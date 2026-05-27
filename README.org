@@ -1,0 +1,243 @@
+#+TITLE: agent-shell-queue.el --- Persistent prompt queue for agent-shell
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+A persistent prompt queue for [[https://github.com/xenodium/agent-shell][agent-shell]] sessions, supporting multi-session
+dispatch with pause, resume, and archive lifecycle management.  Queue state is
+serialized to plist, JSON, or YAML for session persistence across Emacs
+restarts.  Interactive capture, edit, and item-view buffers allow queue
+manipulation without leaving Emacs.  Fork operations split a queue across
+multiple sessions for parallel workloads.
+
+* Contents                                                       :TOC:
+- [[#overview][Overview]]
+- [[#installation][Installation]]
+  - [[#use-package][Use Package]]
+  - [[#manual][Manual]]
+- [[#api-reference][API Reference]]
+  - [[#configuration][Configuration]]
+  - [[#queue-control][Queue Control]]
+  - [[#item-management][Item Management]]
+  - [[#capture][Capture]]
+  - [[#persistence][Persistence]]
+  - [[#buffer-ui][Buffer UI]]
+  - [[#optional-backends][Optional Backends]]
+- [[#license][License]]
+
+* Installation
+** Use Package
+#+BEGIN_SRC sh
+git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp
+(use-package agent-shell-queue
+  :load-path "~/.emacs.d/elpa/agent-shell-queue"
+  :after agent-shell)
+#+END_SRC
+
+** Manual
+
+#+BEGIN_SRC sh
+git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp
+(add-to-list 'load-path "~/.emacs.d/elpa/agent-shell-queue")
+(require 'agent-shell-queue)
+#+END_SRC
+
+* API Reference
+
+** Configuration
+
+*** ~agent-shell-queue-serialization-format~
+
+Format used to persist queue state to disk.  One of:
+- ~plist~ — s-expression with keyword-keyed plists (default; no extra deps)
+- ~json~ — JSON via built-in ~json-serialize~/~json-parse-string~ (Emacs 27+)
+- ~yaml~ — YAML via ~yaml-encode~/~yaml-parse-string~ from the ~yaml~ package
+
+*** ~agent-shell-queue-idle-delay~
+
+Idle delay in seconds for the backup auto-send timer.  Primary draining
+happens via ~shell-maker-finish-output~ advice; this timer is only a safety
+net for buffers that become idle outside that path.  Default: ~60.0~.
+
+*** ~agent-shell-queue-background-prefix~
+
+String prepended to prompts flagged for background sub-agent execution.
+Default: ~"/background "~.
+
+*** ~agent-shell-queue-done-log-file~
+
+When non-nil, path to an append-only JSONL file where completed items are
+logged.  Useful for audit trails across sessions.
+
+*** ~agent-shell-queue-archive-enabled~
+
+When non-nil, items reaching ~done~ status are archived rather than discarded.
+
+*** ~agent-shell-queue-before-reload-hook~ / ~agent-shell-queue-after-reload-hook~
+
+Hooks run immediately before and after reloading queue state from disk.
+
+** Queue Control
+
+*** ~agent-shell-queue-pause~
+
+Pause the global queue; no new items will be dispatched.
+
+*** ~agent-shell-queue-resume~
+
+Resume the global queue after being paused.
+
+*** ~agent-shell-queue-unpause-all-sessions~
+
+Resume all session-level pauses in addition to any global pause.
+
+*** ~agent-shell-queue-session-pause~ =&optional buf=
+
+Pause dispatch for a specific session buffer BUF (default: current buffer).
+
+*** ~agent-shell-queue-session-resume~ =&optional buf=
+
+Resume dispatch for a specific session buffer BUF.
+
+*** ~agent-shell-queue-toggle-intercept-mode~ =&optional buf=
+
+Toggle intercept mode for BUF.  When active, ~shell-maker-submit~ is
+intercepted and prompts are routed through the queue rather than sent directly.
+
+** Item Management
+
+*** ~agent-shell-queue-add~ =prompt buf &optional background=
+
+Add a new active item for PROMPT destined for BUF.  When BACKGROUND is
+non-nil, the item is flagged for sub-agent execution.  Saves and refreshes.
+
+*** ~agent-shell-queue-add-unassigned~ =prompt &optional background=
+
+Add a prompt to the unassigned bucket (not yet assigned to any session).
+
+*** ~agent-shell-queue-enqueue-emacs~ =form buf=
+
+Enqueue a Lisp form to be ~eval~-ed when the queue dispatches to BUF.
+
+*** ~agent-shell-queue-remove~ =id=
+
+Remove item ID from the queue.
+
+*** ~agent-shell-queue-defer~ =id=
+
+Move item ID to deferred status; it will not be dispatched automatically.
+
+*** ~agent-shell-queue-edit~ =id new-prompt=
+
+Replace the prompt text of item ID with NEW-PROMPT.
+
+*** ~agent-shell-queue-move-up~ / ~agent-shell-queue-move-down~ =id=
+
+Reorder item ID within its bucket.
+
+*** ~agent-shell-queue-mark-done~ =id=
+
+Mark item ID as done, optionally archiving it if archiving is enabled.
+
+*** ~agent-shell-queue-send-item~ =id=
+
+Dispatch item ID to its assigned session immediately.
+
+** Capture
+
+*** ~agent-shell-queue-enqueue~ =prompt buf &optional background=
+
+Queue PROMPT for BUF, optionally flagged for BACKGROUND sub-agent execution.
+Sends immediately if BUF is idle; otherwise stores in the queue.  When called
+interactively, opens a capture buffer for composing the prompt.
+
+*** ~agent-shell-queue-capture~ =&optional buf=
+
+Open a capture buffer targeting BUF.  When called interactively from an
+agent-shell buffer, targets that buffer.  With a prefix argument, opens an
+unassigned capture instead.
+
+*** ~agent-shell-queue-capture-unassigned~
+
+Open a capture buffer targeting the unassigned queue bucket.
+
+*** ~agent-shell-queue-capture-from-region~
+
+Create a queue item from the active region content.
+
+*** ~agent-shell-queue-capture-from-context~
+
+Create a queue item from context-at-point candidates
+(thing-at-point, kill ring, current line).
+
+*** ~agent-shell-queue-capture-from-clipboard~
+
+Create a queue item from the current clipboard/kill-ring contents.
+
+** Persistence
+
+*** ~agent-shell-queue-flush~
+
+Force-save queue state to disk immediately.
+
+*** ~agent-shell-queue-reload~
+
+Reload queue state from disk, replacing the in-memory state.
+
+*** ~agent-shell-queue-register-format~ =fmt serialize-fn deserialize-fn=
+
+Register a custom serialization format FMT with SERIALIZE-FN and DESERIALIZE-FN.
+Use this to add support for new storage backends.
+
+*** ~agent-shell-queue-serialize~ =store=
+
+Serialize STORE to a string using the configured format.
+
+*** ~agent-shell-queue-deserialize~ =store string=
+
+Deserialize STRING into STORE using the configured format.
+
+*** ~agent-shell-queue-export~
+
+Export the current queue to a file.
+
+*** ~agent-shell-queue-buffer-archive~
+
+Archive done items from the current buffer's queue bucket.
+
+** Buffer UI
+
+*** ~agent-shell-queue-buffer-open~
+
+Open (or refresh) the ~*agent-shell-queue*~ view buffer.
+
+*** ~agent-shell-queue-set-scope~
+
+Interactively set the scope for the queue view (current buffer, project, global).
+
+*** ~agent-shell-queue-scope-global~
+
+Widen the queue view to show all sessions globally.
+
+*** ~agent-shell-queue-show-disk-state~
+
+Display the raw on-disk queue state in a temporary buffer.
+
+** Optional Backends
+
+~agent-shell-queue-db.el~ provides a SQLite persistence backend.  Load it and
+call ~(agent-shell-queue-db-enable)~ to activate.
+
+~agent-shell-queue-org.el~ provides an Org-mode serialization format, where
+top-level headings are queue buckets and second-level headings are items.
+
+* License
+
+Copyright (C) tychoish.  GPL-3.0 or later.  See the source file header
+for the full license text.

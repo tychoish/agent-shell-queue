@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs_version:
+          - "29.4"
+          - "30.2"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Emacs
+        uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs_version }}
+
+      - name: Clone annotated-completing-read
+        run: git clone https://github.com/tychoish/annotated-completing-read.el /tmp/annotated-completing-read
+
+      - name: Install MELPA dependencies
+        run: |
+          emacs --batch \
+            --eval "(require 'package)" \
+            --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
+            --eval "(package-refresh-contents)" \
+            --eval "(dolist (pkg '(transient alert agent-shell)) (unless (package-installed-p pkg) (package-install pkg)))"
+
+      - name: Run tests
+        run: |
+          emacs --batch \
+            --eval "(require 'package)" \
+            --eval "(package-initialize)" \
+            -L . \
+            -L /tmp/annotated-completing-read \
+            -l test/test-helper.el \
+            -l test/test-agent-shell-queue.el \
+            -l test/test-agent-shell-queue-persistence.el \
+            --eval "(ert-run-tests-batch-and-exit \"agent-shell-queue\")"
