@@ -22,7 +22,7 @@
   "Build a queue item for testing."
   (agent-shell-queue-item--make
    :id id
-   :prompt prompt
+   :args prompt
    :status (or status 'active)
    :kind (or kind 'prompt)
    :background background
@@ -270,7 +270,7 @@ where the tree was parsed, so buffer positions remain valid."
                           "   prompt text\n")))
          (item (car (cdr (car result)))))
     (should (equal "q9abc"   (agent-shell-queue-item-id item)))
-    (should (equal "prompt text" (agent-shell-queue-item-prompt item)))
+    (should (equal "prompt text" (agent-shell-queue-item-args item)))
     (should (eq 'active      (agent-shell-queue-item-status item)))
     (should (eq 'prompt      (agent-shell-queue-item-kind item)))
     (should (eq t            (agent-shell-queue-item-background item)))
@@ -333,7 +333,7 @@ The #+TODO: header must be present so org-mode recognises custom keywords."
     (let ((item (car (cdr (car rt)))))
       (should (equal "*test-buf*"   (caar rt)))
       (should (equal "q3abc"        (agent-shell-queue-item-id item)))
-      (should (equal "do the thing" (agent-shell-queue-item-prompt item)))
+      (should (equal "do the thing" (agent-shell-queue-item-args item)))
       (should (eq 'active           (agent-shell-queue-item-status item)))
       (should (eq nil               (agent-shell-queue-item-background item)))
       (should (= 1705318200.5       (agent-shell-queue-item-created item))))))
@@ -345,7 +345,7 @@ The #+TODO: header must be present so org-mode recognises custom keywords."
                          "q1" "line one\nline two\nline three"))))
     (let ((item (car (cdr (car rt)))))
       (should (equal "line one\nline two\nline three"
-                     (agent-shell-queue-item-prompt item))))))
+                     (agent-shell-queue-item-args item))))))
 
 (ert-deftest agent-shell-queue-org/round-trip/background-flag ()
   (agent-shell-queue-org-test/round-trip
@@ -405,7 +405,7 @@ The #+TODO: header must be present so org-mode recognises custom keywords."
         (list (cons "*buf*"
                     (list (agent-shell-queue-org-test/make-item "q1" tricky))))
       (let ((item (car (cdr (car rt)))))
-        (should (equal tricky (agent-shell-queue-item-prompt item)))))))
+        (should (equal tricky (agent-shell-queue-item-args item)))))))
 
 (ert-deftest agent-shell-queue-org/round-trip/multiple-items-ordered ()
   "Item order is preserved across a round-trip."

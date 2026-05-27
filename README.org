@@ -2,7 +2,6 @@
 #+OPTIONS: toc:2 num:nil
 
 * Overview
-
 A persistent prompt queue for [[https://github.com/xenodium/agent-shell][agent-shell]] sessions, supporting multi-session
 dispatch with pause, resume, and archive lifecycle management.  Queue state is
 serialized to plist, JSON, or YAML for session persistence across Emacs
@@ -135,8 +134,9 @@ intercepted and prompts are routed through the queue rather than sent directly.
 
 *** ~agent-shell-queue-add~ =prompt buf &optional background=
 
-Add a new active item for PROMPT destined for BUF.  When BACKGROUND is
-non-nil, the item is flagged for sub-agent execution.  Saves and refreshes.
+Add a new active item with PROMPT as the ~args~ payload, destined for BUF.
+When BACKGROUND is non-nil, the item is flagged for sub-agent execution.
+Saves and refreshes.
 
 *** ~agent-shell-queue-add-unassigned~ =prompt &optional background=
 
@@ -156,7 +156,7 @@ Move item ID to deferred status; it will not be dispatched automatically.
 
 *** ~agent-shell-queue-edit~ =id new-prompt=
 
-Replace the prompt text of item ID with NEW-PROMPT.
+Replace the ~args~ text of item ID with NEW-PROMPT.
 
 *** ~agent-shell-queue-move-up~ / ~agent-shell-queue-move-down~ =id=
 
@@ -168,7 +168,10 @@ Mark item ID as done, optionally archiving it if archiving is enabled.
 
 *** ~agent-shell-queue-send-item~ =id=
 
-Dispatch item ID to its assigned session immediately.
+Dispatch item ID to its assigned session immediately.  If the item has a
+non-nil ~executor~, the executor is called instead of the built-in kind
+dispatch, and the session-mode-blocked check is skipped.  See the
+[[#executor-interface][Executor Interface]] section for details.
 
 ** Capture
 

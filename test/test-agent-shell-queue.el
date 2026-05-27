@@ -52,7 +52,7 @@ Shadows both the live store and queue globals so no test touches real state."
   "Build a test item directly, bypassing ID generation."
   (agent-shell-queue-item--make
    :id id
-   :prompt prompt
+   :args prompt
    :status (or status 'active)
    :kind 'prompt
    :background background
@@ -551,7 +551,7 @@ which populates item.response from the shell buffer content."
 (ert-deftest agent-shell-queue/make-item-defaults ()
   (agent-shell-queue-test/isolate
     (let ((item (agent-shell-queue--make-item "hello")))
-      (should (equal "hello" (agent-shell-queue-item-prompt item)))
+      (should (equal "hello" (agent-shell-queue-item-args item)))
       (should (eq 'active (agent-shell-queue-item-status item)))
       (should (null (agent-shell-queue-item-background item)))
       (should (null (agent-shell-queue-item-dispatched item)))
@@ -576,7 +576,7 @@ which populates item.response from the shell buffer content."
       (should result)
       (should (equal "buf1" (car result)))
       (should (equal "q-2" (agent-shell-queue-item-id (cdr result))))
-      (should (equal "second" (agent-shell-queue-item-prompt (cdr result)))))))
+      (should (equal "second" (agent-shell-queue-item-args (cdr result)))))))
 
 (ert-deftest agent-shell-queue/item-by-id-not-found ()
   (agent-shell-queue-test/isolate
@@ -607,7 +607,7 @@ which populates item.response from the shell buffer content."
       (unwind-protect
           (progn
             (should (agent-shell-queue-item-p item))
-            (should (equal "hello" (agent-shell-queue-item-prompt item)))
+            (should (equal "hello" (agent-shell-queue-item-args item)))
             (should (eq 'active (agent-shell-queue-item-status item)))
             (should (= 1 (length (agent-shell-queue-store-items agent-shell-queue--store))))
             (should (equal (buffer-name buf) (caar (agent-shell-queue-store-items agent-shell-queue--store))))
@@ -624,8 +624,8 @@ which populates item.response from the shell buffer content."
             (should (= 1 (length (agent-shell-queue-store-items agent-shell-queue--store))))
             (let ((items (cdar (agent-shell-queue-store-items agent-shell-queue--store))))
               (should (= 2 (length items)))
-              (should (equal "first"  (agent-shell-queue-item-prompt (nth 0 items))))
-              (should (equal "second" (agent-shell-queue-item-prompt (nth 1 items))))))
+              (should (equal "first"  (agent-shell-queue-item-args (nth 0 items))))
+              (should (equal "second" (agent-shell-queue-item-args (nth 1 items))))))
         (kill-buffer buf)))))
 
 (ert-deftest agent-shell-queue/add-background-flag-propagated ()
@@ -769,7 +769,7 @@ which populates item.response from the shell buffer content."
           (agent-shell-queue-test/populate '("buf1" ("q-1" "old" active nil))))
     (agent-shell-queue-edit "q-1" "new prompt")
     (should (equal "new prompt"
-                   (agent-shell-queue-item-prompt (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
+                   (agent-shell-queue-item-args (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
 
 (ert-deftest agent-shell-queue/edit-unknown-id-is-noop ()
   (agent-shell-queue-test/isolate-no-sub
@@ -777,7 +777,7 @@ which populates item.response from the shell buffer content."
           (agent-shell-queue-test/populate '("buf1" ("q-1" "old" active nil))))
     (agent-shell-queue-edit "q-999" "new")
     (should (equal "old"
-                   (agent-shell-queue-item-prompt (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
+                   (agent-shell-queue-item-args (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--move / move-up / move-down
@@ -1001,6 +1001,108 @@ can continue dispatching."
                             (agent-shell-queue-queue-session-paused
                              agent-shell-queue--queue)))))))
 
+(ert-deftest agent-shell-queue/send-item-uses-executor-when-set ()
+  "When item has a non-nil executor, send-item calls it instead of agent-shell-insert."
+  (agent-shell-queue-test/isolate-no-sub
+    (let* ((called-with-item nil)
+           (called-with-args nil)
+           (buf (get-buffer-create " *asq-executor-test*"))
+           (executor (lambda (item args)
+                       (setq called-with-item item
+                             called-with-args args))))
+      (unwind-protect
+          (progn
+            (let ((item (agent-shell-queue-item--make
+                         :id "q-exec" :args "exec-args" :status 'active
+                         :kind 'prompt :created 1000.0 :executor executor)))
+              (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                    (list (list (buffer-name buf) item)))
+              (cl-letf (((symbol-function 'buffer-live-p) (lambda (_) t))
+                        ((symbol-function 'agent-shell-insert)
+                         (lambda (&rest _) (error "agent-shell-insert should not be called"))))
+                (agent-shell-queue-send-item "q-exec")
+                (should (eq called-with-item item))
+                (should (equal "exec-args" called-with-args)))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/send-item-skips-mode-block-check-for-executor ()
+  "Items with an executor bypass the session-mode-blocked check."
+  (agent-shell-queue-test/isolate-no-sub
+    (let* ((executor-called nil)
+           (buf (get-buffer-create " *asq-executor-mode-test*"))
+           (executor (lambda (_item _args) (setq executor-called t))))
+      (unwind-protect
+          (progn
+            (let ((item (agent-shell-queue-item--make
+                         :id "q-exec2" :args "text" :status 'active
+                         :kind 'prompt :created 1000.0 :executor executor)))
+              (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                    (list (list (buffer-name buf) item)))
+              (cl-letf (((symbol-function 'buffer-live-p) (lambda (_) t))
+                        ((symbol-function 'agent-shell-queue--session-mode-blocked-p)
+                         (lambda (_) t)))
+                (agent-shell-queue-send-item "q-exec2")
+                (should executor-called))))
+        (kill-buffer buf)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Executor registry
+
+(ert-deftest agent-shell-queue/register-executor-stores-and-retrieves ()
+  "Registering an executor under a name lets it be looked up by that name."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+    (agent-shell-queue-register-executor "test-exec" #'ignore)
+    (should (eq #'ignore (gethash "test-exec" agent-shell-queue--executor-registry)))))
+
+(ert-deftest agent-shell-queue/executor-name-returns-nil-for-unregistered ()
+  "executor-name returns nil for functions not in the registry."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+    (should (null (agent-shell-queue--executor-name #'ignore)))))
+
+(ert-deftest agent-shell-queue/executor-name-returns-name-when-registered ()
+  "executor-name returns the registry key string for a registered function."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+    (agent-shell-queue-register-executor "my-exec" #'ignore)
+    (should (equal "my-exec" (agent-shell-queue--executor-name #'ignore)))))
+
+(ert-deftest agent-shell-queue/executor-from-plist-returns-nil-for-nil ()
+  "executor-from-plist returns nil when given nil (no executor)."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+    (should (null (agent-shell-queue--executor-from-plist nil)))))
+
+(ert-deftest agent-shell-queue/executor-from-plist-returns-nil-for-unknown-name ()
+  "executor-from-plist returns nil and warns for an unknown name."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+    (should (null (agent-shell-queue--executor-from-plist "no-such-executor")))))
+
+(ert-deftest agent-shell-queue/executor-plist-roundtrip ()
+  "A registered executor survives a to-plist / from-plist round-trip."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+    (agent-shell-queue-register-executor "rtrip-exec" #'ignore)
+    (let* ((item (agent-shell-queue-item--make
+                  :id "q-rt" :args "hi" :status 'active :kind 'prompt
+                  :created 1000.0 :executor #'ignore))
+           (restored (agent-shell-queue-item-from-plist
+                      (agent-shell-queue-item-to-plist item))))
+      (should (eq #'ignore (agent-shell-queue-item-executor restored))))))
+
+(ert-deftest agent-shell-queue/executor-plist-roundtrip-unregistered-becomes-nil ()
+  "An unregistered closure serializes as nil and deserializes as nil."
+  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal))
+        (closure (lambda (_item _args) nil)))
+    (let* ((item (agent-shell-queue-item--make
+                  :id "q-cl" :args "hi" :status 'active :kind 'prompt
+                  :created 1000.0 :executor closure))
+           (restored (agent-shell-queue-item-from-plist
+                      (agent-shell-queue-item-to-plist item))))
+      (should (null (agent-shell-queue-item-executor restored))))))
+
+(ert-deftest agent-shell-queue/default-executor-is-auto-registered ()
+  "agent-shell-queue--default-executor is pre-registered in the registry."
+  (should (eq #'agent-shell-queue--default-executor
+              (gethash "agent-shell-queue--default-executor"
+                       agent-shell-queue--executor-registry))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--mark-running-done
 
@@ -1096,7 +1198,7 @@ can continue dispatching."
             (let ((items (cdar (agent-shell-queue-store-items agent-shell-queue--store))))
               (should (= 2 (length items)))
               (let ((new-item (nth 1 items)))
-                (should (equal "done prompt" (agent-shell-queue-item-prompt new-item)))
+                (should (equal "done prompt" (agent-shell-queue-item-args new-item)))
                 (should (eq 'active (agent-shell-queue-item-status new-item))))))
         (kill-buffer buf)))))
 
@@ -1128,7 +1230,7 @@ can continue dispatching."
                                          (agent-shell-queue-store-items agent-shell-queue--store))))
               ;; A new active item exists targeting live-buf
               (should (seq-find (lambda (it)
-                                  (and (equal "hello" (agent-shell-queue-item-prompt it))
+                                  (and (equal "hello" (agent-shell-queue-item-args it))
                                        (eq 'active (agent-shell-queue-item-status it))))
                                 all-items))))
         (kill-buffer live-buf)))))
@@ -1225,7 +1327,7 @@ is void: https://... when the command was invoked on an aborted item."
                  (item (cadr pair)))
             (should (equal "mybuf" (car pair)))
             (should (equal "q-5" (agent-shell-queue-item-id item)))
-            (should (equal "persisted" (agent-shell-queue-item-prompt item)))
+            (should (equal "persisted" (agent-shell-queue-item-args item)))
             (should (eq 'deferred (agent-shell-queue-item-status item)))
             (should (agent-shell-queue-item-background item)))
           ;; save sets flush time
@@ -1300,7 +1402,7 @@ is void: https://... when the command was invoked on an aborted item."
            (item  (cadr (car items))))
       (should (equal "buf"         (caar items)))
       (should (equal "q-3"         (agent-shell-queue-item-id item)))
-      (should (equal "hello plist" (agent-shell-queue-item-prompt item)))
+      (should (equal "hello plist" (agent-shell-queue-item-args item)))
       (should (eq 'deferred        (agent-shell-queue-item-status item)))
       (should (agent-shell-queue-item-background item)))))
 
@@ -1324,7 +1426,7 @@ is void: https://... when the command was invoked on an aborted item."
   (let* ((item (agent-shell-queue-test/make-item "q-1" "prompt" 'active t))
          (pl   (agent-shell-queue-item-to-plist item)))
     (should (equal "q-1"    (plist-get pl :id)))
-    (should (equal "prompt" (plist-get pl :prompt)))
+    (should (equal "prompt" (plist-get pl :args)))
     (should (eq 'active     (plist-get pl :status)))
     (should (eq t           (plist-get pl :background)))
     (should (numberp        (plist-get pl :created)))
@@ -1336,10 +1438,20 @@ is void: https://... when the command was invoked on an aborted item."
          (item (agent-shell-queue-item-from-plist
                 (agent-shell-queue-item-to-plist orig))))
     (should (equal (agent-shell-queue-item-id         orig) (agent-shell-queue-item-id         item)))
-    (should (equal (agent-shell-queue-item-prompt     orig) (agent-shell-queue-item-prompt     item)))
+    (should (equal (agent-shell-queue-item-args     orig) (agent-shell-queue-item-args     item)))
     (should (eq    (agent-shell-queue-item-status     orig) (agent-shell-queue-item-status     item)))
     (should (eq    (agent-shell-queue-item-background orig) (agent-shell-queue-item-background item)))
     (should (=     (agent-shell-queue-item-created    orig) (agent-shell-queue-item-created    item)))))
+
+(ert-deftest agent-shell-queue/item-from-plist-old-prompt-alias ()
+  "from-plist accepts old-style :prompt key for backward compatibility."
+  (let* ((old-plist (list :id "q-alias" :prompt "backward-compat" :status 'active
+                          :kind 'prompt :background nil :created 1000.0
+                          :dispatched nil :completed nil :response nil :outcome nil
+                          :directory nil))
+         (item (agent-shell-queue-item-from-plist old-plist)))
+    (should (equal "backward-compat" (agent-shell-queue-item-args item)))
+    (should (equal "q-alias" (agent-shell-queue-item-id item)))))
 
 ;;; Serialization: JSON format
 
@@ -1355,7 +1467,7 @@ is void: https://... when the command was invoked on an aborted item."
            (item  (cadr (car items))))
       (should (equal "buf"        (caar items)))
       (should (equal "q-4"        (agent-shell-queue-item-id item)))
-      (should (equal "hello json" (agent-shell-queue-item-prompt item)))
+      (should (equal "hello json" (agent-shell-queue-item-args item)))
       (should (eq 'deferred       (agent-shell-queue-item-status item)))
       (should (agent-shell-queue-item-background item)))))
 
@@ -1396,7 +1508,7 @@ is void: https://... when the command was invoked on an aborted item."
                  (parsed (json-parse-string (string-trim content)
                                             :object-type 'plist)))
             (should (equal "q-1"           (plist-get parsed :id)))
-            (should (equal "archive me"    (plist-get parsed :prompt)))
+            (should (equal "archive me"    (plist-get parsed :args)))
             (should (equal "test-instance" (plist-get parsed :instance)))
             (should (eq t                  (plist-get parsed :ran)))
             (should (= 60.0                (plist-get parsed :runtime)))))
@@ -1720,7 +1832,7 @@ is void: https://... when the command was invoked on an aborted item."
          (agent-shell-queue-archive-enabled t)
          (agent-shell-queue-archive-file-function (lambda () tmp))
          (item (agent-shell-queue-item--make
-                :id "q-1" :prompt "p" :status 'done
+                :id "q-1" :args "p" :status 'done
                 :background nil :created 1000.0
                 :dispatched 2000.0 :completed 3000.0)))
     (unwind-protect
@@ -1739,7 +1851,7 @@ is void: https://... when the command was invoked on an aborted item."
          (agent-shell-queue-archive-enabled t)
          (agent-shell-queue-archive-file-function (lambda () tmp))
          (item (agent-shell-queue-item--make
-                :id "q-2" :prompt "p" :status 'done
+                :id "q-2" :args "p" :status 'done
                 :background nil :created 1000.0
                 :dispatched nil :completed nil)))
     (unwind-protect
@@ -2159,7 +2271,7 @@ Also stubs subscription management and `sit-for' to avoid side effects."
       (let ((fork-item (agent-shell-queue-insert-fork-after
                         (current-buffer) "q1" '(:fork-mode fork))))
         (should (string-match-p "iform-session"
-                                (agent-shell-queue-item-prompt fork-item)))))))
+                                (agent-shell-queue-item-args fork-item)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--fork-session-from-running-emacs
@@ -2700,32 +2812,32 @@ Applies to all capture paths, not just insert-after."
   "plist serialization wraps item and target in a :buffer/:item plist."
   (agent-shell-queue-test/isolate-no-sub
     (let* ((item (agent-shell-queue-item--make
-                  :id "test-id" :prompt "hello" :status 'active
+                  :id "test-id" :args "hello" :status 'active
                   :kind 'prompt :created 1000.0)))
       (let ((out (agent-shell-queue--serialize-single-item item "buf1" 'plist)))
         (should (stringp out))
         (let ((parsed (read out)))
           (should (equal (plist-get parsed :buffer) "buf1"))
-          (should (equal (plist-get (plist-get parsed :item) :prompt) "hello"))
+          (should (equal (plist-get (plist-get parsed :item) :args) "hello"))
           (should (equal (plist-get (plist-get parsed :item) :id) "test-id")))))))
 
 (ert-deftest agent-shell-queue/serialize-single-item-json ()
   "JSON serialization includes buffer and item fields."
   (agent-shell-queue-test/isolate-no-sub
     (let* ((item (agent-shell-queue-item--make
-                  :id "test-id" :prompt "hello" :status 'active
+                  :id "test-id" :args "hello" :status 'active
                   :kind 'prompt :created 1000.0)))
       (let ((out (agent-shell-queue--serialize-single-item item "buf1" 'json)))
         (should (stringp out))
         (let ((parsed (json-parse-string out :object-type 'plist :null-object nil)))
           (should (equal (plist-get parsed :buffer) "buf1"))
-          (should (equal (plist-get (plist-get parsed :item) :prompt) "hello")))))))
+          (should (equal (plist-get (plist-get parsed :item) :args) "hello")))))))
 
 (ert-deftest agent-shell-queue/serialize-single-item-unknown-format-errors ()
   "`serialize-single-item' signals user-error for unrecognized format."
   (agent-shell-queue-test/isolate-no-sub
     (let ((item (agent-shell-queue-item--make
-                 :id "x" :prompt "p" :status 'active
+                 :id "x" :args "p" :status 'active
                  :kind 'prompt :created 1000.0)))
       (should-error
        (agent-shell-queue--serialize-single-item item "buf" 'nosuchformat)

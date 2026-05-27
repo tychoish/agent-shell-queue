@@ -46,7 +46,7 @@ The queue starts paused so nothing is dispatched automatically."
   "Build a minimal item for persistence tests."
   (agent-shell-queue-item--make
    :id id
-   :prompt prompt
+   :args prompt
    :status (or status 'active)
    :kind (or kind 'emacs)
    :background nil
@@ -137,7 +137,7 @@ Clears in-memory items first so the load result is unambiguous."
   (agent-shell-queue-test/with-persist-file
     (let ((item (agent-shell-queue-item--make
                  :id "q42"
-                 :prompt "(message \"hello\")"
+                 :args "(message \"hello\")"
                  :status 'active
                  :kind 'emacs
                  :background t
@@ -149,7 +149,7 @@ Clears in-memory items first so the load result is unambiguous."
       (agent-shell-queue-test/persist-save-and-reload)
       (let ((r (car (cdr (assoc "*s*" (agent-shell-queue-store-items agent-shell-queue--store))))))
         (should (equal "q42"               (agent-shell-queue-item-id r)))
-        (should (equal "(message \"hello\")" (agent-shell-queue-item-prompt r)))
+        (should (equal "(message \"hello\")" (agent-shell-queue-item-args r)))
         (should (eq 'active                (agent-shell-queue-item-status r)))
         (should (eq 'emacs                 (agent-shell-queue-item-kind r)))
         (should (eq t                      (agent-shell-queue-item-background r)))
@@ -164,7 +164,7 @@ Clears in-memory items first so the load result is unambiguous."
       (agent-shell-queue-test/persist-save-and-reload)
       (let ((r (car (cdr (assoc "*s*" (agent-shell-queue-store-items agent-shell-queue--store))))))
         (should (eq 'emacs    (agent-shell-queue-item-kind r)))
-        (should (equal "(+ 1 2)" (agent-shell-queue-item-prompt r)))))))
+        (should (equal "(+ 1 2)" (agent-shell-queue-item-args r)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Multiple buckets
@@ -232,7 +232,7 @@ The item completes and the side effect is visible."
            (buf-name (buffer-name target))
            (item (agent-shell-queue-item--make
                   :id "q01"
-                  :prompt (format "(setq agent-shell-queue-persist-test--side-effect %S)" 42)
+                  :args (format "(setq agent-shell-queue-persist-test--side-effect %S)" 42)
                   :status 'active
                   :kind 'emacs
                   :background nil
@@ -260,7 +260,7 @@ The item completes and the side effect is visible."
            (buf-name (buffer-name target))
            (item (agent-shell-queue-item--make
                   :id "q01"
-                  :prompt (format "(setq agent-shell-queue-persist-test--side-effect %S)" 99)
+                  :args (format "(setq agent-shell-queue-persist-test--side-effect %S)" 99)
                   :status 'active
                   :kind 'emacs
                   :background nil
@@ -293,13 +293,13 @@ The item completes and the side effect is visible."
     (let ((agent-shell-queue-archive-enabled t))
       (cl-letf (((symbol-function 'agent-shell-queue--write-archive) #'ignore))
         (let ((old1 (agent-shell-queue-item--make
-                     :id "q01" :prompt "oldest" :status 'done
+                     :id "q01" :args "oldest" :status 'done
                      :kind 'emacs :background nil :created 100.0))
               (old2 (agent-shell-queue-item--make
-                     :id "q02" :prompt "middle" :status 'done
+                     :id "q02" :args "middle" :status 'done
                      :kind 'emacs :background nil :created 200.0))
               (new1 (agent-shell-queue-item--make
-                     :id "q03" :prompt "newest" :status 'done
+                     :id "q03" :args "newest" :status 'done
                      :kind 'emacs :background nil :created 300.0))
               (active (agent-shell-queue-test/persist-item "q04" "active")))
           (setf (agent-shell-queue-store-items agent-shell-queue--store)
@@ -318,10 +318,10 @@ The item completes and the side effect is visible."
     (let ((agent-shell-queue-archive-enabled t))
       (cl-letf (((symbol-function 'agent-shell-queue--write-archive) #'ignore))
         (let ((done-a (agent-shell-queue-item--make
-                       :id "qa1" :prompt "done-a" :status 'done
+                       :id "qa1" :args "done-a" :status 'done
                        :kind 'emacs :background nil :created 100.0))
               (done-b (agent-shell-queue-item--make
-                       :id "qb1" :prompt "done-b" :status 'done
+                       :id "qb1" :args "done-b" :status 'done
                        :kind 'emacs :background nil :created 200.0))
               (active-a (agent-shell-queue-test/persist-item "qa2" "active-a"))
               (active-b (agent-shell-queue-test/persist-item "qb2" "active-b")))
@@ -367,9 +367,9 @@ The item completes and the side effect is visible."
               (should (= 2 (length all-items)))
               (should (seq-every-p (lambda (it) (eq 'active (agent-shell-queue-item-status it)))
                                    all-items))
-              (should (seq-find (lambda (it) (equal "hello world" (agent-shell-queue-item-prompt it)))
+              (should (seq-find (lambda (it) (equal "hello world" (agent-shell-queue-item-args it)))
                                 all-items))
-              (should (seq-find (lambda (it) (equal "(+ 1 2)" (agent-shell-queue-item-prompt it)))
+              (should (seq-find (lambda (it) (equal "(+ 1 2)" (agent-shell-queue-item-args it)))
                                 all-items))
               (let ((emacs-item (seq-find (lambda (it) (eq 'emacs (agent-shell-queue-item-kind it)))
                                           all-items)))

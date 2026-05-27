@@ -190,38 +190,113 @@ Nil means use a subdirectory of `temporary-file-directory' named
 
 ;;; Struct macro
 
-(defmacro agent-shell-queue--defstruct (type-name &rest fields)
-  "Define a cl-defstruct TYPE-NAME with FIELDS and generate plist serializers.
-FIELDS are plain symbols.  Generates constructor TYPE-NAME--make plus:
+(defmacro agent-shell-queue--defstruct (type-name &rest field-specs)
+  "Define a cl-defstruct TYPE-NAME with FIELD-SPECS and generate plist serializers.
+Each spec in FIELD-SPECS is either a plain symbol or (SYMBOL &rest OPTIONS).
+Supported options:
+  :no-serialize t      — skip this field in to-plist and from-plist
+  :alias KEYWORD       — also try KEYWORD when reading from plist (backward compat)
+  :to-plist FUNC       — call (FUNC raw-value) when writing this field to a plist
+  :from-plist FUNC     — call (FUNC plist-value) when reading this field from a plist
+Generates constructor TYPE-NAME--make plus:
   TYPE-NAME-to-plist   — struct → keyword-keyed plist
   TYPE-NAME-from-plist — keyword-keyed plist → struct"
   (declare (indent 1))
   (let* ((sname (symbol-name type-name))
          (ctor (intern (concat sname "--make")))
          (to-fn (intern (concat sname "-to-plist")))
-         (from-fn (intern (concat sname "-from-plist"))))
+         (from-fn (intern (concat sname "-from-plist")))
+         (parsed (seq-map (lambda (spec)
+                            (if (symbolp spec)
+                                (list spec nil nil nil nil)
+                              (let ((sym (car spec))
+                                    (opts (cdr spec)))
+                                (list sym
+                                      (plist-get opts :no-serialize)
+                                      (plist-get opts :alias)
+                                      (plist-get opts :to-plist)
+                                      (plist-get opts :from-plist)))))
+                          field-specs))
+         (field-names (seq-map #'car parsed))
+         (serializable (seq-remove (lambda (p) (pcase-let ((`(,_ ,no-ser . ,_) p)) no-ser)) parsed)))
     `(progn
        (cl-defstruct (,type-name (:constructor ,ctor) (:copier nil))
-         ,@fields)
+         ,@field-names)
        (defun ,to-fn (item)
          ,(format "Convert %s ITEM to a keyword-keyed plist." sname)
          (list ,@(cl-mapcan
-                  (lambda (f)
-                    (list (intern (concat ":" (symbol-name f)))
-                          `(,(intern (concat sname "-" (symbol-name f))) item)))
-                  fields)))
+                  (lambda (p)
+                    (pcase-let ((`(,f ,_ ,_ ,to-plist-fn ,_) p))
+                      (let* ((kw (intern (concat ":" (symbol-name f))))
+                             (raw `(,(intern (concat sname "-" (symbol-name f))) item)))
+                        (list kw (if to-plist-fn `(,to-plist-fn ,raw) raw)))))
+                  serializable)))
        (defun ,from-fn (plist)
          ,(format "Reconstruct a %s from keyword-keyed PLIST." sname)
          (,ctor ,@(cl-mapcan
-                   (lambda (f)
-                     (let ((kw (intern (concat ":" (symbol-name f)))))
-                       (list kw `(plist-get plist ,kw))))
-                   fields))))))
+                   (lambda (p)
+                     (pcase-let ((`(,f ,_ ,alias ,_ ,from-plist-fn) p))
+                       (let* ((kw (intern (concat ":" (symbol-name f))))
+                              (raw (if alias
+                                       `(or (plist-get plist ,kw) (plist-get plist ,alias))
+                                     `(plist-get plist ,kw))))
+                         (list kw (if from-plist-fn `(,from-plist-fn ,raw) raw)))))
+                   serializable))))))
+
+;;; Executor registry
+
+(defvar agent-shell-queue--executor-registry (make-hash-table :test #'equal)
+  "Registry mapping executor name strings to executor functions.
+Only registered executors survive serialization.  Register entries with
+`agent-shell-queue-register-executor'.")
+
+(defun agent-shell-queue-register-executor (name fn)
+  "Register executor function FN under NAME.
+NAME may be a string or symbol; it is stored as a string via `symbol-name'
+when a symbol is passed.  The name is what gets written into serialized
+queue state, so it must be stable across Emacs restarts.
+Returns FN."
+  (puthash (if (symbolp name) (symbol-name name) name)
+           fn agent-shell-queue--executor-registry)
+  fn)
+
+(defun agent-shell-queue--executor-name (fn)
+  "Return the registry name for FN, or nil if FN is not registered.
+Performs a reverse lookup (value → key) over the registry, so the
+registered name need not match the function's symbol name.  Returns nil
+for nil, or for any function not found in the registry."
+  (when fn
+    (map-some (lambda (name registered-fn)
+                (when (eq fn registered-fn) name))
+              agent-shell-queue--executor-registry)))
+
+(defun agent-shell-queue--executor-from-plist (name)
+  "Deserialize executor NAME via the registry.
+Returns nil (kind-dispatch) when NAME is nil or not found; emits a
+warning for non-nil names that have no registry entry."
+  (when name
+    (or (gethash name agent-shell-queue--executor-registry)
+        (progn
+          (message "agent-shell-queue: unknown executor %S — item will use kind dispatch" name)
+          nil))))
 
 ;;; Data model
 
 (agent-shell-queue--defstruct agent-shell-queue-item
-  id prompt status kind background created dispatched completed response outcome directory)
+  id
+  (args :alias :prompt)
+  status
+  kind
+  background
+  created
+  dispatched
+  completed
+  response
+  outcome
+  directory
+  (executor
+   :to-plist agent-shell-queue--executor-name
+   :from-plist agent-shell-queue--executor-from-plist))
 
 (defun agent-shell-queue--migrate-item-if-stale (item)
   "Return ITEM or a current-layout copy with missing slots defaulted to nil.
@@ -468,7 +543,7 @@ the session queue is paused until the mode changes.")
   "Return a new active queue item for PROMPT."
   (agent-shell-queue-item--make
    :id (agent-shell-queue--gen-id)
-   :prompt prompt
+   :args prompt
    :status 'active
    :kind (or kind 'prompt)
    :background background
@@ -524,10 +599,11 @@ but that yields \"0d\" for a zero delta instead of \"0s\"."
 
 (defun agent-shell-queue--item-to-json (item)
   "Convert ITEM to a JSON-serializable plist.
-Status is stored as a string; background as a JSON boolean."
+Status is stored as a string; background as a JSON boolean;
+executor as its registry name string or JSON null."
   (list
    :id (agent-shell-queue-item-id item)
-   :prompt (agent-shell-queue-item-prompt item)
+   :args (agent-shell-queue-item-args item)
    :status (symbol-name (agent-shell-queue-item-status item))
    :kind (symbol-name (or (agent-shell-queue-item-kind item) 'prompt))
    :background (if (agent-shell-queue-item-background item) t :false)
@@ -536,14 +612,16 @@ Status is stored as a string; background as a JSON boolean."
    :completed (or (agent-shell-queue-item-completed item) :null)
    :response (or (agent-shell-queue-item-response item) :null)
    :outcome (if-let* ((o (agent-shell-queue-item-outcome item))) (symbol-name o) :null)
-   :directory (or (agent-shell-queue-item-directory item) :null)))
+   :directory (or (agent-shell-queue-item-directory item) :null)
+   :executor (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null)))
 
 (defun agent-shell-queue--item-from-json (obj)
   "Reconstruct a queue item from JSON-parsed plist OBJ.
-Status is interned; background truthy only when exactly `t'."
+Status is interned; background truthy only when exactly `t';
+executor resolved from the registry (nil when absent or unknown)."
   (agent-shell-queue-item--make
    :id (plist-get obj :id)
-   :prompt (plist-get obj :prompt)
+   :args (or (plist-get obj :args) (plist-get obj :prompt))
    :status (intern (plist-get obj :status))
    :kind (intern (or (plist-get obj :kind) "prompt"))
    :background (eq t (plist-get obj :background))
@@ -552,7 +630,10 @@ Status is interned; background truthy only when exactly `t'."
    :completed (plist-get obj :completed)
    :response (let ((r (plist-get obj :response))) (unless (eq r :null) r))
    :outcome (when-let* ((o (plist-get obj :outcome))) (unless (eq o :null) (intern o)))
-   :directory (let ((d (plist-get obj :directory))) (unless (eq d :null) d))))
+   :directory (let ((d (plist-get obj :directory))) (unless (eq d :null) d))
+   :executor (let ((e (plist-get obj :executor)))
+               (unless (or (null e) (eq e :null))
+                 (agent-shell-queue--executor-from-plist e)))))
 
 (defun agent-shell-queue--serialize-json (items)
   "Serialize ITEMS to a JSON string."
@@ -586,7 +667,7 @@ Status is interned; background truthy only when exactly `t'."
 Status is stored as a string; background as t or nil."
   (let ((h (make-hash-table :test 'equal)))
     (map-put! h "id" (agent-shell-queue-item-id item))
-    (map-put! h "prompt" (agent-shell-queue-item-prompt item))
+    (map-put! h "args" (agent-shell-queue-item-args item))
     (map-put! h "status" (symbol-name (agent-shell-queue-item-status item)))
     (map-put! h "kind" (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
     (map-put! h "background" (if (agent-shell-queue-item-background item) t nil))
@@ -596,13 +677,14 @@ Status is stored as a string; background as t or nil."
     (map-put! h "response" (or (agent-shell-queue-item-response item) :null))
     (map-put! h "outcome" (if-let* ((o (agent-shell-queue-item-outcome item))) (symbol-name o) :null))
     (map-put! h "directory" (or (agent-shell-queue-item-directory item) :null))
+    (map-put! h "executor" (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null))
     h))
 
 (defun agent-shell-queue--item-from-yaml (obj)
   "Reconstruct a queue item from a hash-table OBJ produced by `yaml-parse-string'."
   (agent-shell-queue-item--make
    :id (map-elt obj "id")
-   :prompt (map-elt obj "prompt")
+   :args (or (map-elt obj "args") (map-elt obj "prompt"))
    :status (intern (map-elt obj "status"))
    :kind (intern (or (map-elt obj "kind") "prompt"))
    :background (eq t (map-elt obj "background"))
@@ -611,7 +693,10 @@ Status is stored as a string; background as t or nil."
    :completed (map-elt obj "completed")
    :response (let ((r (map-elt obj "response"))) (unless (eq r :null) r))
    :outcome (when-let* ((o (map-elt obj "outcome"))) (unless (eq o :null) (intern o)))
-   :directory (let ((d (map-elt obj "directory"))) (unless (eq d :null) d))))
+   :directory (let ((d (map-elt obj "directory"))) (unless (eq d :null) d))
+   :executor (let ((e (map-elt obj "executor")))
+               (unless (or (null e) (eq e :null))
+                 (agent-shell-queue--executor-from-plist e)))))
 
 (defun agent-shell-queue--serialize-yaml (items)
   "Serialize ITEMS to a YAML string via `yaml-encode'."
@@ -767,7 +852,7 @@ No-op when `agent-shell-queue-done-log-file' is nil."
         (let ((entry (json-serialize
                       (list :id (agent-shell-queue-item-id item)
                             :target buf-name
-                            :prompt (agent-shell-queue-item-prompt item)
+                            :args (agent-shell-queue-item-args item)
                             :background (if (agent-shell-queue-item-background item) t :false)
                             :created (agent-shell-queue-item-created item)
                             :completed (float-time)))))
@@ -792,7 +877,7 @@ item was dispatched, ISO-8601 archive timestamp, and runtime (dispatched→compl
                           agent-shell-queue-instance-name))
                (entry (json-serialize
                        (list :id (agent-shell-queue-item-id item)
-                             :prompt (agent-shell-queue-item-prompt item)
+                             :args (agent-shell-queue-item-args item)
                              :status (symbol-name (agent-shell-queue-item-status item))
                              :background (if (agent-shell-queue-item-background item) t :false)
                              :target buf-name
@@ -965,7 +1050,7 @@ Always logs the removed item's prompt to *Messages*."
     (message "agent-shell-queue: removed %s [%s]: %s"
              id (car found)
              (truncate-string-to-width
-              (agent-shell-queue-item-prompt (cdr found)) 120 nil nil "…")))
+              (agent-shell-queue-item-args (cdr found)) 120 nil nil "…")))
   (let ((before-names (seq-map #'car (agent-shell-queue-store-items agent-shell-queue--store))))
     (seq-do (lambda (it)
               (setcdr it (seq-remove (lambda (item) (agent-shell-queue--item-id-matches-p id item)) (cdr it))))
@@ -985,7 +1070,7 @@ Returns t to proceed, nil to skip.  When user answers \\='a\\=', sets
       (let ((answer (read-char-choice
                      (format "Remove [%s]? (y)es (n)o (a)ll: "
                              (truncate-string-to-width
-                              (agent-shell-queue-item-prompt item) 60 nil nil "…"))
+                              (agent-shell-queue-item-args item) 60 nil nil "…"))
                      '(?y ?n ?a ?Y ?N ?A))))
         (pcase answer
           ((or ?y ?Y) t)
@@ -1001,10 +1086,10 @@ Returns t to proceed, nil to skip.  When user answers \\='a\\=', sets
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue-edit (id new-prompt)
-  "Replace the prompt of item ID with NEW-PROMPT.  Save."
+  "Replace the args of item ID with NEW-PROMPT.  Save."
   ;; does it make sense to make a "agent-shell-queue--with-save" macro and then inline all of this?
   (when-let* ((pair (agent-shell-queue--item-by-id id)))
-    (setf (agent-shell-queue-item-prompt (cdr pair)) new-prompt)
+    (setf (agent-shell-queue-item-args (cdr pair)) new-prompt)
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue-set-background-task (id flag)
@@ -1124,11 +1209,39 @@ and dispatches the next item for BUF-NAME if the buffer is still live."
               (buf-name (car pair)))
     (agent-shell-queue--complete-item item buf-name)))
 
+(defun agent-shell-queue--default-executor (item args)
+  "Default dispatch for ITEM: send ARGS to the item's target shell buffer.
+Fires an alert with the truncated ARGS text, then calls `agent-shell-insert'
+to submit the text.  Background items are prefixed with
+`agent-shell-queue-background-prefix'.  Records the buffer position after
+insertion so response capture can find the reply."
+  (let* ((pair (agent-shell-queue--item-by-id (agent-shell-queue-item-id item)))
+         (buf-name (car pair))
+         (buf (get-buffer buf-name)))
+    (alert (truncate-string-to-width args 80 nil nil "…")
+           :title (format "Queue → %s" buf-name)
+           :category 'agent-shell-queue
+           :severity 'low)
+    (agent-shell-insert
+     :text (if (agent-shell-queue-item-background item)
+               (concat agent-shell-queue-background-prefix args)
+             args)
+     :submit t :no-focus t :shell-buffer buf)
+    ;; Record after insert so start-pos is past the submitted "Claude> [args]" line.
+    (push (cons (agent-shell-queue-item-id item) (with-current-buffer buf (point-max)))
+          agent-shell-queue--response-start-positions)))
+
+(agent-shell-queue-register-executor
+ (symbol-name 'agent-shell-queue--default-executor)
+ #'agent-shell-queue--default-executor)
+
 (defun agent-shell-queue-send-item (id)
   "Send the item with ID to its target buffer, marking it as running.
 Items flagged as background are wrapped with `agent-shell-queue-background-prefix'.
 The item transitions to done when the buffer's turn-complete event fires.
-Running and done items are not persisted across sessions."
+Running and done items are not persisted across sessions.
+If the item has a non-nil executor field, it is called as
+\(funcall executor item args) instead of the normal kind dispatch."
   (when-let* ((pair (agent-shell-queue--item-by-id id)))
     (let* ((buf-name (car pair))
            (item (cdr pair))
@@ -1137,7 +1250,8 @@ Running and done items are not persisted across sessions."
        ((not (buffer-live-p buf))
         (message "agent-shell-queue: cannot dispatch — target shell %s is gone; use t/T to reassign"
                  buf-name))
-       ((agent-shell-queue--session-mode-blocked-p buf)
+       ((and (null (agent-shell-queue-item-executor item))
+             (agent-shell-queue--session-mode-blocked-p buf))
         (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
         (message "agent-shell-queue: dispatch blocked — session %s is in mode %s"
                  buf-name
@@ -1150,48 +1264,40 @@ Running and done items are not persisted across sessions."
               (setf (agent-shell-queue-item-dispatched item) (float-time))
               (agent-shell-queue--save)
               (agent-shell-queue--refresh-buffer)
-              (pcase (agent-shell-queue-item-kind item)
-                ('emacs
-                 (condition-case eval-err
-                     (eval (read (agent-shell-queue-item-prompt item)) t)
-                   (error (message "agent-shell-queue: emacs item %s error: %s" id eval-err)))
-                 (agent-shell-queue--complete-item item buf-name))
-                ((or 'pause 'compact)
-                 (cl-pushnew (cons buf-name id) agent-shell-queue--compact-running :test #'equal)
-                 (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
-                 (agent-shell-queue--save)
-                 (agent-shell-queue--refresh-buffer)
-                 (alert (if (eq (agent-shell-queue-item-kind item) 'pause)
-                            (format "Queue for %s paused — human action required" buf-name)
-                          (format "Manual work required: %s"
-                                  (agent-shell-queue-item-prompt item)))
-                        :title (format "Queue → %s" buf-name)
-                        :category 'agent-shell-queue
-                        :severity 'high
-                        :persistent t))
-                ('wait
-                 (let* ((target (date-to-time (agent-shell-queue-item-prompt item)))
-                        (delay (max 0 (float-time (time-subtract target (current-time)))))
-                        (wait-timer (run-with-timer delay nil
-                                                    #'agent-shell-queue--wait-timer-fire
-                                                    id)))
-                   (push (cons id wait-timer) agent-shell-queue--wait-timers)
+              (if (agent-shell-queue-item-executor item)
+                  (funcall (agent-shell-queue-item-executor item)
+                           item
+                           (agent-shell-queue-item-args item))
+                (pcase (agent-shell-queue-item-kind item)
+                  ('emacs
+                   (condition-case eval-err
+                       (eval (read (agent-shell-queue-item-args item)) t)
+                     (error (message "agent-shell-queue: emacs item %s error: %s" id eval-err)))
+                   (agent-shell-queue--complete-item item buf-name))
+                  ((or 'pause 'compact)
+                   (cl-pushnew (cons buf-name id) agent-shell-queue--compact-running :test #'equal)
+                   (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
                    (agent-shell-queue--save)
-                   (agent-shell-queue--refresh-buffer)))
-                (_
-                 (alert (truncate-string-to-width (agent-shell-queue-item-prompt item) 80 nil nil "…")
-                        :title (format "Queue → %s" buf-name)
-                        :category 'agent-shell-queue
-                        :severity 'low)
-                 (agent-shell-insert
-                  :text (if (agent-shell-queue-item-background item)
-                            (concat agent-shell-queue-background-prefix
-                                    (agent-shell-queue-item-prompt item))
-                          (agent-shell-queue-item-prompt item))
-                  :submit t :no-focus t :shell-buffer buf)
-                 ;; Record after insert so start-pos is past the submitted "Claude> [prompt]" line.
-                 (push (cons id (with-current-buffer buf (point-max)))
-                       agent-shell-queue--response-start-positions))))
+                   (agent-shell-queue--refresh-buffer)
+                   (alert (if (eq (agent-shell-queue-item-kind item) 'pause)
+                              (format "Queue for %s paused — human action required" buf-name)
+                            (format "Manual work required: %s"
+                                    (agent-shell-queue-item-args item)))
+                          :title (format "Queue → %s" buf-name)
+                          :category 'agent-shell-queue
+                          :severity 'high
+                          :persistent t))
+                  ('wait
+                   (let* ((target (date-to-time (agent-shell-queue-item-args item)))
+                          (delay (max 0 (float-time (time-subtract target (current-time)))))
+                          (wait-timer (run-with-timer delay nil
+                                                      #'agent-shell-queue--wait-timer-fire
+                                                      id)))
+                     (push (cons id wait-timer) agent-shell-queue--wait-timers)
+                     (agent-shell-queue--save)
+                     (agent-shell-queue--refresh-buffer)))
+                  (_
+                   (agent-shell-queue--default-executor item (agent-shell-queue-item-args item))))))
           (error
            (agent-shell-queue--handle-stale-item id buf-name err))))))))
 
@@ -1487,7 +1593,7 @@ Affected buffer queues are paused and the queue state is saved."
                                       (seq-map (lambda (it)
                                                  (condition-case _
                                                      (ignore (agent-shell-queue-item-id it)
-                                                             (agent-shell-queue-item-prompt it)
+                                                             (agent-shell-queue-item-args it)
                                                              (agent-shell-queue-item-status it))
                                                    (error (cons (car pair) it)))))
                                       (seq-filter #'identity))))))
@@ -2051,7 +2157,7 @@ SHOW-BUFFER-P indicates whether the Buffer column is included."
                                     (agent-shell-queue--format-age (time-since dispatched)))
                                    (t "")))
                          (first-line (car (split-string
-                                           (agent-shell-queue-item-prompt item) "\n")))
+                                           (agent-shell-queue-item-args item) "\n")))
                          (buf-cell (funcall cell
                                             (if (equal (car pair) agent-shell-queue--unassigned-key)
                                                 "(unassigned)" (car pair))))
@@ -2095,7 +2201,7 @@ Must be called immediately after `tabulated-list-print'."
               (when-let* ((id (car it))
                           (line-start (cdr it))
                           (item (cdr (agent-shell-queue--item-by-id id)))
-                          (prompt (agent-shell-queue-item-prompt item)))
+                          (prompt (agent-shell-queue-item-args item)))
                 (let ((face (cdr (agent-shell-queue--item-display item nil nil))))
                   (save-excursion
                     (goto-char line-start)
@@ -2218,7 +2324,7 @@ When the original target buffer is dead, prompts for a live replacement."
     (unless (memq (agent-shell-queue-item-status old-item) '(done aborted))
       (user-error "Item %s is not done or aborted; cannot re-enqueue" id))
     (agent-shell-queue-add
-     (agent-shell-queue-item-prompt old-item)
+     (agent-shell-queue-item-args old-item)
      buf
      (agent-shell-queue-item-background old-item))))
 
@@ -2244,7 +2350,7 @@ When called interactively, prompts for the target buffer."
                        (agent-shell-queue--ensure-loaded)
                        (agent-shell-queue-item--make
                         :id (agent-shell-queue--gen-id)
-                        :prompt "[PAUSE — waiting for human]"
+                        :args "[PAUSE — waiting for human]"
                         :status 'active
                         :kind 'pause
                         :created (float-time))))
@@ -2566,7 +2672,7 @@ Each entry is a plist with keys:
                (agent-shell-queue--format-age (time-subtract completed dispatched))))
     (insert "\n")
     (insert (propertize "Prompt:\n" 'face 'bold))
-    (insert (agent-shell-queue-item-prompt item) "\n")
+    (insert (agent-shell-queue-item-args item) "\n")
     (when-let* ((response (agent-shell-queue-item-response item)))
       (insert "\n")
       (insert (propertize "Response:\n" 'face 'bold))
@@ -2766,7 +2872,7 @@ when called interactively with a prefix argument, prompts for a file path."
                     (let* ((obj (json-parse-string line :object-type 'plist))
                            (item (agent-shell-queue-item--make
                                   :id (agent-shell-queue--gen-id)
-                                  :prompt (plist-get obj :prompt)
+                                  :args (or (plist-get obj :args) (plist-get obj :prompt))
                                   :status 'active
                                   :kind (intern (or (plist-get obj :kind) "prompt"))
                                   :background (eq t (plist-get obj :background))
@@ -3698,7 +3804,7 @@ being edited, switches to that buffer and signals an error."
               (setf (agent-shell-queue-queue-editing-ids agent-shell-queue--queue)
                     (delete prev-id (agent-shell-queue-queue-editing-ids agent-shell-queue--queue))))
             (erase-buffer)
-            (insert (agent-shell-queue-item-prompt item))
+            (insert (agent-shell-queue-item-args item))
             (agent-shell-queue-edit-mode)
             (setq-local agent-shell-queue--editing-id id))
           (cl-pushnew id (agent-shell-queue-queue-editing-ids agent-shell-queue--queue) :test #'equal)
@@ -3733,7 +3839,7 @@ and age."
                  (lambda (it)
                    (unless (memq (agent-shell-queue-item-status it) '(done running))
                      (let* ((id (agent-shell-queue-item-id it))
-                            (prompt (agent-shell-queue-item-prompt it))
+                            (prompt (agent-shell-queue-item-args it))
                             (status (agent-shell-queue--status-string it))
                             (age (agent-shell-queue--format-age
                                   (time-since (agent-shell-queue-item-created it))))
@@ -4125,7 +4231,7 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
   "Convert ITEM to a hash-table for raw editing; omits nil timestamp fields."
   (let ((h (make-hash-table :test #'equal)))
     (map-put! h "id" (agent-shell-queue-item-id item))
-    (map-put! h "prompt" (agent-shell-queue-item-prompt item))
+    (map-put! h "prompt" (agent-shell-queue-item-args item))
     (map-put! h "status" (symbol-name (agent-shell-queue-item-status item)))
     (map-put! h "kind" (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
     (map-put! h "background" (if (agent-shell-queue-item-background item) t nil))
@@ -4206,7 +4312,7 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
 (defun agent-shell-queue--parse-yaml-item (item-h snapshot)
   "Validate hash-table ITEM-H against SNAPSHOT; return (item . errors) or (nil . errors)."
   (let* ((id (map-elt item-h "id"))
-         (prompt (map-elt item-h "prompt"))
+         (prompt (or (map-elt item-h "args") (map-elt item-h "prompt")))
          (status-str (map-elt item-h "status" "active"))
          (kind-str (map-elt item-h "kind" "prompt"))
          (bg (map-elt item-h "background"))
@@ -4247,7 +4353,7 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
              (final-completed (or completed (and orig (agent-shell-queue-item-completed orig)))))
         (cons (agent-shell-queue-item--make
                :id final-id
-               :prompt (string-trim prompt)
+               :args (string-trim prompt)
                :status (or status 'active)
                :kind (or kind 'prompt)
                :background (eq t bg)
@@ -4405,7 +4511,7 @@ For each item whose ID already exists, prompts to keep, replace, or assign new I
                                (t
                                 (when (and (stringp final-id) (equal final-id raw-id) existing)
                                   (agent-shell-queue-remove raw-id))
-                                (let* ((prompt (map-elt it "prompt" ""))
+                                (let* ((prompt (or (map-elt it "args") (map-elt it "prompt") ""))
                                        (status-str (map-elt it "status" "active"))
                                        (status (condition-case nil (intern status-str) (error 'active)))
                                        (kind-str (map-elt it "kind" "prompt"))
@@ -4416,8 +4522,8 @@ For each item whose ID already exists, prompts to keep, replace, or assign new I
                                                         (get-buffer buf-name)))
                                        (item (agent-shell-queue-item--make
                                               :id final-id
-                                              :prompt (if (string-empty-p (string-trim (or prompt "")))
-                                                          "(imported)" (string-trim prompt))
+                                              :args (if (string-empty-p (string-trim (or prompt "")))
+                                                        "(imported)" (string-trim prompt))
                                               :status (if (memq status '(active deferred invalid)) status 'active)
                                               :kind (if (memq kind '(prompt pause context emacs wait compact)) kind 'prompt)
                                               :background bg

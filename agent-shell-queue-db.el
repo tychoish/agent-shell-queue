@@ -33,6 +33,8 @@
 (declare-function agent-shell-queue-import "agent-shell-queue")
 (declare-function agent-shell-queue--scope-label "agent-shell-queue")
 (declare-function agent-shell-queue--item-to-yaml "agent-shell-queue")
+(declare-function agent-shell-queue--executor-name "agent-shell-queue")
+(declare-function agent-shell-queue--executor-from-plist "agent-shell-queue")
 
 ;;; Variables
 
@@ -68,20 +70,25 @@ to store the database at a custom location.")
      dispatched REAL,
      completed  REAL,
      response   TEXT,
-     position   INTEGER NOT NULL DEFAULT 0
+     position   INTEGER NOT NULL DEFAULT 0,
+     executor   TEXT
    )"
   "DDL for the items table.")
+
+(defconst agent-shell-queue-db--migrate-add-executor
+  "ALTER TABLE items ADD COLUMN executor TEXT"
+  "DDL to add the executor column to existing databases that predate it.")
 
 (defconst agent-shell-queue-db--insert-item
   "INSERT OR REPLACE INTO items
      (id, bucket, prompt, status, kind, background,
-      created, dispatched, completed, response, position)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      created, dispatched, completed, response, position, executor)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   "Parameterized INSERT for a single queue item.")
 
 (defconst agent-shell-queue-db--select-items
   "SELECT id, bucket, prompt, status, kind, background,
-          created, dispatched, completed, response
+          created, dispatched, completed, response, executor
    FROM items
    ORDER BY bucket, position"
   "SELECT to reconstruct the full items alist on load.")
@@ -110,7 +117,12 @@ to store the database at a custom location.")
       (sqlite-execute agent-shell-queue-db--connection
                       "PRAGMA busy_timeout = 5000")
       (sqlite-execute agent-shell-queue-db--connection
-                      agent-shell-queue-db--create-items)))
+                      agent-shell-queue-db--create-items)
+      ;; Migrate existing databases that predate the executor column.
+      (condition-case nil
+          (sqlite-execute agent-shell-queue-db--connection
+                          agent-shell-queue-db--migrate-add-executor)
+        (error nil))))
   agent-shell-queue-db--connection)
 
 (defun agent-shell-queue-db--close ()
@@ -149,7 +161,7 @@ Called as `agent-shell-queue-save-function' when the DB backend is active."
                  agent-shell-queue-db--insert-item
                  (list (agent-shell-queue-item-id item)
                        (car pair)
-                       (agent-shell-queue-item-prompt item)
+                       (agent-shell-queue-item-args item)
                        (symbol-name (agent-shell-queue-item-status item))
                        (symbol-name (or (agent-shell-queue-item-kind item) 'prompt))
                        (if (agent-shell-queue-item-background item) 1 0)
@@ -157,7 +169,8 @@ Called as `agent-shell-queue-save-function' when the DB backend is active."
                        (agent-shell-queue-item-dispatched item)
                        (agent-shell-queue-item-completed item)
                        (agent-shell-queue-item-response item)
-                       pos))
+                       pos
+                       (agent-shell-queue--executor-name (agent-shell-queue-item-executor item))))
                 (cl-incf pos))))
           (sqlite-execute conn "COMMIT"))
       (error
@@ -178,20 +191,21 @@ Called as `agent-shell-queue-load-function' when the DB backend is active."
         (result nil))
     (dolist (row (sqlite-select conn agent-shell-queue-db--select-items))
       (cl-destructuring-bind
-          (id bucket prompt status-str kind-str bg created dispatched completed response)
+          (id bucket prompt status-str kind-str bg created dispatched completed response executor-name)
           row
         (let* ((status (condition-case nil (intern (or status-str "active")) (error 'active)))
                (kind   (condition-case nil (intern (or kind-str "prompt"))   (error 'prompt)))
                (item   (agent-shell-queue-item--make
                         :id id
-                        :prompt prompt
+                        :args prompt
                         :status status
                         :kind kind
                         :background (eql bg 1)
                         :created created
                         :dispatched dispatched
                         :completed completed
-                        :response response))
+                        :response response
+                        :executor (agent-shell-queue--executor-from-plist executor-name)))
                (pair (assoc bucket result)))
           (if pair
               (setcdr pair (append (cdr pair) (list item)))
@@ -361,7 +375,7 @@ Each function is called with two arguments: BUF-NAME and ITEM.")
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
            (list (agent-shell-queue-item-id item)
                  buf-name
-                 (agent-shell-queue-item-prompt item)
+                 (agent-shell-queue-item-args item)
                  (symbol-name (or (agent-shell-queue-item-kind item) 'prompt))
                  (if (agent-shell-queue-item-background item) 1 0)
                  (agent-shell-queue-item-created item)

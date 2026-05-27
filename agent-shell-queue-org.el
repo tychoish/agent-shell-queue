@@ -77,8 +77,8 @@ build the property drawer so org manages drawer formatting."
   (let* ((status (agent-shell-queue-item-status item))
          (keyword (or (cdr (assq status agent-shell-queue-org--status-keyword)) "TODO"))
          (title (agent-shell-queue-org--heading-title
-                 (agent-shell-queue-item-prompt item)))
-         (prompt (or (agent-shell-queue-item-prompt item) "")))
+                 (agent-shell-queue-item-args item)))
+         (prompt (or (agent-shell-queue-item-args item) "")))
     (goto-char (point-max))
     (insert (format "** %s %s\n" keyword title))
     (org-set-property "QUEUE-ID"   (agent-shell-queue-item-id item))
@@ -169,7 +169,7 @@ Must be called in the buffer where ITEM-HL was parsed."
                        'active))))
     (agent-shell-queue-item--make
      :id (or (funcall prop "QUEUE-ID") (agent-shell-queue--gen-id))
-     :prompt (agent-shell-queue-org--body-from-element item-hl)
+     :args (agent-shell-queue-org--body-from-element item-hl)
      :status status
      :kind (intern (or (funcall prop "KIND") "prompt"))
      :background (equal (funcall prop "BACKGROUND") "t")

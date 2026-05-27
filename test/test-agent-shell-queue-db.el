@@ -1,3 +1,4 @@
+
 ;;; test-agent-shell-queue-db.el --- ERT tests for agent-shell-queue-db -*- lexical-binding: t -*-
 
 ;; Run inside a live Emacs session:
@@ -18,10 +19,6 @@
 (require 'agent-shell-queue-db)
 
 ;;; Helpers
-
-(defmacro agent-shell-queue-db-test/skip-if-no-sqlite ()
-  "Skip the enclosing test when built-in sqlite is unavailable."
-  `(skip-unless (fboundp 'sqlite-open)))
 
 (defmacro agent-shell-queue-db-test/with-db (&rest body)
   "Run BODY with isolated queue globals and a fresh temporary SQLite database.
@@ -60,7 +57,7 @@ Skips the enclosing test when built-in sqlite is unavailable."
   "Build a deterministic test item with fixed timestamps."
   (agent-shell-queue-item--make
    :id id
-   :prompt prompt
+   :args prompt
    :status (or status 'active)
    :kind (or kind 'prompt)
    :background background
@@ -75,8 +72,8 @@ Ignores created/dispatched/completed since nil vs 0.0 can differ after
 a SQLite roundtrip."
   (and (equal (agent-shell-queue-item-id a)
               (agent-shell-queue-item-id b))
-       (equal (agent-shell-queue-item-prompt a)
-              (agent-shell-queue-item-prompt b))
+       (equal (agent-shell-queue-item-args a)
+              (agent-shell-queue-item-args b))
        (eq    (agent-shell-queue-item-status a)
               (agent-shell-queue-item-status b))
        (eq    (agent-shell-queue-item-kind a)
@@ -488,7 +485,7 @@ reached.  This test documents the actual behaviour."
   "Nil dispatched/completed/response fields survive a save/load cycle."
   (agent-shell-queue-db-test/with-db
     (let ((item (agent-shell-queue-item--make
-                 :id "qa1" :prompt "p" :status 'active :kind 'prompt
+                 :id "qa1" :args "p" :status 'active :kind 'prompt
                  :background nil :created 1000.0
                  :dispatched nil :completed nil :response nil)))
       (setq agent-shell-queue--items (list (list "*s*" item)))
@@ -504,7 +501,7 @@ reached.  This test documents the actual behaviour."
   "Dispatched, completed, and response fields survive a save/load cycle."
   (agent-shell-queue-db-test/with-db
     (let ((item (agent-shell-queue-item--make
-                 :id "qa1" :prompt "p" :status 'active :kind 'prompt
+                 :id "qa1" :args "p" :status 'active :kind 'prompt
                  :background nil :created 1000.0
                  :dispatched 2000.0 :completed 3000.0 :response "done text")))
       (setq agent-shell-queue--items (list (list "*s*" item)))
@@ -624,7 +621,7 @@ reached.  This test documents the actual behaviour."
     (agent-shell-queue-db-enable-done-log)
     (let* ((conn (agent-shell-queue-db--ensure-connection))
            (item (agent-shell-queue-item--make
-                  :id "qa1" :prompt "finished task" :status 'done
+                  :id "qa1" :args "finished task" :status 'done
                   :kind 'prompt :background nil
                   :created 1000.0 :dispatched 2000.0 :completed 3000.0
                   :response "done")))
@@ -641,10 +638,10 @@ reached.  This test documents the actual behaviour."
     (agent-shell-queue-db-enable-done-log)
     (let* ((conn (agent-shell-queue-db--ensure-connection))
            (item-bg (agent-shell-queue-item--make
-                     :id "qa1" :prompt "p" :status 'done :kind 'prompt
+                     :id "qa1" :args "p" :status 'done :kind 'prompt
                      :background t :created 0.0 :dispatched 0.0 :completed 0.0))
            (item-nobg (agent-shell-queue-item--make
-                       :id "qa2" :prompt "p" :status 'done :kind 'prompt
+                       :id "qa2" :args "p" :status 'done :kind 'prompt
                        :background nil :created 0.0 :dispatched 0.0 :completed 0.0)))
       (agent-shell-queue-db--record-done "*s*" item-bg)
       (agent-shell-queue-db--record-done "*s*" item-nobg)
@@ -666,7 +663,7 @@ reached.  This test documents the actual behaviour."
     (let* ((agent-shell-queue-instance-name "test-instance")
            (conn (agent-shell-queue-db--ensure-connection))
            (item (agent-shell-queue-item--make
-                  :id "qa1" :prompt "p" :status 'done :kind 'prompt
+                  :id "qa1" :args "p" :status 'done :kind 'prompt
                   :background nil :created 0.0 :dispatched 0.0 :completed 0.0)))
       (agent-shell-queue-db--record-done "*s*" item)
       (let* ((rows (sqlite-select conn "SELECT instance FROM done_items"))
@@ -680,7 +677,7 @@ reached.  This test documents the actual behaviour."
     (let* ((agent-shell-queue-instance-name (lambda () "fn-instance"))
            (conn (agent-shell-queue-db--ensure-connection))
            (item (agent-shell-queue-item--make
-                  :id "qa1" :prompt "p" :status 'done :kind 'prompt
+                  :id "qa1" :args "p" :status 'done :kind 'prompt
                   :background nil :created 0.0 :dispatched 0.0 :completed 0.0)))
       (agent-shell-queue-db--record-done "*s*" item)
       (let* ((rows (sqlite-select conn "SELECT instance FROM done_items"))
