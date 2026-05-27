@@ -377,6 +377,28 @@ Installed as :before advice on `shell-maker-submit'."
                (buffer-name buf))
       (agent-shell-queue--refresh-buffer))))
 
+(defun agent-shell-queue-enable-intercept-mode (&optional buf)
+  "Enable intercept mode in BUF so user-typed turns are captured as queue items."
+  (interactive
+   (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
+             (agent-shell-queue--pick-buffer "Enable intercept for: "))))
+  (when buf
+    (with-current-buffer buf
+      (setq agent-shell-queue-intercept-mode t)
+      (message "agent-shell-queue intercept: ENABLED in %s" (buffer-name buf))
+      (agent-shell-queue--refresh-buffer))))
+
+(defun agent-shell-queue-disable-intercept-mode (&optional buf)
+  "Disable intercept mode in BUF."
+  (interactive
+   (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
+             (agent-shell-queue--pick-buffer "Disable intercept for: "))))
+  (when buf
+    (with-current-buffer buf
+      (setq agent-shell-queue-intercept-mode nil)
+      (message "agent-shell-queue intercept: disabled in %s" (buffer-name buf))
+      (agent-shell-queue--refresh-buffer))))
+
 (defun agent-shell-queue--default-state-file ()
   "Default queue state file path under `user-emacs-directory'."
   (expand-file-name (concat "agent-shell-queue."
@@ -3259,6 +3281,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     ("R" "Resume (global)" agent-shell-queue-resume)
     ("lp" "Pause (session)" agent-shell-queue-session-pause)
     ("lR" "Resume (session)" agent-shell-queue-session-resume)
+    ("li" "Toggle intercept mode" agent-shell-queue-toggle-intercept-mode)
     ("U" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
    ["Manage Task" :if agent-shell-queue--point-item
     ("s" "Dispatch now" agent-shell-queue-buffer-send
@@ -3318,7 +3341,6 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     ("N" "Set scope (narrow)" agent-shell-queue-set-scope)
     ("W" "Widen to global scope" agent-shell-queue-scope-global)
     ("v" "Export scope to YAML" agent-shell-queue-export)
-    ("li" "Toggle intercept mode" agent-shell-queue-toggle-intercept-mode)
     ("F" "Flush to disk" agent-shell-queue-flush)
     ("D" "Show disk state" agent-shell-queue-show-disk-state)
     ("O" "Open shell for item at point" agent-shell-queue-buffer-open-shell
