@@ -47,6 +47,10 @@
   '((t :foreground "cornflowerblue"))
   "Face for queue items not yet assigned to any shell.")
 
+(defface agent-shell-queue-detached-face
+  '((t :foreground "orange" :slant italic))
+  "Face for queue items whose target shell buffer no longer exists.")
+
 (defface agent-shell-queue-compact-face
   '((t :foreground "steelblue3"))
   "Face for compact (non-LLM manual) work items.")
@@ -1105,7 +1109,8 @@ Running and done items are not persisted across sessions."
            (buf (get-buffer buf-name)))
       (cond
        ((not (buffer-live-p buf))
-        (agent-shell-queue--redirect-dead-target id buf-name))
+        (message "agent-shell-queue: cannot dispatch — target shell %s is gone; use t/T to reassign"
+                 buf-name))
        ((agent-shell-queue--session-mode-blocked-p buf)
         (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
         (message "agent-shell-queue: dispatch blocked — session %s is in mode %s"
@@ -1536,6 +1541,9 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
          (editing (member (agent-shell-queue-item-id item) (agent-shell-queue-queue-editing-ids agent-shell-queue--queue)))
          (blocked (and buf-name (member buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
          (unassigned (equal buf-name agent-shell-queue--unassigned-key))
+         (detached (and buf-name
+                        (not unassigned)
+                        (not (buffer-live-p (get-buffer buf-name)))))
          (done (eq status 'done))
          (running (eq status 'running))
          (aborted (eq status 'aborted))
@@ -1556,6 +1564,7 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
                 (editing "editing")
                 ((and (eq status 'active) blocked) "paused<shell>")
                 ((and (eq status 'active) (agent-shell-queue-queue-paused agent-shell-queue--queue)) "paused<all>")
+                ((and detached (eq status 'active)) "detached")
                 ((and (eq status 'deferred) bg) "held.bg")
                 ((eq status 'deferred) "held")
                 ((eq status 'draft) "draft")
@@ -1571,6 +1580,7 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
                              'agent-shell-queue-blocked-face
                            'italic))
                 ((eq status 'draft) 'agent-shell-queue-draft-face)
+                (detached 'agent-shell-queue-detached-face)
                 (unassigned 'agent-shell-queue-unassigned-face)
                 ((eq kind 'compact) 'agent-shell-queue-compact-face)
                 ((eq kind 'emacs) 'font-lock-function-name-face)
@@ -2300,33 +2310,149 @@ and the queue advances to the next item."
 
 ;;; Item view
 
-(defvar agent-shell-queue-item-view-mode-map
+;;; Item-view action table — single source of truth for keys, transient, and ACR menu
+
+(defconst agent-shell-queue--item-view-action-table
+  (list
+   ;; Plist fields: :key :label :cmd :group :annotation :if
+   ;; :group nil  — keymap only, not shown in transient or ACR
+   ;; :if nil     — always shown when :group is non-nil
+   (list :key "s"
+         :label "Dispatch now"
+         :cmd 'agent-shell-queue-item-view-send
+         :group "Manage Task"
+         :annotation "Send item to target shell immediately"
+         :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted draft)))))
+   (list :key "X"
+         :label "Abort (interrupt)"
+         :cmd 'agent-shell-queue-item-view-abort
+         :group "Manage Task"
+         :annotation "Interrupt running item, mark as aborted"
+         :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
+   (list :key "R"
+         :label "Re-enqueue"
+         :cmd 'agent-shell-queue-item-view-reenqueue
+         :group "Manage Task"
+         :annotation "Create a new active copy of this completed item"
+         :if (lambda () (memq (agent-shell-queue--iv-status) '(done aborted))))
+   (list :key "z"
+         :label "Mark done"
+         :cmd 'agent-shell-queue-item-view-mark-done
+         :group "Manage Task"
+         :annotation "Manually mark item done without dispatching"
+         :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
+   (list :key "e"
+         :label "Edit"
+         :cmd 'agent-shell-queue-item-view-edit
+         :group "Manage Task"
+         :annotation "Open item in edit buffer"
+         :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
+   (list :key "d"
+         :label "Pause (suspend dispatch)"
+         :cmd 'agent-shell-queue-item-view-pause
+         :group "Manage Task"
+         :annotation "Suspend item from being dispatched"
+         :if (lambda () (eq (agent-shell-queue--iv-status) 'active)))
+   (list :key "u"
+         :label "Schedule (resume dispatch)"
+         :cmd 'agent-shell-queue-item-view-schedule
+         :group "Manage Task"
+         :annotation "Return item to active dispatch queue"
+         :if (lambda () (memq (agent-shell-queue--iv-status) '(deferred draft))))
+   (list :key "b"
+         :label "Enable background task"
+         :cmd 'agent-shell-queue-item-view-enable-background-task
+         :group "Manage Task"
+         :annotation "Prefix prompt with /background on dispatch"
+         :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
+                             (not (agent-shell-queue--iv-bg-p)))))
+   (list :key "B"
+         :label "Disable background task"
+         :cmd 'agent-shell-queue-item-view-disable-background-task
+         :group "Manage Task"
+         :annotation "Remove background task flag"
+         :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
+                             (agent-shell-queue--iv-bg-p))))
+   (list :key "i"
+         :label "Inspect raw"
+         :cmd 'agent-shell-queue-item-view-inspect
+         :group "Manage Task"
+         :annotation "View raw serialization of this item"
+         :if nil)
+   (list :key "C-d"
+         :label "Destructive…"
+         :cmd 'agent-shell-queue-item-destructive-menu
+         :group "Manage Task"
+         :annotation "Archive, remove, or other destructive operations"
+         :if (lambda () (not (eq (agent-shell-queue--iv-status) 'running))))
+   ;; Move / Assign group
+   (list :key "M-<up>"
+         :label "Move up"
+         :cmd 'agent-shell-queue-item-view-move-up
+         :group "Move / Assign"
+         :annotation "Move item earlier in its bucket queue"
+         :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
+   (list :key "M-<down>"
+         :label "Move down"
+         :cmd 'agent-shell-queue-item-view-move-down
+         :group "Move / Assign"
+         :annotation "Move item later in its bucket queue"
+         :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
+   (list :key "t"
+         :label "Assign to shell…"
+         :cmd 'agent-shell-queue-item-view-assign
+         :group "Move / Assign"
+         :annotation "Move item to a different agent-shell buffer"
+         :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
+   ;; Detached reassignment — only visible when target buffer is dead
+   (list :key "T"
+         :label "Reassign (this item)"
+         :cmd 'agent-shell-queue-item-view-reassign-detached
+         :group "Move / Assign"
+         :annotation "Assign this detached item to an active or new shell"
+         :if #'agent-shell-queue--iv-detached-p)
+   (list :key "C-t"
+         :label "Reassign (all in same bucket)"
+         :cmd 'agent-shell-queue-item-view-reassign-bucket-detached
+         :group "Move / Assign"
+         :annotation "Assign all items from the same dead shell to a shell"
+         :if #'agent-shell-queue--iv-detached-p)
+   (list :key "C-T"
+         :label "Reassign (all detached)"
+         :cmd 'agent-shell-queue-item-view-reassign-all-detached
+         :group "Move / Assign"
+         :annotation "Assign every detached item across all buckets to a shell"
+         :if #'agent-shell-queue--iv-detached-p)
+   ;; Keymap-only entries (no transient/ACR group)
+   (list :key "C-K"     :label "Remove"   :cmd 'agent-shell-queue-item-view-remove  :group nil :annotation nil :if nil)
+   (list :key "C-<DEL>" :label "Remove"   :cmd 'agent-shell-queue-item-view-remove  :group nil :annotation nil :if nil)
+   (list :key "C-A"     :label "Archive"  :cmd 'agent-shell-queue-item-view-archive :group nil :annotation nil :if nil)
+   (list :key "g"       :label "Refresh"  :cmd 'agent-shell-queue-item-view-refresh :group nil :annotation nil :if nil)
+   (list :key "m"       :label "Menu"     :cmd 'agent-shell-queue-item-menu         :group nil :annotation nil :if nil)
+   (list :key "a"       :label "Actions"  :cmd 'agent-shell-queue-item-view-actions :group nil :annotation nil :if nil)
+   (list :key "q"       :label "Close"    :cmd 'quit-window                          :group nil :annotation nil :if nil))
+  "Action table for `agent-shell-queue-item-view-mode'.
+Each entry is a plist with keys:
+  :key        — key-binding string for `kbd'
+  :label      — human-readable label
+  :cmd        — command symbol
+  :group      — transient group name (nil = keymap only)
+  :annotation — short annotation for ACR menu (nil = not in ACR)
+  :if         — predicate function or nil (nil = always visible)")
+
+(defconst agent-shell-queue--item-view-action-groups
+  '("Manage Task" "Move / Assign")
+  "Ordered group names for the item-view transient menu.")
+
+(defun agent-shell-queue--item-view-build-map ()
+  "Build `agent-shell-queue-item-view-mode-map' from the action table."
   (let ((m (make-sparse-keymap)))
-    ;; Core lifecycle
-    (define-key m (kbd "s")        #'agent-shell-queue-item-view-send)
-    (define-key m (kbd "C-K")      #'agent-shell-queue-item-view-remove)
-    (define-key m (kbd "C-<DEL>")  #'agent-shell-queue-item-view-remove)
-    (define-key m (kbd "R")        #'agent-shell-queue-item-view-reenqueue)
-    (define-key m (kbd "C-A")      #'agent-shell-queue-item-view-archive)
-    (define-key m (kbd "z")        #'agent-shell-queue-item-view-mark-done)
-    ;; Edit
-    (define-key m (kbd "e")        #'agent-shell-queue-item-view-edit)
-    ;; Pause / schedule
-    (define-key m (kbd "d")        #'agent-shell-queue-item-view-pause)
-    (define-key m (kbd "u")        #'agent-shell-queue-item-view-schedule)
-    ;; Background flag
-    (define-key m (kbd "b")        #'agent-shell-queue-item-view-enable-background-task)
-    (define-key m (kbd "B")        #'agent-shell-queue-item-view-disable-background-task)
-    ;; Move / assign
-    (define-key m (kbd "M-<up>")   #'agent-shell-queue-item-view-move-up)
-    (define-key m (kbd "M-<down>") #'agent-shell-queue-item-view-move-down)
-    (define-key m (kbd "t")        #'agent-shell-queue-item-view-assign)
-    ;; Refresh / inspect / menu / close
-    (define-key m (kbd "g")        #'agent-shell-queue-item-view-refresh)
-    (define-key m (kbd "i")        #'agent-shell-queue-item-view-inspect)
-    (define-key m (kbd "m")        #'agent-shell-queue-item-menu)
-    (define-key m (kbd "q")        #'quit-window)
-    m)
+    (dolist (entry agent-shell-queue--item-view-action-table)
+      (define-key m (kbd (plist-get entry :key)) (plist-get entry :cmd)))
+    m))
+
+(defvar agent-shell-queue-item-view-mode-map
+  (agent-shell-queue--item-view-build-map)
   "Keymap for `agent-shell-queue-item-view-mode'.")
 
 (define-derived-mode agent-shell-queue-item-view-mode markdown-mode "Queue-Item"
@@ -2365,7 +2491,7 @@ and the queue advances to the next item."
       (funcall field "Outcome:" (symbol-name outcome)))
     (funcall field "Kind:" (symbol-name (or kind 'prompt)))
     (funcall field "Background:" (if bg "yes" "no"))
-    (insert sep "\n")
+    (insert "\n")
     (funcall field "Created:"
              (format "%s (%s ago)"
                      (format-time-string "%F %T" created)
@@ -2383,30 +2509,15 @@ and the queue advances to the next item."
     (when (and dispatched completed)
       (funcall field "Latency:"
                (agent-shell-queue--format-age (time-subtract completed dispatched))))
-    (insert sep "\n")
+    (insert "\n")
     (insert (propertize "Prompt:\n" 'face 'bold))
     (insert (agent-shell-queue-item-prompt item) "\n")
     (when-let* ((response (agent-shell-queue-item-response item)))
-      (insert sep "\n")
+      (insert "\n")
       (insert (propertize "Response:\n" 'face 'bold))
       (insert response "\n"))
-    (insert sep "\n")
-    (insert (propertize
-             (let ((status (agent-shell-queue-item-status item)))
-               (cond
-                ((eq status 'running)
-                 "[X] abort  [m] menu  [q] close")
-                ((eq status 'active)
-                 "[s] send now  [e] edit  [d] pause  [b] background  [m] menu  [q] close")
-                ((eq status 'deferred)
-                 "[u] schedule  [e] edit  [m] menu  [q] close")
-                ((memq status '(done aborted))
-                 "[R] re-enqueue  [A] archive  [k] remove  [m] menu  [q] close")
-                ((eq status 'incomplete)
-                 "[s] retry  [e] edit  [k] remove  [m] menu  [q] close")
-                (t
-                 "[e] edit  [k] remove  [m] menu  [q] close")))
-             'face 'shadow))))
+    (insert "\n")
+    (insert (propertize "[m] menu  [a] actions  [q] close" 'face 'shadow))))
 
 (defun agent-shell-queue-buffer-view-item ()
   "Open an item-view window below showing the item at point."
@@ -2684,6 +2795,79 @@ when called interactively with a prefix argument, prompts for a file path."
         (agent-shell-queue--refresh-buffer)
         (agent-shell-queue-item-view-refresh)))))
 
+;;; Detached item reassignment
+
+(defun agent-shell-queue--pick-shell-for-reassign (prompt)
+  "Prompt for a live agent-shell buffer or offer to create a new one.
+Returns a buffer name string, or nil if cancelled."
+  (let* ((bufs (agent-shell-buffers))
+         (live-entries (seq-map (lambda (b)
+                                  (cons (buffer-name b)
+                                        (abbreviate-file-name
+                                         (or (buffer-local-value 'default-directory b) ""))))
+                                bufs))
+         (choices (cons (cons "(create new shell)" "Open a new agent-shell in a chosen directory")
+                        live-entries))
+         (choice (annotated-completing-read choices
+                                            :prompt prompt
+                                            :require-match t)))
+    (if (equal choice "(create new shell)")
+        (let* ((dir (read-directory-name "Shell directory: "))
+               (before (agent-shell-buffers))
+               (_ (let ((default-directory dir))
+                    (call-interactively #'agent-shell-new-shell)))
+               (_ (sit-for 0.1))
+               (new-buf (seq-find (lambda (b) (not (memq b before)))
+                                  (agent-shell-buffers))))
+          (when new-buf (buffer-name new-buf)))
+      choice)))
+
+(defun agent-shell-queue-item-view-reassign-detached ()
+  "Assign this detached item to an active or newly created shell."
+  (interactive)
+  (unless (agent-shell-queue--iv-detached-p)
+    (user-error "This item is not detached"))
+  (when-let* ((id agent-shell-queue--item-view-id)
+              (new-name (agent-shell-queue--pick-shell-for-reassign "reassign to: ")))
+    (agent-shell-queue--assign-item id new-name)
+    (agent-shell-queue--refresh-buffer)
+    (agent-shell-queue-item-view-refresh)))
+
+(defun agent-shell-queue-item-view-reassign-bucket-detached ()
+  "Assign all items in the same dead bucket to an active or new shell."
+  (interactive)
+  (when-let* ((id agent-shell-queue--item-view-id)
+              (target (agent-shell-queue--iv-target))
+              (_ (or (agent-shell-queue--item-detached-p target)
+                     (user-error "This item is not detached")))
+              (cell (assoc target (agent-shell-queue-store-items agent-shell-queue--store)))
+              (ids (seq-map #'agent-shell-queue-item-id (cdr cell)))
+              (new-name (agent-shell-queue--pick-shell-for-reassign
+                         (format "reassign %d item(s) from dead shell to: " (length ids)))))
+    (dolist (item-id ids)
+      (when (agent-shell-queue--item-by-id item-id)
+        (agent-shell-queue--assign-item item-id new-name)))
+    (agent-shell-queue--refresh-buffer)
+    (when (derived-mode-p 'agent-shell-queue-item-view-mode)
+      (agent-shell-queue-item-view-refresh))))
+
+(defun agent-shell-queue-item-view-reassign-all-detached ()
+  "Assign all detached items across all buckets to an active or new shell."
+  (interactive)
+  (let* ((all-ids (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
+                    (seq-filter (lambda (p) (agent-shell-queue--item-detached-p (car p))))
+                    (seq-mapcat (lambda (p) (seq-map #'agent-shell-queue-item-id (cdr p)))))))
+    (when (null all-ids)
+      (user-error "No detached items in the queue"))
+    (when-let* ((new-name (agent-shell-queue--pick-shell-for-reassign
+                           (format "reassign %d detached item(s) to: " (length all-ids)))))
+      (dolist (item-id all-ids)
+        (when (agent-shell-queue--item-by-id item-id)
+          (agent-shell-queue--assign-item item-id new-name)))
+      (agent-shell-queue--refresh-buffer)
+      (when (derived-mode-p 'agent-shell-queue-item-view-mode)
+        (agent-shell-queue-item-view-refresh)))))
+
 (defun agent-shell-queue-item-view-edit ()
   "Open the edit buffer for the displayed item."
   (interactive)
@@ -2919,6 +3103,23 @@ Pauses the session queue — call `agent-shell-queue-session-resume' to restart.
   (when (and (boundp 'agent-shell-queue--item-view-id) agent-shell-queue--item-view-id)
     (cdr (agent-shell-queue--item-by-id agent-shell-queue--item-view-id))))
 
+(defun agent-shell-queue--item-detached-p (buf-name)
+  "Return non-nil when BUF-NAME names a bucket whose buffer is not live.
+Does not match the unassigned bucket — only truly detached (dead) targets."
+  (and buf-name
+       (not (equal buf-name agent-shell-queue--unassigned-key))
+       (not (buffer-live-p (get-buffer buf-name)))))
+
+(defun agent-shell-queue--iv-target ()
+  "Return the bucket key for the item currently shown in this item-view buffer."
+  (when (and (boundp 'agent-shell-queue--item-view-id)
+             agent-shell-queue--item-view-id)
+    (car (agent-shell-queue--item-by-id agent-shell-queue--item-view-id))))
+
+(defun agent-shell-queue--iv-detached-p ()
+  "Return non-nil if the viewed item's target shell is no longer live."
+  (agent-shell-queue--item-detached-p (agent-shell-queue--iv-target)))
+
 (defun agent-shell-queue--iv-status ()
   "Return the status of the item being viewed, or nil."
   (when-let* ((item (agent-shell-queue--iv-item)))
@@ -2992,39 +3193,55 @@ Items in aborted state remain editable; only running, done, or absent items are 
     ("x" "Enable archiving" agent-shell-queue-toggle-archive
      :if (lambda () (not agent-shell-queue-archive-enabled)))]])
 
-(transient-define-prefix agent-shell-queue-item-menu ()
-  "Actions for the item shown in the current item-view buffer."
-  [["Manage Task"
-    ("s" "Dispatch now" agent-shell-queue-item-view-send
-     :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted draft)))))
-    ("X" "Abort (interrupt)" agent-shell-queue-item-view-abort
-     :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
-    ("R" "Re-enqueue" agent-shell-queue-item-view-reenqueue
-     :if (lambda () (memq (agent-shell-queue--iv-status) '(done aborted))))
-    ("z" "Mark done" agent-shell-queue-item-view-mark-done
-     :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-    ("e" "Edit" agent-shell-queue-item-view-edit
-     :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-    ("d" "Pause (suspend from dispatch)" agent-shell-queue-item-view-pause
-     :if (lambda () (eq (agent-shell-queue--iv-status) 'active)))
-    ("u" "Schedule (resume dispatch)" agent-shell-queue-item-view-schedule
-     :if (lambda () (memq (agent-shell-queue--iv-status) '(deferred draft))))
-    ("b" "Enable background task" agent-shell-queue-item-view-enable-background-task
-     :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
-                         (not (agent-shell-queue--iv-bg-p)))))
-    ("B" "Disable background task" agent-shell-queue-item-view-disable-background-task
-     :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
-                         (agent-shell-queue--iv-bg-p))))
-    ("i" "Inspect raw…" agent-shell-queue-item-view-inspect)
-    ("C-d" "Destructive…" agent-shell-queue-item-destructive-menu
-     :if (lambda () (not (eq (agent-shell-queue--iv-status) 'running))))]
-   ["Move / Assign" :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted nil))))
-    ("M-<up>" "Move up" agent-shell-queue-item-view-move-up
-     :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-    ("M-<down>" "Move down" agent-shell-queue-item-view-move-down
-     :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-    ("t" "Assign to shell…" agent-shell-queue-item-view-assign
-     :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))]])
+(defun agent-shell-queue-item-view-actions ()
+  "Show available item-view actions via annotated-completing-read."
+  (interactive)
+  (let* ((visible (thread-last agent-shell-queue--item-view-action-table
+                    (seq-filter (lambda (a)
+                                  (let ((if-fn (plist-get a :if)))
+                                    (and (plist-get a :group)
+                                         (plist-get a :annotation)
+                                         (or (null if-fn) (funcall if-fn))))))))
+         (table (seq-map (lambda (a)
+                           (cons (plist-get a :label) (plist-get a :annotation)))
+                         visible)))
+    (when-let* ((label (annotated-completing-read table
+                                                  :prompt "item action: "
+                                                  :category 'agent-shell-queue-item-action
+                                                  :require-match t))
+                (entry (seq-find (lambda (a) (equal (plist-get a :label) label))
+                                 visible))
+                (cmd (plist-get entry :cmd)))
+      (call-interactively cmd))))
+
+(defun agent-shell-queue--build-item-menu ()
+  "Regenerate `agent-shell-queue-item-menu' from `agent-shell-queue--item-view-action-table'."
+  (let* ((action-entries (seq-filter (lambda (a) (plist-get a :group))
+                                     agent-shell-queue--item-view-action-table))
+         (group-forms
+          (seq-map
+           (lambda (gname)
+             (apply #'vector
+                    gname
+                    (seq-map
+                     (lambda (a)
+                       (let ((key    (plist-get a :key))
+                             (label  (plist-get a :label))
+                             (cmd    (plist-get a :cmd))
+                             (if-fn  (plist-get a :if)))
+                         (if if-fn
+                             (list key label cmd :if if-fn)
+                           (list key label cmd))))
+                     (seq-filter (lambda (a) (equal (plist-get a :group) gname))
+                                 action-entries))))
+           agent-shell-queue--item-view-action-groups)))
+    (eval
+     `(transient-define-prefix agent-shell-queue-item-menu ()
+        "Actions for the item shown in the current item-view buffer."
+        ,@group-forms)
+     t)))
+
+(agent-shell-queue--build-item-menu)
 
 (defun agent-shell-queue-buffer-move-up ()
   "Move the item at point one position earlier."
@@ -3225,10 +3442,11 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
                       (not agent-shell-queue-show-age-column))
                  "already minimal"
                "hide Buffer, Ordinal, and Age columns"))
-    (dolist (it columns)
-      (let ((on (symbol-value (cdr it))))
-        (map-put! table (car it)
-                 (if on "visible · click to hide" "hidden · click to show"))))
+    (seq-do (lambda (it)
+              (let ((on (symbol-value (cdr it))))
+                (map-put! table (car it)
+                          (if on "visible · click to hide" "hidden · click to show"))))
+            columns)
     (map-put! table "Multi-line format"
              (if agent-shell-queue-multiline-format
                  "on · prompt on second line · click to disable"
@@ -3883,8 +4101,8 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
                (file-name-directory (agent-shell-queue--state-file)))))
     (with-temp-file file
       (insert text))
-    (dolist (it (nreverse errors))
-      (message "agent-shell-queue raw edit: %s" it))
+    (seq-do (lambda (it) (message "agent-shell-queue raw edit: %s" it))
+            (nreverse errors))
     (message "agent-shell-queue: %d error(s) — buffer saved to %s (queue remains paused)"
              (length errors) file)))
 
@@ -3995,14 +4213,17 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
         (cl-return-from agent-shell-queue-raw-edit-confirm
           (agent-shell-queue--raw-edit-fail text errors)))
       ;; Preserve running/done items from current queue
-      (let ((preserved nil))
-        (dolist (it (agent-shell-queue-store-items agent-shell-queue--store))
-          (when-let* ((kept (seq-filter (lambda (it)
-                                          (memq (agent-shell-queue-item-status it) '(running done)))
-                                        (cdr it))))
-            (push (cons (car it) kept) preserved)))
+      (let ((preserved (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
+                                    (seq-map (lambda (it)
+                                               (let ((kept (seq-filter
+                                                            (lambda (item)
+                                                              (memq (agent-shell-queue-item-status item)
+                                                                    '(running done)))
+                                                            (cdr it))))
+                                                 (when kept (cons (car it) kept)))))
+                                    (seq-remove #'null))))
         (let ((result (nreverse new-buckets)))
-          (dolist (it (nreverse preserved))
+          (dolist (it preserved)
             (if-let* ((cell (assoc (car it) result)))
                 (setcdr cell (append (cdr cell) (cdr it)))
               (push it result)))
@@ -4300,16 +4521,16 @@ OPTS is a plist with these keys:
                 ;; Mark affected items as pending-fork; leave them in source.
                 ;; Keep session paused so the user can insert tasks before them.
                 (progn
-                  (dolist (it items-to-fork)
-                    (setf (agent-shell-queue-item-status it) 'pending-fork))
+                  (seq-do (lambda (it) (setf (agent-shell-queue-item-status it) 'pending-fork))
+                        items-to-fork)
                   (setq should-resume nil)
                   (agent-shell-queue--save)
                   (agent-shell-queue--refresh-buffer)
                   (message "agent-shell-queue: %d item(s) marked pending-fork in %s; new session %s created"
                            (length fork-ids) source-name new-name))
               ;; Normal mode: move items to the new session.
-              (dolist (it fork-ids)
-                (agent-shell-queue--assign-item it new-name))
+              (seq-do (lambda (it) (agent-shell-queue--assign-item it new-name))
+                      fork-ids)
               (agent-shell-queue--ensure-subscription new-buf)
               (agent-shell-queue--save)
               (agent-shell-queue--refresh-buffer)

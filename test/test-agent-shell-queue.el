@@ -980,25 +980,26 @@ which populates item.response from the shell buffer content."
               (should (equal "/bg do thing" inserted-text))))
         (kill-buffer buf)))))
 
-(ert-deftest agent-shell-queue/send-item-dead-buffer-alerts-and-pauses ()
-  "Dead target during dispatch emits a high-severity alert and pauses the
-session queue instead of raising a user-error."
+(ert-deftest agent-shell-queue/send-item-dead-buffer-messages-no-pause ()
+  "Dead target during dispatch emits a message but does not pause the session
+queue or raise a user-error.  The queue is left running so other sessions
+can continue dispatching."
   (agent-shell-queue-test/isolate-no-sub
-    (let (alerted)
+    (let (msg-emitted)
       (setf (agent-shell-queue-store-items agent-shell-queue--store)
             (agent-shell-queue-test/populate '("dead-buf" ("q-1" "hello" active nil))))
       (cl-letf (((symbol-function 'get-buffer) (lambda (_) nil))
-                ((symbol-function 'alert)
-                 (lambda (msg &rest args)
-                   (setq alerted (list msg (plist-get args :severity))))))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (setq msg-emitted (apply #'format fmt args)))))
         (should-not (condition-case err
                         (progn (agent-shell-queue-send-item "q-1") nil)
                       (user-error err)))
-        (should alerted)
-        (should (eq 'high (cadr alerted)))
-        (should (member "dead-buf"
-                        (agent-shell-queue-queue-session-paused
-                         agent-shell-queue--queue)))))))
+        (should msg-emitted)
+        (should (string-match-p "dead-buf" msg-emitted))
+        (should-not (member "dead-buf"
+                            (agent-shell-queue-queue-session-paused
+                             agent-shell-queue--queue)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--mark-running-done
@@ -2749,5 +2750,79 @@ Applies to all capture paths, not just insert-after."
                (lambda (sym) (if (eq sym 'yaml-encode) nil (fboundp sym)))))
       (let ((choices (agent-shell-queue--inspect-format-display)))
         (should-not (assoc "yaml" choices))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Detached status
+
+(ert-deftest agent-shell-queue/item-detached-p-dead-buffer ()
+  "Returns non-nil when the named buffer does not exist."
+  (should (agent-shell-queue--item-detached-p "this-buffer-does-not-exist-xyz")))
+
+(ert-deftest agent-shell-queue/item-detached-p-nil ()
+  "Returns nil for a nil bucket name."
+  (should-not (agent-shell-queue--item-detached-p nil)))
+
+(ert-deftest agent-shell-queue/item-detached-p-unassigned ()
+  "Returns nil for the unassigned bucket key."
+  (should-not (agent-shell-queue--item-detached-p agent-shell-queue--unassigned-key)))
+
+(ert-deftest agent-shell-queue/item-detached-p-live-buffer ()
+  "Returns nil when the named buffer is live."
+  (let ((buf (get-buffer-create " *asq-detached-test*")))
+    (unwind-protect
+        (should-not (agent-shell-queue--item-detached-p (buffer-name buf)))
+      (kill-buffer buf))))
+
+(ert-deftest agent-shell-queue/status-string-detached-active ()
+  "An active item in a dead bucket shows as 'detached'."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'active nil)))
+      (should (equal "detached"
+                     (agent-shell-queue--status-string item "no-such-buffer-xyz"))))))
+
+(ert-deftest agent-shell-queue/status-string-detached-deferred-still-held ()
+  "A deferred item in a dead bucket shows as 'held', not 'detached'."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'deferred nil)))
+      (should (equal "held"
+                     (agent-shell-queue--status-string item "no-such-buffer-xyz"))))))
+
+(ert-deftest agent-shell-queue/status-string-detached-blocked-takes-priority ()
+  "When a bucket is both session-paused and dead, blocked wins (shows paused<shell>)."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'active nil)))
+      (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) '("dead-paused-buf"))
+      (should (equal "paused<shell>"
+                     (agent-shell-queue--status-string item "dead-paused-buf"))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Item-view action table
+
+(ert-deftest agent-shell-queue/item-view-action-table-non-empty ()
+  "The action table has entries with required keys."
+  (should (> (length agent-shell-queue--item-view-action-table) 0))
+  (dolist (entry agent-shell-queue--item-view-action-table)
+    (should (plist-get entry :key))
+    (should (plist-get entry :label))
+    (should (plist-get entry :cmd))))
+
+(ert-deftest agent-shell-queue/item-view-action-table-keys-unique ()
+  "No two entries share the same key binding."
+  (let ((keys (seq-map (lambda (a) (plist-get a :key))
+                       agent-shell-queue--item-view-action-table)))
+    (should (= (length keys) (length (seq-uniq keys))))))
+
+(ert-deftest agent-shell-queue/item-view-action-table-groups-valid ()
+  "Every :group value is either nil or a member of the groups list."
+  (dolist (entry agent-shell-queue--item-view-action-table)
+    (let ((group (plist-get entry :group)))
+      (when group
+        (should (member group agent-shell-queue--item-view-action-groups))))))
+
+(ert-deftest agent-shell-queue/item-view-build-map-has-actions ()
+  "The built keymap contains all keys from the action table."
+  (let ((m (agent-shell-queue--item-view-build-map)))
+    (dolist (entry agent-shell-queue--item-view-action-table)
+      (should (lookup-key m (kbd (plist-get entry :key)))))))
 
 ;;; test-agent-shell-queue.el ends here
