@@ -13,6 +13,8 @@ multiple sessions for parallel workloads.
 * Contents                                                       :TOC:
 - [[#overview][Overview]]
 - [[#installation][Installation]]
+  - [[#package-vcel][package-vc.el]]
+  - [[#use-package-with-vc][use-package with VC]]
   - [[#use-package][Use Package]]
   - [[#manual][Manual]]
 - [[#api-reference][API Reference]]
@@ -26,6 +28,25 @@ multiple sessions for parallel workloads.
 - [[#license][License]]
 
 * Installation
+** package-vc.el
+
+Requires Emacs 29.1+.  Run once to clone and register the package:
+
+#+BEGIN_SRC emacs-lisp
+(package-vc-install '(agent-shell-queue
+                      :url "https://github.com/tychoish/agent-shell-queue"))
+#+END_SRC
+
+** use-package with VC
+
+Requires Emacs 30+.  Installs on first load if not already present:
+
+#+BEGIN_SRC emacs-lisp
+(use-package agent-shell-queue
+  :vc (:url "https://github.com/tychoish/agent-shell-queue")
+  :after agent-shell)
+#+END_SRC
+
 ** Use Package
 #+BEGIN_SRC sh
 git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
