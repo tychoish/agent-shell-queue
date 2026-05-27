@@ -1823,10 +1823,10 @@ is void: https://... when the command was invoked on an aborted item."
             ("q4" "p4" draft nil))))
     (let ((collected (agent-shell-queue--fork-collect-items "*s*" nil)))
       (should (= 3 (length collected)))
-      (should (member "q1" (-map #'agent-shell-queue-item-id collected)))
-      (should (member "q2" (-map #'agent-shell-queue-item-id collected)))
-      (should (member "q4" (-map #'agent-shell-queue-item-id collected)))
-      (should (not (member "q3" (-map #'agent-shell-queue-item-id collected)))))))
+      (should (member "q1" (seq-map #'agent-shell-queue-item-id collected)))
+      (should (member "q2" (seq-map #'agent-shell-queue-item-id collected)))
+      (should (member "q4" (seq-map #'agent-shell-queue-item-id collected)))
+      (should (not (member "q3" (seq-map #'agent-shell-queue-item-id collected)))))))
 
 (ert-deftest agent-shell-queue/fork-collect-items-from-id ()
   "With from-id, collects active items at and after that position."
@@ -1840,9 +1840,9 @@ is void: https://... when the command was invoked on an aborted item."
             ("q4" "p4" active nil))))
     (let ((collected (agent-shell-queue--fork-collect-items "*s*" "q2")))
       (should (= 3 (length collected)))
-      (should (-all? (lambda (it)
-                       (member (agent-shell-queue-item-id it) '("q2" "q3" "q4")))
-                     collected)))))
+      (should (seq-every-p (lambda (it)
+                             (member (agent-shell-queue-item-id it) '("q2" "q3" "q4")))
+                           collected)))))
 
 (ert-deftest agent-shell-queue/fork-collect-items-from-id-skips-done ()
   "Skips done and running items even when they appear in range."
@@ -1857,9 +1857,9 @@ is void: https://... when the command was invoked on an aborted item."
     (let ((collected (agent-shell-queue--fork-collect-items "*s*" "q2")))
       ;; q2 is running → not eligible; q3, q4 are active
       (should (= 2 (length collected)))
-      (should (-all? (lambda (it)
-                       (member (agent-shell-queue-item-id it) '("q3" "q4")))
-                     collected)))))
+      (should (seq-every-p (lambda (it)
+                             (member (agent-shell-queue-item-id it) '("q3" "q4")))
+                           collected)))))
 
 (ert-deftest agent-shell-queue/fork-collect-items-unknown-from-id ()
   "Unknown from-id returns empty list."
@@ -1911,8 +1911,8 @@ Also stubs subscription management and `sit-for' to avoid side effects."
         (let ((new-items (cdr (assoc "*new-session*"
                                      (agent-shell-queue-store-items agent-shell-queue--store)))))
           (should (= 2 (length new-items)))
-          (should (member "q2" (-map #'agent-shell-queue-item-id new-items)))
-          (should (member "q3" (-map #'agent-shell-queue-item-id new-items))))
+          (should (member "q2" (seq-map #'agent-shell-queue-item-id new-items)))
+          (should (member "q3" (seq-map #'agent-shell-queue-item-id new-items))))
         (kill-buffer "*new-session*")))))
 
 (ert-deftest agent-shell-queue/fork-session-nil-from-id-moves-all ()
@@ -2018,8 +2018,8 @@ Also stubs subscription management and `sit-for' to avoid side effects."
         (agent-shell-queue-release-pending-fork (current-buffer)))
       (let ((items (cdr (assoc "*release-session*"
                                (agent-shell-queue-store-items agent-shell-queue--store)))))
-        (should (-all? (lambda (it)
-                         (eq 'active (agent-shell-queue-item-status it)))
+        (should (seq-every-p (lambda (it)
+                               (eq 'active (agent-shell-queue-item-status it)))
                        items))))))
 
 (ert-deftest agent-shell-queue/release-pending-fork-no-op-when-none ()
@@ -2180,8 +2180,8 @@ Also stubs subscription management and `sit-for' to avoid side effects."
       (let ((new-items (cdr (assoc "*from-running-new*"
                                    (agent-shell-queue-store-items agent-shell-queue--store)))))
         (should (= 2 (length new-items)))
-        (should (member "q3" (-map #'agent-shell-queue-item-id new-items)))
-        (should (member "q4" (-map #'agent-shell-queue-item-id new-items))))
+        (should (member "q3" (seq-map #'agent-shell-queue-item-id new-items)))
+        (should (member "q4" (seq-map #'agent-shell-queue-item-id new-items))))
       (kill-buffer "*from-running-new*"))))
 
 (ert-deftest agent-shell-queue/fork-from-running-emacs-no-items-after ()
