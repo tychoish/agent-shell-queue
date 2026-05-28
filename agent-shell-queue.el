@@ -245,40 +245,56 @@ Generates constructor TYPE-NAME--make plus:
 
 ;;; Executor registry
 
-(defvar agent-shell-queue--executor-registry (make-hash-table :test #'equal)
-  "Registry mapping executor name strings to executor functions.
-Only registered executors survive serialization.  Register entries with
+(cl-defstruct (agent-shell-queue-executor
+               (:constructor agent-shell-queue-executor--make)
+               (:copier nil))
+  "Registry entry pairing a serializable NAME with an EXECUTOR function and
+an optional CAPTURE function.
+EXECUTOR: (item args) — called by `agent-shell-queue-send-item' to dispatch.
+CAPTURE:  ()         — called during item creation to produce the args value;
+                       nil means fall back to the standard text-capture buffer."
+  name executor capture)
+
+(defvar agent-shell-queue--executors nil
+  "List of `agent-shell-queue-executor' entries.
+Only executors present here survive serialization.  Register entries with
 `agent-shell-queue-register-executor'.")
 
-(defun agent-shell-queue-register-executor (name fn)
-  "Register executor function FN under NAME.
-NAME may be a string or symbol; it is stored as a string via `symbol-name'
-when a symbol is passed.  The name is what gets written into serialized
+(defun agent-shell-queue-register-executor (name executor &optional capture)
+  "Register EXECUTOR (and optional CAPTURE) under NAME.
+NAME may be a string or symbol; it is coerced to a string.  Re-registering
+an existing name replaces the entry.  The name is written into serialized
 queue state, so it must be stable across Emacs restarts.
-Returns FN."
-  (puthash (if (symbolp name) (symbol-name name) name)
-           fn agent-shell-queue--executor-registry)
-  fn)
+Returns EXECUTOR."
+  (let ((name-str (if (symbolp name) (symbol-name name) name)))
+    (setq agent-shell-queue--executors
+          (cons (agent-shell-queue-executor--make
+                 :name name-str :executor executor :capture capture)
+                (seq-remove (lambda (e) (equal name-str (agent-shell-queue-executor-name e)))
+                            agent-shell-queue--executors)))
+    executor))
+
+(defun agent-shell-queue--find-executor (name)
+  "Return the `agent-shell-queue-executor' entry for NAME, or nil."
+  (seq-find (lambda (e) (equal name (agent-shell-queue-executor-name e)))
+            agent-shell-queue--executors))
 
 (defun agent-shell-queue--executor-name (fn)
-  "Return the registry name for FN, or nil if FN is not registered.
-Performs a reverse lookup (value → key) over the registry, so the
-registered name need not match the function's symbol name.  Returns nil
-for nil, or for any function not found in the registry."
-  (when fn
-    (map-some (lambda (name registered-fn)
-                (when (eq fn registered-fn) name))
-              agent-shell-queue--executor-registry)))
+  "Return the registry name for FN, or nil if not registered."
+  (when-let* ((e (seq-find (lambda (e) (eq fn (agent-shell-queue-executor-executor e)))
+                           agent-shell-queue--executors)))
+    (agent-shell-queue-executor-name e)))
 
 (defun agent-shell-queue--executor-from-plist (name)
   "Deserialize executor NAME via the registry.
 Returns nil (kind-dispatch) when NAME is nil or not found; emits a
 warning for non-nil names that have no registry entry."
   (when name
-    (or (gethash name agent-shell-queue--executor-registry)
-        (progn
-          (message "agent-shell-queue: unknown executor %S — item will use kind dispatch" name)
-          nil))))
+    (if-let* ((e (agent-shell-queue--find-executor name)))
+        (agent-shell-queue-executor-executor e)
+      (progn
+        (message "agent-shell-queue: unknown executor %S — item will use kind dispatch" name)
+        nil))))
 
 ;;; Data model
 
@@ -539,11 +555,15 @@ the session queue is paused until the mode changes.")
             (apply #'string
                    (seq-map (lambda (_it) (aref chars (random 36))) (make-list 4 nil))))))
 
+(defun agent-shell-queue--clean-args (args)
+  "Remove trailing whitespace from every line of ARGS."
+  (string-join (seq-map #'string-trim-right (split-string args "\n")) "\n"))
+
 (defun agent-shell-queue--make-item (prompt &optional background kind)
   "Return a new active queue item for PROMPT."
   (agent-shell-queue-item--make
    :id (agent-shell-queue--gen-id)
-   :args prompt
+   :args (agent-shell-queue--clean-args prompt)
    :status 'active
    :kind (or kind 'prompt)
    :background background
@@ -1087,9 +1107,8 @@ Returns t to proceed, nil to skip.  When user answers \\='a\\=', sets
 
 (defun agent-shell-queue-edit (id new-prompt)
   "Replace the args of item ID with NEW-PROMPT.  Save."
-  ;; does it make sense to make a "agent-shell-queue--with-save" macro and then inline all of this?
   (when-let* ((pair (agent-shell-queue--item-by-id id)))
-    (setf (agent-shell-queue-item-args (cdr pair)) new-prompt)
+    (setf (agent-shell-queue-item-args (cdr pair)) (agent-shell-queue--clean-args new-prompt))
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue-set-background-task (id flag)
@@ -1233,7 +1252,8 @@ insertion so response capture can find the reply."
 
 (agent-shell-queue-register-executor
  (symbol-name 'agent-shell-queue--default-executor)
- #'agent-shell-queue--default-executor)
+ #'agent-shell-queue--default-executor
+ nil)
 
 (defun agent-shell-queue-send-item (id)
   "Send the item with ID to its target buffer, marking it as running.
@@ -1325,36 +1345,50 @@ all collapsed blocks are folded: only the prose between them."
                                                (> (prop-match-beginning end-marker) start-pos))
                                           (prop-match-beginning end-marker)
                                         (point-max)))
-                             ;; The echoed prompt has field=input; model response
-                             ;; starts where field transitions away from input.
+                             ;; If start-pos is still inside the echoed field=input
+                             ;; region, skip forward to where field changes (the
+                             ;; model response).  If shell-maker already advanced
+                             ;; past field=input before the position was recorded
+                             ;; (the common case), use start-pos directly — a
+                             ;; next-single-property-change call here would return
+                             ;; the field change at the very end of the response,
+                             ;; making response-start equal to end-pos and
+                             ;; collecting nothing.
                              (response-start
-                              (or (next-single-property-change start-pos 'field nil end-pos)
-                                  start-pos))
-                             ;; Walk forward collecting plain-text segments (no
-                             ;; agent-shell-ui-state), skipping collapsed blocks.
+                              (if (eq (get-text-property start-pos 'field) 'input)
+                                  (or (next-single-property-change start-pos 'field nil end-pos)
+                                      start-pos)
+                                start-pos))
+                             ;; Walk forward, keeping only the last visible segment.
+                             ;; Thinking blocks, tool calls, and intermediate agent
+                             ;; messages are overwritten each iteration; only the
+                             ;; final non-empty visible block is retained.
                              (pos response-start)
-                             (segments nil))
+                             (last-seg nil))
                         (while (< pos end-pos)
                           (let* ((state (get-text-property pos 'agent-shell-ui-state))
                                  (block-end (or (next-single-property-change
                                                  pos 'agent-shell-ui-state nil end-pos)
                                                 end-pos)))
                             (if (and state (text-property-any pos block-end 'invisible t))
-                                ;; Block has hidden body (collapsed tool call, thinking, etc.) — skip.
+                                ;; Hidden body (collapsed tool call, thinking, etc.) — skip.
                                 (setq pos block-end)
-                              ;; Visible content (plain text, agent message, expanded block) — collect.
+                              ;; Visible content — overwrite; we want only the last one.
                               (let ((seg (string-trim
                                           (buffer-substring-no-properties pos block-end))))
                                 (when (not (string-empty-p seg))
-                                  (push seg segments))
+                                  (setq last-seg seg))
                                 (setq pos block-end)))))
-                        (when segments
-                          (string-join (nreverse segments) "\n\n")))))))
-        (when (and text (not (string-empty-p text)))
-          (setf (agent-shell-queue-item-response (cdr pair))
-                (if (> (length text) 8192)
-                    (concat (substring text 0 8192) "\n\n…[truncated]")
-                  text)))))))
+                        last-seg)))))
+        (if (and text (not (string-empty-p text)))
+            (let ((stored (if (> (length text) 8192)
+                              (concat (substring text 0 8192) "\n\n…[truncated]")
+                            text)))
+              (setf (agent-shell-queue-item-response (cdr pair)) stored)
+              (message "agent-shell-queue: captured response for %s (%d chars%s)"
+                       id (length text)
+                       (if (> (length text) 8192) ", truncated" "")))
+          (message "agent-shell-queue: no response captured for %s" id))))))
 
 (defun agent-shell-queue--mark-running-done (buf-name)
   "Mark any running items for BUF-NAME as done, recording completion time.

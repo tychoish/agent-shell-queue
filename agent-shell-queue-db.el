@@ -135,43 +135,34 @@ to store the database at a custom location.")
 ;;; Save
 
 (defun agent-shell-queue-db--save ()
-  "Persist queue items to SQLite, excluding done and running items.
+  "Persist all queue items to SQLite.
 Called as `agent-shell-queue-save-function' when the DB backend is active."
-  (let* ((conn (agent-shell-queue-db--ensure-connection))
-         (items-to-save
-          (cl-remove-if
-           (lambda (pair) (null (cdr pair)))
-           (mapcar (lambda (pair)
-                     (cons (car pair)
-                           (cl-remove-if
-                            (lambda (item)
-                              (memq (agent-shell-queue-item-status item)
-                                    '(done running)))
-                            (cdr pair))))
-                   agent-shell-queue--items))))
+  (let ((conn (agent-shell-queue-db--ensure-connection)))
     (condition-case err
         (progn
           (sqlite-execute conn "BEGIN TRANSACTION")
           (sqlite-execute conn "DELETE FROM items")
-          (dolist (pair items-to-save)
-            (let ((pos 0))
-              (dolist (item (cdr pair))
-                (sqlite-execute
-                 conn
-                 agent-shell-queue-db--insert-item
-                 (list (agent-shell-queue-item-id item)
-                       (car pair)
-                       (agent-shell-queue-item-args item)
-                       (symbol-name (agent-shell-queue-item-status item))
-                       (symbol-name (or (agent-shell-queue-item-kind item) 'prompt))
-                       (if (agent-shell-queue-item-background item) 1 0)
-                       (agent-shell-queue-item-created item)
-                       (agent-shell-queue-item-dispatched item)
-                       (agent-shell-queue-item-completed item)
-                       (agent-shell-queue-item-response item)
-                       pos
-                       (agent-shell-queue--executor-name (agent-shell-queue-item-executor item))))
-                (cl-incf pos))))
+          (seq-do (lambda (pair)
+                    (let ((pos 0))
+                      (seq-do (lambda (item)
+                                (sqlite-execute
+                                 conn
+                                 agent-shell-queue-db--insert-item
+                                 (list (agent-shell-queue-item-id item)
+                                       (car pair)
+                                       (agent-shell-queue-item-args item)
+                                       (symbol-name (agent-shell-queue-item-status item))
+                                       (symbol-name (or (agent-shell-queue-item-kind item) 'prompt))
+                                       (if (agent-shell-queue-item-background item) 1 0)
+                                       (agent-shell-queue-item-created item)
+                                       (agent-shell-queue-item-dispatched item)
+                                       (agent-shell-queue-item-completed item)
+                                       (agent-shell-queue-item-response item)
+                                       pos
+                                       (agent-shell-queue--executor-name (agent-shell-queue-item-executor item))))
+                                (setq pos (1+ pos)))
+                              (cdr pair))))
+                  agent-shell-queue--items)
           (sqlite-execute conn "COMMIT"))
       (error
        (ignore-errors (sqlite-execute conn "ROLLBACK"))

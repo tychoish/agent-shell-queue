@@ -154,7 +154,8 @@ AND the invisible property set.  capture-response must exclude them."
       (kill-buffer shell-buf))))
 
 (ert-deftest agent-shell-queue/capture-response-mixes-plain-and-block ()
-  "Plain text is collected and truly-collapsed blocks (invisible=t) are skipped."
+  "Only the last visible segment is captured; earlier segments and collapsed
+blocks are discarded."
   (let* ((item (agent-shell-queue-test/make-item "q01" "prompt" 'running))
          (plain-state-1 '((:qualified-id . "msg-1")))
          (block-state   '((:qualified-id . "tool-1") (:collapsed . t)))
@@ -175,8 +176,8 @@ AND the invisible property set.  capture-response must exclude them."
          (agent-shell-queue--capture-response "q01" (buffer-name shell-buf))
          (let ((response (agent-shell-queue-item-response item)))
            (should (stringp response))
-           (should (string-match-p "First sentence" response))
            (should (string-match-p "Second sentence" response))
+           (should-not (string-match-p "First sentence" response))
            (should-not (string-match-p "tool output" response))))
       (kill-buffer shell-buf))))
 
@@ -269,6 +270,42 @@ whether a block's content is hidden from the user."
 
 ;;; Full pipeline integration: mark-running-done → capture-response → item.response
 
+(defun agent-shell-queue-test/make-shell-buffer-realistic (&rest spans)
+  "Build a buffer matching the real shell-maker/agent-shell turn structure.
+The structure is:
+  field=input    — echoed user prompt
+  field=boundary — shell-maker boundary (appears BEFORE the model response)
+  field=output   — '<shell-maker-end-of-prompt>' boilerplate
+  SPANS          — model response content (each with field=output)
+Each span is (TEXT &optional STATE INVISIBLE).
+Returns (BUFFER . START-POS) where START-POS is point-max right after the
+boilerplate — matching what `agent-shell-queue--default-executor' records."
+  (let ((buf (generate-new-buffer "*test-shell-buf-realistic*")))
+    (with-current-buffer buf
+      (let ((prompt-beg (point)))
+        (insert "user prompt")
+        (put-text-property prompt-beg (point) 'field 'input)
+        (let ((bbeg (point)))
+          (insert "\n")
+          (put-text-property bbeg (point) 'field 'boundary))
+        (let ((obeg (point)))
+          (insert "<shell-maker-end-of-prompt>\n")
+          (put-text-property obeg (point) 'field 'output))
+        (let ((start-pos (point)))
+          (seq-do (lambda (span)
+                    (let* ((text (car span))
+                           (state (cadr span))
+                           (hidden (nth 2 span))
+                           (sbeg (point)))
+                      (insert text)
+                      (put-text-property sbeg (point) 'field 'output)
+                      (when state
+                        (put-text-property sbeg (point) 'agent-shell-ui-state state))
+                      (when hidden
+                        (put-text-property sbeg (point) 'invisible t))))
+                  spans)
+          (cons buf start-pos))))))
+
 (defun agent-shell-queue-test/make-shell-buffer (text)
   "Build a minimal mock agent-shell buffer containing TEXT as the model response.
 Returns (BUFFER . START-POS).  The buffer has the shape that
@@ -314,7 +351,8 @@ which populates item.response from the shell buffer content."
       (kill-buffer shell-buf))))
 
 (ert-deftest agent-shell-queue/mark-running-done-captures-mixed-response ()
-  "Integration: response capture skips invisible blocks when mark-running-done fires."
+  "Integration: only the last visible segment is captured; invisible blocks and
+earlier segments are discarded."
   (let* ((item (agent-shell-queue-test/make-item "q01" "prompt" 'running))
          (buf (generate-new-buffer "*test-shell-mixed*"))
          buf-name start-pos)
@@ -323,7 +361,7 @@ which populates item.response from the shell buffer content."
       (setq start-pos (point))
       (insert ">>> prompt")
       (put-text-property start-pos (point) 'field 'input)
-      ;; Agent message text — visible (no invisible property).
+      ;; Agent message text — visible but not the last segment.
       (let ((p (point)))
         (insert "The result is correct.")
         (put-text-property p (point) 'agent-shell-ui-state
@@ -334,9 +372,8 @@ which populates item.response from the shell buffer content."
         (put-text-property p (point) 'agent-shell-ui-state
                            '((:qualified-id . "tool-1") (:collapsed . t)))
         (put-text-property p (point) 'invisible t))
-      ;; Final text.
-      (let ((p (point)))
-        (insert " Done."))
+      ;; Final text — the last visible segment.
+      (insert " Done.")
       (let ((bbeg (point)))
         (insert "\n")
         (put-text-property bbeg (point) 'field 'boundary)))
@@ -352,10 +389,146 @@ which populates item.response from the shell buffer content."
            (agent-shell-queue--mark-running-done buf-name))
          (let ((response (agent-shell-queue-item-response item)))
            (should (stringp response))
-           (should (string-match-p "The result is correct" response))
            (should (string-match-p "Done" response))
+           (should-not (string-match-p "The result is correct" response))
            (should-not (string-match-p "tool: bash" response))))
       (kill-buffer buf))))
+
+;;; Regression tests: capture-response with realistic shell-maker buffer structure
+;;
+;; In the real agent-shell/shell-maker buffer layout the field=boundary marker
+;; appears BEFORE the model response (right after the user prompt), not after
+;; it.  This means start-pos (recorded as point-max right after agent-shell-insert
+;; returns) is already in the field=output region.  The old code called
+;; next-single-property-change from start-pos to find where the field changes
+;; away from field=input — but since we are already past field=input the call
+;; returns the field change at the very end of the response (= end-pos), making
+;; response-start = end-pos and collecting nothing.
+
+(ert-deftest agent-shell-queue/capture-response-realistic-buffer-plain-text ()
+  "Regression: capture works when start-pos is in field=output (real layout)."
+  (let* ((item (agent-shell-queue-test/make-item "q-real" "prompt" 'running))
+         (buf+start (agent-shell-queue-test/make-shell-buffer-realistic
+                     (list "All 42 tests pass.")))
+         (shell-buf (car buf+start))
+         (start-pos (cdr buf+start)))
+    (unwind-protect
+        (agent-shell-queue-test/isolate
+         (setf (agent-shell-queue-store-items agent-shell-queue--store)
+               (list (list (buffer-name shell-buf) item)))
+         (setq agent-shell-queue--response-start-positions
+               (list (cons "q-real" start-pos)))
+         (agent-shell-queue--capture-response "q-real" (buffer-name shell-buf))
+         (should (equal "All 42 tests pass."
+                        (agent-shell-queue-item-response item))))
+      (kill-buffer shell-buf))))
+
+(ert-deftest agent-shell-queue/capture-response-realistic-buffer-skips-collapsed ()
+  "Regression: only the last visible segment is captured; earlier segments and
+collapsed blocks are discarded."
+  (let* ((item (agent-shell-queue-test/make-item "q-real2" "prompt" 'running))
+         (buf+start (agent-shell-queue-test/make-shell-buffer-realistic
+                     (list "Visible text." nil nil)
+                     (list "[tool call]" 'tool t)
+                     (list " Done." nil nil)))
+         (shell-buf (car buf+start))
+         (start-pos (cdr buf+start)))
+    (unwind-protect
+        (agent-shell-queue-test/isolate
+         (setf (agent-shell-queue-store-items agent-shell-queue--store)
+               (list (list (buffer-name shell-buf) item)))
+         (setq agent-shell-queue--response-start-positions
+               (list (cons "q-real2" start-pos)))
+         (agent-shell-queue--capture-response "q-real2" (buffer-name shell-buf))
+         (let ((resp (agent-shell-queue-item-response item)))
+           (should (stringp resp))
+           (should (string-match-p "Done" resp))
+           (should-not (string-match-p "Visible text" resp))
+           (should-not (string-match-p "tool call" resp))))
+      (kill-buffer shell-buf))))
+
+(ert-deftest agent-shell-queue/capture-response-realistic-buffer-no-response ()
+  "Empty model output logs a message and leaves response nil."
+  (let* ((item (agent-shell-queue-test/make-item "q-empty" "prompt" 'running))
+         (buf+start (agent-shell-queue-test/make-shell-buffer-realistic))
+         (shell-buf (car buf+start))
+         (start-pos (cdr buf+start)))
+    (unwind-protect
+        (agent-shell-queue-test/isolate
+         (setf (agent-shell-queue-store-items agent-shell-queue--store)
+               (list (list (buffer-name shell-buf) item)))
+         (setq agent-shell-queue--response-start-positions
+               (list (cons "q-empty" start-pos)))
+         (agent-shell-queue--capture-response "q-empty" (buffer-name shell-buf))
+         (should (null (agent-shell-queue-item-response item))))
+      (kill-buffer shell-buf))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue--clean-args (pure)
+
+(ert-deftest agent-shell-queue/clean-args-strips-trailing-spaces ()
+  "Trailing spaces on each line are removed."
+  (should (equal "hello\nworld"
+                 (agent-shell-queue--clean-args "hello  \nworld   "))))
+
+(ert-deftest agent-shell-queue/clean-args-strips-trailing-tabs ()
+  "Trailing tabs on each line are removed."
+  (should (equal "a\nb"
+                 (agent-shell-queue--clean-args "a\t\nb\t\t"))))
+
+(ert-deftest agent-shell-queue/clean-args-preserves-internal-whitespace ()
+  "Spaces within a line are untouched."
+  (should (equal "hello world"
+                 (agent-shell-queue--clean-args "hello world  "))))
+
+(ert-deftest agent-shell-queue/clean-args-no-op-on-clean-string ()
+  "Already-clean strings are returned unchanged."
+  (should (equal "clean" (agent-shell-queue--clean-args "clean"))))
+
+(ert-deftest agent-shell-queue/make-item-cleans-trailing-whitespace ()
+  "Items created via --make-item have trailing whitespace stripped."
+  (let ((item (agent-shell-queue--make-item "hello  \nworld   ")))
+    (should (equal "hello\nworld" (agent-shell-queue-item-args item)))))
+
+(ert-deftest agent-shell-queue/edit-cleans-trailing-whitespace ()
+  "agent-shell-queue-edit strips trailing whitespace from the new args."
+  (agent-shell-queue-test/isolate
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf" ("q-e1" "old" active nil))))
+    (agent-shell-queue-edit "q-e1" "new  \nvalue   ")
+    (let ((item (cadar (agent-shell-queue-store-items agent-shell-queue--store))))
+      (should (equal "new\nvalue" (agent-shell-queue-item-args item))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Response persistence
+
+(ert-deftest agent-shell-queue/response-persists-in-plist-roundtrip ()
+  "Response text survives a to-plist / from-plist round-trip."
+  (let* ((item (agent-shell-queue-test/make-item "q-resp" "prompt" 'done))
+         (_ (setf (agent-shell-queue-item-response item) "the response text"))
+         (restored (agent-shell-queue-item-from-plist
+                    (agent-shell-queue-item-to-plist item))))
+    (should (equal "the response text" (agent-shell-queue-item-response restored)))))
+
+(ert-deftest agent-shell-queue/response-nil-persists-in-plist-roundtrip ()
+  "Nil response survives a to-plist / from-plist round-trip as nil."
+  (let* ((item (agent-shell-queue-test/make-item "q-nil-resp" "prompt" 'active))
+         (restored (agent-shell-queue-item-from-plist
+                    (agent-shell-queue-item-to-plist item))))
+    (should (null (agent-shell-queue-item-response restored)))))
+
+(ert-deftest agent-shell-queue/done-item-response-persists-across-save-load ()
+  "Done items with responses are included in serialized queue state."
+  (agent-shell-queue-test/isolate
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf" ("q-done" "the prompt" done nil))))
+    (let ((item (cadar (agent-shell-queue-store-items agent-shell-queue--store))))
+      (setf (agent-shell-queue-item-response item) "saved response"))
+    (let* ((str (agent-shell-queue-serialize agent-shell-queue--store))
+           (loaded (agent-shell-queue-deserialize agent-shell-queue--store str))
+           (restored-item (cadr (car loaded))))
+      (should (equal "saved response" (agent-shell-queue-item-response restored-item)))
+      (should (eq 'done (agent-shell-queue-item-status restored-item))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--format-age (pure)
@@ -1049,35 +1222,54 @@ can continue dispatching."
 ;;; Executor registry
 
 (ert-deftest agent-shell-queue/register-executor-stores-and-retrieves ()
-  "Registering an executor under a name lets it be looked up by that name."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+  "Registering an executor under a name lets it be found by that name."
+  (let ((agent-shell-queue--executors nil))
     (agent-shell-queue-register-executor "test-exec" #'ignore)
-    (should (eq #'ignore (gethash "test-exec" agent-shell-queue--executor-registry)))))
+    (let ((entry (agent-shell-queue--find-executor "test-exec")))
+      (should entry)
+      (should (eq #'ignore (agent-shell-queue-executor-executor entry))))))
+
+(ert-deftest agent-shell-queue/register-executor-with-capture ()
+  "Registering with a capture function stores it in the entry."
+  (let ((agent-shell-queue--executors nil))
+    (agent-shell-queue-register-executor "cap-exec" #'ignore #'ignore)
+    (let ((entry (agent-shell-queue--find-executor "cap-exec")))
+      (should entry)
+      (should (eq #'ignore (agent-shell-queue-executor-capture entry))))))
+
+(ert-deftest agent-shell-queue/register-executor-replaces-existing ()
+  "Re-registering under the same name replaces the entry."
+  (let ((agent-shell-queue--executors nil))
+    (agent-shell-queue-register-executor "dup" #'ignore)
+    (agent-shell-queue-register-executor "dup" #'identity)
+    (should (= 1 (length agent-shell-queue--executors)))
+    (should (eq #'identity (agent-shell-queue-executor-executor
+                            (agent-shell-queue--find-executor "dup"))))))
 
 (ert-deftest agent-shell-queue/executor-name-returns-nil-for-unregistered ()
   "executor-name returns nil for functions not in the registry."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+  (let ((agent-shell-queue--executors nil))
     (should (null (agent-shell-queue--executor-name #'ignore)))))
 
 (ert-deftest agent-shell-queue/executor-name-returns-name-when-registered ()
-  "executor-name returns the registry key string for a registered function."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+  "executor-name returns the name string for a registered function."
+  (let ((agent-shell-queue--executors nil))
     (agent-shell-queue-register-executor "my-exec" #'ignore)
     (should (equal "my-exec" (agent-shell-queue--executor-name #'ignore)))))
 
 (ert-deftest agent-shell-queue/executor-from-plist-returns-nil-for-nil ()
   "executor-from-plist returns nil when given nil (no executor)."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+  (let ((agent-shell-queue--executors nil))
     (should (null (agent-shell-queue--executor-from-plist nil)))))
 
 (ert-deftest agent-shell-queue/executor-from-plist-returns-nil-for-unknown-name ()
   "executor-from-plist returns nil and warns for an unknown name."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+  (let ((agent-shell-queue--executors nil))
     (should (null (agent-shell-queue--executor-from-plist "no-such-executor")))))
 
 (ert-deftest agent-shell-queue/executor-plist-roundtrip ()
   "A registered executor survives a to-plist / from-plist round-trip."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal)))
+  (let ((agent-shell-queue--executors nil))
     (agent-shell-queue-register-executor "rtrip-exec" #'ignore)
     (let* ((item (agent-shell-queue-item--make
                   :id "q-rt" :args "hi" :status 'active :kind 'prompt
@@ -1088,7 +1280,7 @@ can continue dispatching."
 
 (ert-deftest agent-shell-queue/executor-plist-roundtrip-unregistered-becomes-nil ()
   "An unregistered closure serializes as nil and deserializes as nil."
-  (let ((agent-shell-queue--executor-registry (make-hash-table :test #'equal))
+  (let ((agent-shell-queue--executors nil)
         (closure (lambda (_item _args) nil)))
     (let* ((item (agent-shell-queue-item--make
                   :id "q-cl" :args "hi" :status 'active :kind 'prompt
@@ -1098,10 +1290,12 @@ can continue dispatching."
       (should (null (agent-shell-queue-item-executor restored))))))
 
 (ert-deftest agent-shell-queue/default-executor-is-auto-registered ()
-  "agent-shell-queue--default-executor is pre-registered in the registry."
-  (should (eq #'agent-shell-queue--default-executor
-              (gethash "agent-shell-queue--default-executor"
-                       agent-shell-queue--executor-registry))))
+  "agent-shell-queue--default-executor is pre-registered."
+  (let ((entry (agent-shell-queue--find-executor
+                "agent-shell-queue--default-executor")))
+    (should entry)
+    (should (eq #'agent-shell-queue--default-executor
+                (agent-shell-queue-executor-executor entry)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--mark-running-done
