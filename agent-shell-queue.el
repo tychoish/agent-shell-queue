@@ -3713,7 +3713,8 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     ("lR" "Resume (session)" agent-shell-queue-session-resume)
     ("li" "Toggle intercept mode" agent-shell-queue-toggle-intercept-mode)
     ("U" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
-   ["Manage Task" :if agent-shell-queue--point-item
+   ["Manage Task"
+    :if agent-shell-queue--point-item
     ("s" "Dispatch now" agent-shell-queue-buffer-send
      :if agent-shell-queue--point-dispatchable-p)
     ("X" "Abort (interrupt)" agent-shell-queue-buffer-abort
