@@ -59,7 +59,9 @@
 
 (defun agent-shell-queue-org--ts (val)
   "Return numeric VAL as a string, or \"nil\" when VAL is nil."
-  (if (numberp val) (number-to-string val) "nil"))
+  (if (numberp val)
+      (number-to-string val)
+    "nil"))
 
 (defun agent-shell-queue-org--parse-ts (str)
   "Parse a float timestamp from STR; return nil for \"nil\", blank, or missing."
@@ -125,22 +127,20 @@ build the property drawer so org manages drawer formatting."
   "Return a string-keyed alist of property drawer entries from headline HL.
 Uses direct child access rather than `org-element-map' to avoid recursion into
 paragraph text nodes, which are strings in Emacs 29+ and would crash the walker."
-  (let (result)
     (when-let* ((section (agent-shell-queue-org--section-of hl))
                 (drawer (agent-shell-queue-org--drawer-of section)))
-      (dolist (child (org-element-contents drawer))
-        (when (eq (org-element-type child) 'node-property)
-          (push (cons (org-element-property :key child)
-                      (or (org-element-property :value child) ""))
-                result))))
-    result))
+      (thread-last (org-element-contents drawer)
+		   (seq-filter (lambda (child) (eq (org-element-type child) 'node-property)))
+		   (seq-map (lambda (child)
+			      (cons (org-element-property :key child)
+				    (or (org-element-property :value child) "")))))))
 
 (defun agent-shell-queue-org--body-from-element (hl)
   "Extract the prompt body text from queue item headline HL.
 Uses buffer positions from the parsed element, so must be called in the
 same buffer where HL was parsed.  Strips 3-space indentation added by
 `agent-shell-queue-org--insert-item'."
-  (let* ((section (agent-shell-queue-org--section-of hl)))
+  (let ((section (agent-shell-queue-org--section-of hl)))
     (if (not section)
         ""
       (let* ((drawer (agent-shell-queue-org--drawer-of section))

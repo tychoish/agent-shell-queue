@@ -266,11 +266,17 @@ NAME may be a string or symbol; it is coerced to a string.  Re-registering
 an existing name replaces the entry.  The name is written into serialized
 queue state, so it must be stable across Emacs restarts.
 Returns EXECUTOR."
-  (let ((name-str (if (symbolp name) (symbol-name name) name)))
+  (let ((name-str (cond
+		   ((symbolp name) (symbol-name name))
+		   ((stringp name) name)
+		   (t (user-error "impossible type for %s" name)))))
     (setq agent-shell-queue--executors
           (cons (agent-shell-queue-executor--make
-                 :name name-str :executor executor :capture capture)
-                (seq-remove (lambda (e) (equal name-str (agent-shell-queue-executor-name e)))
+                 :name name-str
+		 :executor executor
+		 :capture capture)
+                (seq-remove (lambda (e)
+			      (equal name-str (agent-shell-queue-executor-name e)))
                             agent-shell-queue--executors)))
     executor))
 
@@ -644,7 +650,7 @@ executor resolved from the registry (nil when absent or unknown)."
    :args (or (plist-get obj :args) (plist-get obj :prompt))
    :status (intern (plist-get obj :status))
    :kind (intern (or (plist-get obj :kind) "prompt"))
-   :background (eq t (plist-get obj :background))
+   :background (eq t (plist-get obj  C9A4-BEF:background))
    :created (plist-get obj :created)
    :dispatched (plist-get obj :dispatched)
    :completed (plist-get obj :completed)
@@ -1087,22 +1093,23 @@ Always logs the removed item's prompt to *Messages*."
 Returns t to proceed, nil to skip.  When user answers \\='a\\=', sets
 `agent-shell-queue--remove-all-confirmed' so future calls return t immediately."
   (or agent-shell-queue--remove-all-confirmed
-      (let ((answer (read-char-choice
-                     (format "Remove [%s]? (y)es (n)o (a)ll: "
-                             (truncate-string-to-width
-                              (agent-shell-queue-item-args item) 60 nil nil "…"))
-                     '(?y ?n ?a ?Y ?N ?A))))
-        (pcase answer
-          ((or ?y ?Y) t)
-          ((or ?a ?A) (setq agent-shell-queue--remove-all-confirmed t) t)
-          (_ nil)))))
+      (pcase (read-char-choice
+              (format "Remove [%s]? (y)es (n)o (a)ll: "
+                      (truncate-string-to-width
+                       (agent-shell-queue-item-args item) 60 nil nil "…"))
+              '(?y ?n ?a ?Y ?N ?A))
+              ((or ?y ?Y) t)
+              ((or ?a ?A) (setq agent-shell-queue--remove-all-confirmed t) t)
+              (_ nil))))
 
 (defun agent-shell-queue-defer (id)
   "Toggle status of item ID between `active' and `deferred'.  Save."
   (when-let* ((pair (agent-shell-queue--item-by-id id))
               (item (cdr pair)))
     (setf (agent-shell-queue-item-status item)
-          (if (eq (agent-shell-queue-item-status item) 'active) 'deferred 'active))
+          (if (eq (agent-shell-queue-item-status item) 'active)
+	      'deferred
+	    'active))
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue-edit (id new-prompt)
@@ -1444,10 +1451,11 @@ The queue must be manually resumed via `agent-shell-queue-session-resume'."
 
 (defun agent-shell-queue--alert-if-empty ()
   "Send a persistent alert when no active or running items remain in any queue."
-  (unless (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
-             (seq-mapcat #'cdr)
-             (seq-some (lambda (item)
-                         (memq (agent-shell-queue-item-status item) '(active running)))))
+  (unless (thread-last
+	    (agent-shell-queue-store-items agent-shell-queue--store)
+            (seq-mapcat #'cdr)
+            (seq-some (lambda (item)
+                        (memq (agent-shell-queue-item-status item) '(active running)))))
     (alert "All queued tasks complete"
            :title "Agent Queue"
            :category 'agent-shell-queue
@@ -4297,7 +4305,7 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
                                            h)))
                               (seq-remove #'null))))
     (if buckets
-	(yaml-encode (vconcat buckets)) 
+	(yaml-encode (vconcat buckets))
       "")))
 
 (defun agent-shell-queue--make-edit-snapshot ()
