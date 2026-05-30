@@ -650,7 +650,7 @@ executor resolved from the registry (nil when absent or unknown)."
    :args (or (plist-get obj :args) (plist-get obj :prompt))
    :status (intern (plist-get obj :status))
    :kind (intern (or (plist-get obj :kind) "prompt"))
-   :background (eq t (plist-get obj  C9A4-BEF:background))
+   :background (eq t (plist-get obj :background))
    :created (plist-get obj :created)
    :dispatched (plist-get obj :dispatched)
    :completed (plist-get obj :completed)
