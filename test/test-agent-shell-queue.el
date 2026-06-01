@@ -153,18 +153,37 @@ AND the invisible property set.  capture-response must exclude them."
          (should-not (agent-shell-queue-item-response item)))
       (kill-buffer shell-buf))))
 
+(ert-deftest agent-shell-queue/capture-response-cleans-prompts ()
+  "Prompt artifacts and trailing prompts are removed from the response."
+  (let* ((item (agent-shell-queue-test/make-item "q01" "prompt" 'running))
+         (buf+start (agent-shell-queue-test/make-response-buffer
+                     (list "<shell-maker-end-of-prompt>\nActual response.\nGemini>" nil nil)))
+         (shell-buf (car buf+start))
+         (start-pos (cdr buf+start)))
+    (unwind-protect
+        (agent-shell-queue-test/isolate
+         (setf (agent-shell-queue-store-items agent-shell-queue--store)
+               (list (list (buffer-name shell-buf) item)))
+         (setq agent-shell-queue--response-start-positions
+               (list (cons "q01" start-pos)))
+         (agent-shell-queue--capture-response "q01" (buffer-name shell-buf))
+         (let ((response (agent-shell-queue-item-response item)))
+           (should (equal "Actual response." response))))
+      (kill-buffer shell-buf))))
+
 (ert-deftest agent-shell-queue/capture-response-mixes-plain-and-block ()
-  "Only the last visible segment is captured; earlier segments and collapsed
-blocks are discarded."
+  "All visible segments are captured; block titles (first line) are discarded; collapsed blocks are skipped."
   (let* ((item (agent-shell-queue-test/make-item "q01" "prompt" 'running))
          (plain-state-1 '((:qualified-id . "msg-1")))
          (block-state   '((:qualified-id . "tool-1") (:collapsed . t)))
          (plain-state-2 '((:qualified-id . "msg-2")))
          (buf+start (agent-shell-queue-test/make-response-buffer
-                     (list "First sentence."  plain-state-1 nil)
-                     ;; Third element t → invisible (truly collapsed labeled block).
-                     (list "[tool output]"    block-state   t)
-                     (list "Second sentence." plain-state-2 nil)))
+                     (list "First prose."  plain-state-1 nil)
+                     ;; A visible block: first line should be discarded.
+                     (list "Title\nBlock content." '((:qualified-id . "b1")) nil)
+                     ;; An invisible block: should be skipped entirely.
+                     (list "Title\n[hidden]"    block-state   t)
+                     (list "Second prose." plain-state-2 nil)))
          (shell-buf (car buf+start))
          (start-pos (cdr buf+start)))
     (unwind-protect
@@ -176,9 +195,9 @@ blocks are discarded."
          (agent-shell-queue--capture-response "q01" (buffer-name shell-buf))
          (let ((response (agent-shell-queue-item-response item)))
            (should (stringp response))
-           (should (string-match-p "Second sentence" response))
-           (should-not (string-match-p "First sentence" response))
-           (should-not (string-match-p "tool output" response))))
+           (should (equal "First prose.\n\nBlock content.\n\nSecond prose." response))
+           (should-not (string-match-p "Title" response))
+           (should-not (string-match-p "hidden" response))))
       (kill-buffer shell-buf))))
 
 (ert-deftest agent-shell-queue/capture-response-collects-agent-message-chunks ()
@@ -1969,6 +1988,78 @@ is void: https://... when the command was invoked on an aborted item."
     (should (= 1 (length agent-shell-queue--subscriptions)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue-buffer-open-shell
+
+(ert-deftest agent-shell-queue/buffer-open-shell-pops-live-buffer ()
+  "Pops to the shell buffer directly when it is live."
+  (agent-shell-queue-test/isolate
+    (let ((buf (get-buffer-create " *asq-shell-live-test*"))
+          (popped nil))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-live" "hello" 'active nil))))
+            (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-live"))
+                      ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
+              (agent-shell-queue-buffer-open-shell)
+              (should (eq popped buf))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/buffer-open-shell-errors-when-dead-no-create ()
+  "Signals user-error when buffer is dead and executor has no create function."
+  (agent-shell-queue-test/isolate
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("dead-buf" ("q-dead" "hello" active nil))))
+    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-dead"))
+              ((symbol-function 'get-buffer) (lambda (_) nil)))
+      (should-error (agent-shell-queue-buffer-open-shell) :type 'user-error))))
+
+(ert-deftest agent-shell-queue/buffer-open-shell-creates-when-dead-and-user-confirms ()
+  "Calls create-fn and pops to the result when buffer is dead and user answers yes."
+  (agent-shell-queue-test/isolate
+    (let* ((agent-shell-queue--executors nil)
+           (exec-fn (lambda (_item _args) nil))
+           (new-buf (get-buffer-create " *asq-shell-created*"))
+           (popped nil))
+      (unwind-protect
+          (progn
+            (agent-shell-queue-register-executor "test-exec" exec-fn nil (lambda () new-buf))
+            (let ((item (agent-shell-queue-test/make-item "q-create" "hello" 'active nil)))
+              (setf (agent-shell-queue-item-executor item) exec-fn)
+              (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                    (list (list "dead-buf" item))))
+            (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-create"))
+                      ((symbol-function 'get-buffer) (lambda (_) nil))
+                      ((symbol-function 'y-or-n-p) (lambda (_) t))
+                      ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
+              (agent-shell-queue-buffer-open-shell)
+              (should (eq popped new-buf))))
+        (kill-buffer new-buf)))))
+
+(ert-deftest agent-shell-queue/buffer-open-shell-noop-when-dead-and-user-declines ()
+  "Does nothing when buffer is dead, create-fn exists, but user answers no."
+  (agent-shell-queue-test/isolate
+    (let* ((agent-shell-queue--executors nil)
+           (exec-fn (lambda (_item _args) nil))
+           (created nil)
+           (popped nil))
+      (agent-shell-queue-register-executor
+       "test-exec" exec-fn nil
+       (lambda () (setq created t) (get-buffer-create " *asq-shell-declined*")))
+      (let ((item (agent-shell-queue-test/make-item "q-decline" "hello" 'active nil)))
+        (setf (agent-shell-queue-item-executor item) exec-fn)
+        (setf (agent-shell-queue-store-items agent-shell-queue--store)
+              (list (list "dead-buf" item))))
+      (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-decline"))
+                ((symbol-function 'get-buffer) (lambda (_) nil))
+                ((symbol-function 'y-or-n-p) (lambda (_) nil))
+                ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
+        (agent-shell-queue-buffer-open-shell)
+        (should-not created)
+        (should-not popped)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue-defer — unknown id is noop
 
 (ert-deftest agent-shell-queue/defer-unknown-id-is-noop ()
@@ -3130,5 +3221,201 @@ Applies to all capture paths, not just insert-after."
   (let ((m (agent-shell-queue--item-view-build-map)))
     (dolist (entry agent-shell-queue--item-view-action-table)
       (should (lookup-key m (kbd (plist-get entry :key)))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue--has-running-item-p
+
+(ert-deftest agent-shell-queue/has-running-item-p-true ()
+  "Returns non-nil when a running item exists for the buffer."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'running nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (should (agent-shell-queue--has-running-item-p "buf1")))))
+
+(ert-deftest agent-shell-queue/has-running-item-p-false ()
+  "Returns nil when no running items exist for the buffer."
+  (agent-shell-queue-test/isolate
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf1" ("q-1" "hello" active nil))))
+    (should-not (agent-shell-queue--has-running-item-p "buf1"))))
+
+(ert-deftest agent-shell-queue/has-running-item-p-wrong-buf ()
+  "Returns nil when the running item belongs to a different buffer."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'running nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (should-not (agent-shell-queue--has-running-item-p "buf2")))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue--copy-item-to-end
+
+(ert-deftest agent-shell-queue/copy-item-to-end-appends ()
+  "A copy is appended after the existing items with a fresh ID."
+  (agent-shell-queue-test/isolate
+    (let* ((orig (agent-shell-queue-test/make-item "q-1" "hello" 'running nil))
+           (extra (agent-shell-queue-test/make-item "q-2" "world" 'active nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" orig extra)))
+      (let ((new-id (agent-shell-queue--copy-item-to-end "buf1" orig)))
+        (let* ((items (cdr (assoc "buf1" (agent-shell-queue-store-items agent-shell-queue--store))))
+               (copy (car (last items))))
+          (should (= 3 (length items)))
+          (should (equal new-id (agent-shell-queue-item-id copy)))
+          (should (equal "hello" (agent-shell-queue-item-args copy)))
+          (should (eq 'active (agent-shell-queue-item-status copy)))
+          (should-not (equal "q-1" new-id)))))))
+
+(ert-deftest agent-shell-queue/copy-item-to-end-creates-bucket ()
+  "Creates a new bucket when the buffer has no existing queue."
+  (agent-shell-queue-test/isolate
+    (let ((orig (agent-shell-queue-test/make-item "q-1" "hi" 'running nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store) nil)
+      (agent-shell-queue--copy-item-to-end "fresh-buf" orig)
+      (let ((bucket (assoc "fresh-buf" (agent-shell-queue-store-items agent-shell-queue--store))))
+        (should bucket)
+        (should (= 1 (length (cdr bucket))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue--send-now — smart dispatch
+
+(ert-deftest agent-shell-queue/send-now-dispatches-when-no-running ()
+  "Calls send-item when no running task exists for the buffer."
+  (agent-shell-queue-test/isolate
+    (let ((sent nil)
+          (buf (get-buffer-create " *asq-sn-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "hello" 'active nil))))
+            (cl-letf (((symbol-function 'agent-shell-queue-send-item)
+                       (lambda (id) (setq sent id)))
+                      ((symbol-function 'buffer-live-p) (lambda (_) t)))
+              (agent-shell-queue--send-now "q-1")
+              (should (equal sent "q-1"))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/send-now-running-item-enqueues-copy ()
+  "Appends a copy when the item itself is running and queue is busy."
+  (agent-shell-queue-test/isolate
+    (let* ((item (agent-shell-queue-test/make-item "q-1" "hello" 'running nil))
+           (copied nil))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (cl-letf (((symbol-function 'agent-shell-queue--copy-item-to-end)
+                 (lambda (buf-name _item) (setq copied buf-name) "new-id")))
+        (agent-shell-queue--send-now "q-1")
+        (should (equal copied "buf1"))))))
+
+(ert-deftest agent-shell-queue/send-now-active-item-errors-when-running ()
+  "Signals user-error when trying to dispatch an active item while queue runs."
+  (agent-shell-queue-test/isolate
+    (let* ((running (agent-shell-queue-test/make-item "q-run" "go" 'running nil))
+           (active (agent-shell-queue-test/make-item "q-act" "wait" 'active nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" running active)))
+      (should-error (agent-shell-queue--send-now "q-act") :type 'user-error))))
+
+(ert-deftest agent-shell-queue/send-now-deferred-activates-when-running ()
+  "Marks deferred item active (without dispatching) when queue is busy."
+  (agent-shell-queue-test/isolate
+    (let* ((running (agent-shell-queue-test/make-item "q-run" "go" 'running nil))
+           (deferred (agent-shell-queue-test/make-item "q-def" "later" 'deferred nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" running deferred)))
+      (cl-letf (((symbol-function 'agent-shell-queue-send-item) #'ignore))
+        (agent-shell-queue--send-now "q-def")
+        (should (eq 'active (agent-shell-queue-item-status deferred)))))))
+
+(ert-deftest agent-shell-queue/send-now-done-item-reenqueues-when-running ()
+  "Calls reenqueue when a done item is dispatched while queue is busy."
+  (agent-shell-queue-test/isolate
+    (let* ((running (agent-shell-queue-test/make-item "q-run" "go" 'running nil))
+           (done (agent-shell-queue-test/make-item "q-done" "finished" 'done nil))
+           (reenqueued nil))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" running done)))
+      (cl-letf (((symbol-function 'agent-shell-queue-reenqueue)
+                 (lambda (id) (setq reenqueued id))))
+        (agent-shell-queue--send-now "q-done")
+        (should (equal reenqueued "q-done"))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue-untrack-running
+
+(ert-deftest agent-shell-queue/untrack-running-removes-item ()
+  "Removes the running item from the store without aborting."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'running nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue-untrack-running "q-1")
+      (should-not (agent-shell-queue--item-by-id "q-1")))))
+
+(ert-deftest agent-shell-queue/untrack-running-errors-if-not-running ()
+  "Signals user-error when item is not running."
+  (agent-shell-queue-test/isolate
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf1" ("q-1" "hello" active nil))))
+    (should-error (agent-shell-queue-untrack-running "q-1") :type 'user-error)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue-enqueue-running-copy
+
+(ert-deftest agent-shell-queue/enqueue-running-copy-appends ()
+  "Appends an active copy of the running item to the queue."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'running nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue-enqueue-running-copy "q-1")
+      (let ((items (cdr (assoc "buf1" (agent-shell-queue-store-items agent-shell-queue--store)))))
+        (should (= 2 (length items)))
+        (should (eq 'running (agent-shell-queue-item-status (nth 0 items))))
+        (should (eq 'active (agent-shell-queue-item-status (nth 1 items))))
+        (should (equal "hello" (agent-shell-queue-item-args (nth 1 items))))
+        (should-not (equal "q-1" (agent-shell-queue-item-id (nth 1 items))))))))
+
+(ert-deftest agent-shell-queue/enqueue-running-copy-errors-if-not-running ()
+  "Signals user-error when item is not running."
+  (agent-shell-queue-test/isolate
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf1" ("q-1" "hello" active nil))))
+    (should-error (agent-shell-queue-enqueue-running-copy "q-1") :type 'user-error)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue--on-queue-buffer-kill
+
+(ert-deftest agent-shell-queue/on-queue-buffer-kill-aborts-running ()
+  "Running items are marked aborted when the queue buffer is killed."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'running nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue--on-queue-buffer-kill)
+      (should (eq 'aborted (agent-shell-queue-item-status item)))
+      (should (eq 'canceled (agent-shell-queue-item-outcome item))))))
+
+(ert-deftest agent-shell-queue/on-queue-buffer-kill-defers-active ()
+  "Active items are deferred when the queue buffer is killed."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'active nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue--on-queue-buffer-kill)
+      (should (eq 'deferred (agent-shell-queue-item-status item))))))
+
+(ert-deftest agent-shell-queue/on-queue-buffer-kill-leaves-done-intact ()
+  "Done and deferred items are untouched when the queue buffer is killed."
+  (agent-shell-queue-test/isolate
+    (let ((done (agent-shell-queue-test/make-item "q-1" "d" 'done nil))
+          (deferred (agent-shell-queue-test/make-item "q-2" "p" 'deferred nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" done deferred)))
+      (agent-shell-queue--on-queue-buffer-kill)
+      (should (eq 'done (agent-shell-queue-item-status done)))
+      (should (eq 'deferred (agent-shell-queue-item-status deferred))))))
 
 ;;; test-agent-shell-queue.el ends here
