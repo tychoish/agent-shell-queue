@@ -370,8 +370,7 @@ which populates item.response from the shell buffer content."
       (kill-buffer shell-buf))))
 
 (ert-deftest agent-shell-queue/mark-running-done-captures-mixed-response ()
-  "Integration: only the last visible segment is captured; invisible blocks and
-earlier segments are discarded."
+  "Integration: all visible segments are captured; only invisible blocks are discarded."
   (let* ((item (agent-shell-queue-test/make-item "q01" "prompt" 'running))
          (buf (generate-new-buffer "*test-shell-mixed*"))
          buf-name start-pos)
@@ -409,7 +408,7 @@ earlier segments are discarded."
          (let ((response (agent-shell-queue-item-response item)))
            (should (stringp response))
            (should (string-match-p "Done" response))
-           (should-not (string-match-p "The result is correct" response))
+           (should (string-match-p "The result is correct" response))
            (should-not (string-match-p "tool: bash" response))))
       (kill-buffer buf))))
 
@@ -443,8 +442,7 @@ earlier segments are discarded."
       (kill-buffer shell-buf))))
 
 (ert-deftest agent-shell-queue/capture-response-realistic-buffer-skips-collapsed ()
-  "Regression: only the last visible segment is captured; earlier segments and
-collapsed blocks are discarded."
+  "Regression: all visible segments are captured; only invisible (collapsed) blocks are discarded."
   (let* ((item (agent-shell-queue-test/make-item "q-real2" "prompt" 'running))
          (buf+start (agent-shell-queue-test/make-shell-buffer-realistic
                      (list "Visible text." nil nil)
@@ -462,7 +460,7 @@ collapsed blocks are discarded."
          (let ((resp (agent-shell-queue-item-response item)))
            (should (stringp resp))
            (should (string-match-p "Done" resp))
-           (should-not (string-match-p "Visible text" resp))
+           (should (string-match-p "Visible text" resp))
            (should-not (string-match-p "tool call" resp))))
       (kill-buffer shell-buf))))
 
@@ -602,9 +600,15 @@ collapsed blocks are discarded."
       (should (equal "scheduled" (agent-shell-queue--status-string item))))))
 
 (ert-deftest agent-shell-queue/status-string-deferred ()
+  "Legacy deferred items display as blocked.skip (migration compat)."
   (agent-shell-queue-test/isolate
     (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'deferred nil)))
-      (should (equal "held" (agent-shell-queue--status-string item))))))
+      (should (equal "blocked.skip" (agent-shell-queue--status-string item))))))
+
+(ert-deftest agent-shell-queue/status-string-blocked-skip ()
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'blocked.skip nil)))
+      (should (equal "blocked.skip" (agent-shell-queue--status-string item))))))
 
 (ert-deftest agent-shell-queue/status-string-active-background ()
   (agent-shell-queue-test/isolate
@@ -612,9 +616,10 @@ collapsed blocks are discarded."
       (should (equal "scheduled.bg" (agent-shell-queue--status-string item))))))
 
 (ert-deftest agent-shell-queue/status-string-deferred-background ()
+  "Legacy deferred background items display as blocked.skip.bg."
   (agent-shell-queue-test/isolate
     (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'deferred t)))
-      (should (equal "held.bg" (agent-shell-queue--status-string item))))))
+      (should (equal "blocked.skip.bg" (agent-shell-queue--status-string item))))))
 
 (ert-deftest agent-shell-queue/status-string-running ()
   (agent-shell-queue-test/isolate
@@ -639,19 +644,19 @@ collapsed blocks are discarded."
       (should (equal "editing" (agent-shell-queue--status-string item))))))
 
 (ert-deftest agent-shell-queue/status-string-session-paused ()
-  "Active item targeting a session-paused buffer shows 'paused<shell>'."
+  "Active item targeting a session-paused buffer shows 'blocked.runner'."
   (agent-shell-queue-test/isolate
     (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'active nil)))
       (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) '("paused-buf"))
-      (should (equal "paused<shell>"
+      (should (equal "blocked.runner"
                      (agent-shell-queue--status-string item "paused-buf"))))))
 
 (ert-deftest agent-shell-queue/status-string-session-paused-not-deferred ()
-  "Deferred items are not shown as paused even if session is paused."
+  "Deferred/blocked items are not shown as blocked.runner even if session is paused."
   (agent-shell-queue-test/isolate
-    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'deferred nil)))
+    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'blocked.skip nil)))
       (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) '("paused-buf"))
-      (should (equal "held"
+      (should (equal "blocked.skip"
                      (agent-shell-queue--status-string item "paused-buf"))))))
 
 (ert-deftest agent-shell-queue/status-string-editing-takes-priority-over-paused ()
@@ -910,12 +915,12 @@ collapsed blocks are discarded."
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
           (agent-shell-queue-test/populate '("buf1" ("q-1" "hello" active nil))))
     (agent-shell-queue-defer "q-1")
-    (should (eq 'deferred (agent-shell-queue-item-status (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
+    (should (eq 'blocked.skip (agent-shell-queue-item-status (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
 
 (ert-deftest agent-shell-queue/defer-deferred-to-active ()
   (agent-shell-queue-test/isolate-no-sub
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
-          (agent-shell-queue-test/populate '("buf1" ("q-1" "hello" deferred nil))))
+          (agent-shell-queue-test/populate '("buf1" ("q-1" "hello" blocked.skip nil))))
     (agent-shell-queue-defer "q-1")
     (should (eq 'active (agent-shell-queue-item-status (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
 
@@ -1058,6 +1063,115 @@ collapsed blocks are discarded."
     (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) '("buf1" "buf2" "buf3"))
     (agent-shell-queue-unpause-all-sessions)
     (should-not (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
+
+(ert-deftest agent-shell-queue/pause-marks-active-as-blocked-global ()
+  "pause converts active items to blocked.global."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'active nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue-pause)
+      (should (eq 'blocked.global (agent-shell-queue-item-status item))))))
+
+(ert-deftest agent-shell-queue/resume-restores-blocked-global-to-active ()
+  "resume converts blocked.global items back to active."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'blocked.global nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer) #'ignore))
+        (agent-shell-queue-resume))
+      (should (eq 'active (agent-shell-queue-item-status item))))))
+
+(ert-deftest agent-shell-queue/resume-triggers-dispatch-for-live-buffers ()
+  "resume calls --send-next-for-buffer for each live buffer with items."
+  (agent-shell-queue-test/isolate
+    (let ((dispatched nil)
+          (buf (get-buffer-create " *asq-resume-dispatch-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.global nil))))
+            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                       (lambda (b) (push (buffer-name b) dispatched))))
+              (agent-shell-queue-resume))
+            (should (member (buffer-name buf) dispatched)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/resume-skips-dispatch-for-dead-buffers ()
+  "resume does not crash or dispatch for buffer names with no live buffer."
+  (agent-shell-queue-test/isolate
+    (let ((dispatched nil))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list " *asq-dead-buf*"
+                        (agent-shell-queue-test/make-item "q-1" "p" 'blocked.global nil))))
+      (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                 (lambda (b) (push (buffer-name b) dispatched))))
+        (agent-shell-queue-resume))
+      (should-not dispatched))))
+
+(ert-deftest agent-shell-queue/resume-skips-dispatch-for-session-paused-buffers ()
+  "resume does not dispatch for buffers still in the session-paused list."
+  (agent-shell-queue-test/isolate
+    (let ((dispatched nil)
+          (buf (get-buffer-create " *asq-resume-skip-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.global nil))))
+            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+                  (list (buffer-name buf)))
+            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                       (lambda (b) (push (buffer-name b) dispatched))))
+              (agent-shell-queue-resume))
+            (should-not dispatched))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/unpause-all-sessions-restores-blocked-runner-items ()
+  "unpause-all-sessions converts blocked.runner items back to active."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'blocked.runner nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue-unpause-all-sessions)
+      (should (eq 'active (agent-shell-queue-item-status item))))))
+
+(ert-deftest agent-shell-queue/unpause-all-sessions-triggers-dispatch ()
+  "unpause-all-sessions calls --send-next-for-buffer for each live buffer."
+  (agent-shell-queue-test/isolate
+    (let ((dispatched nil)
+          (buf (get-buffer-create " *asq-unpause-all-dispatch-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
+            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+                  (list (buffer-name buf)))
+            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                       (lambda (b) (push (buffer-name b) dispatched))))
+              (agent-shell-queue-unpause-all-sessions))
+            (should (member (buffer-name buf) dispatched)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/unpause-all-sessions-skips-dispatch-when-globally-paused ()
+  "unpause-all-sessions does not dispatch when the global queue is paused."
+  (agent-shell-queue-test/isolate
+    (let ((dispatched nil)
+          (buf (get-buffer-create " *asq-unpause-global-paused-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
+            (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
+            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                       (lambda (b) (push (buffer-name b) dispatched))))
+              (agent-shell-queue-unpause-all-sessions))
+            (should-not dispatched))
+        (kill-buffer buf)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Dispatch: editing-ids and buffer-paused prevent sends
@@ -1531,7 +1645,7 @@ is void: https://... when the command was invoked on an aborted item."
         (progn
           (setf (agent-shell-queue-store-items agent-shell-queue--store)
                 (agent-shell-queue-test/populate
-                 '("mybuf" ("q-5" "persisted" deferred t))))
+                 '("mybuf" ("q-5" "persisted" blocked.skip t))))
           (agent-shell-queue--save)
           (setf (agent-shell-queue-store-items agent-shell-queue--store) nil)
           (agent-shell-queue--load)
@@ -1541,7 +1655,7 @@ is void: https://... when the command was invoked on an aborted item."
             (should (equal "mybuf" (car pair)))
             (should (equal "q-5" (agent-shell-queue-item-id item)))
             (should (equal "persisted" (agent-shell-queue-item-args item)))
-            (should (eq 'deferred (agent-shell-queue-item-status item)))
+            (should (eq 'blocked.skip (agent-shell-queue-item-status item)))
             (should (agent-shell-queue-item-background item)))
           ;; save sets flush time
           (should (numberp agent-shell-queue--last-flush-time)))
@@ -2210,13 +2324,13 @@ is void: https://... when the command was invoked on an aborted item."
 ;;; agent-shell-queue--fork-collect-items
 
 (ert-deftest agent-shell-queue/fork-collect-items-nil-from-id ()
-  "With nil from-id, collects all active/deferred/draft items."
+  "With nil from-id, collects all active/blocked/draft items but not done."
   (agent-shell-queue-test/isolate
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
           (agent-shell-queue-test/populate
            '("*s*"
             ("q1" "p1" active nil)
-            ("q2" "p2" deferred nil)
+            ("q2" "p2" blocked.skip nil)
             ("q3" "p3" done nil)
             ("q4" "p4" draft nil))))
     (let ((collected (agent-shell-queue--fork-collect-items "*s*" nil)))
@@ -3178,18 +3292,18 @@ Applies to all capture paths, not just insert-after."
                      (agent-shell-queue--status-string item "no-such-buffer-xyz"))))))
 
 (ert-deftest agent-shell-queue/status-string-detached-deferred-still-held ()
-  "A deferred item in a dead bucket shows as 'held', not 'detached'."
+  "A blocked.skip item in a dead bucket shows as 'blocked.skip', not 'detached'."
   (agent-shell-queue-test/isolate
-    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'deferred nil)))
-      (should (equal "held"
+    (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'blocked.skip nil)))
+      (should (equal "blocked.skip"
                      (agent-shell-queue--status-string item "no-such-buffer-xyz"))))))
 
 (ert-deftest agent-shell-queue/status-string-detached-blocked-takes-priority ()
-  "When a bucket is both session-paused and dead, blocked wins (shows paused<shell>)."
+  "When a bucket is both session-paused and dead, blocked.runner wins."
   (agent-shell-queue-test/isolate
     (let ((item (agent-shell-queue-test/make-item "q-1" "p" 'active nil)))
       (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) '("dead-paused-buf"))
-      (should (equal "paused<shell>"
+      (should (equal "blocked.runner"
                      (agent-shell-queue--status-string item "dead-paused-buf"))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3319,15 +3433,15 @@ Applies to all capture paths, not just insert-after."
       (should-error (agent-shell-queue--send-now "q-act") :type 'user-error))))
 
 (ert-deftest agent-shell-queue/send-now-deferred-activates-when-running ()
-  "Marks deferred item active (without dispatching) when queue is busy."
+  "Unblocks a blocked.skip item (sets active) when queue is busy."
   (agent-shell-queue-test/isolate
     (let* ((running (agent-shell-queue-test/make-item "q-run" "go" 'running nil))
-           (deferred (agent-shell-queue-test/make-item "q-def" "later" 'deferred nil)))
+           (blocked (agent-shell-queue-test/make-item "q-def" "later" 'blocked.skip nil)))
       (setf (agent-shell-queue-store-items agent-shell-queue--store)
-            (list (list "buf1" running deferred)))
+            (list (list "buf1" running blocked)))
       (cl-letf (((symbol-function 'agent-shell-queue-send-item) #'ignore))
         (agent-shell-queue--send-now "q-def")
-        (should (eq 'active (agent-shell-queue-item-status deferred)))))))
+        (should (eq 'active (agent-shell-queue-item-status blocked)))))))
 
 (ert-deftest agent-shell-queue/send-now-done-item-reenqueues-when-running ()
   "Calls reenqueue when a done item is dispatched while queue is busy."
@@ -3399,23 +3513,138 @@ Applies to all capture paths, not just insert-after."
       (should (eq 'canceled (agent-shell-queue-item-outcome item))))))
 
 (ert-deftest agent-shell-queue/on-queue-buffer-kill-defers-active ()
-  "Active items are deferred when the queue buffer is killed."
+  "Active items become blocked.skip when the queue buffer is killed."
   (agent-shell-queue-test/isolate
     (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'active nil)))
       (setf (agent-shell-queue-store-items agent-shell-queue--store)
             (list (list "buf1" item)))
       (agent-shell-queue--on-queue-buffer-kill)
-      (should (eq 'deferred (agent-shell-queue-item-status item))))))
+      (should (eq 'blocked.skip (agent-shell-queue-item-status item))))))
 
 (ert-deftest agent-shell-queue/on-queue-buffer-kill-leaves-done-intact ()
-  "Done and deferred items are untouched when the queue buffer is killed."
+  "Done and blocked items are untouched when the queue buffer is killed."
   (agent-shell-queue-test/isolate
     (let ((done (agent-shell-queue-test/make-item "q-1" "d" 'done nil))
-          (deferred (agent-shell-queue-test/make-item "q-2" "p" 'deferred nil)))
+          (skipped (agent-shell-queue-test/make-item "q-2" "p" 'blocked.skip nil)))
       (setf (agent-shell-queue-store-items agent-shell-queue--store)
-            (list (list "buf1" done deferred)))
+            (list (list "buf1" done skipped)))
       (agent-shell-queue--on-queue-buffer-kill)
       (should (eq 'done (agent-shell-queue-item-status done)))
-      (should (eq 'deferred (agent-shell-queue-item-status deferred))))))
+      (should (eq 'blocked.skip (agent-shell-queue-item-status skipped))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue-recover-stuck-shell
+
+(ert-deftest agent-shell-queue/recover-marks-running-item-aborted ()
+  "recover-stuck-shell marks any running item as aborted with outcome interrupted."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "stuck" 'running nil))
+          (buf (get-buffer-create " *asq-recover-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf) item)))
+            (cl-letf (((symbol-function 'agent-shell-interrupt) #'ignore)
+                      ((symbol-function 'agent-shell-queue--poll-for-idle-and-resume) #'ignore))
+              (agent-shell-queue-recover-stuck-shell buf))
+            (should (eq 'aborted (agent-shell-queue-item-status item)))
+            (should (eq 'interrupted (agent-shell-queue-item-outcome item)))
+            (should (agent-shell-queue-item-completed item)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/recover-leaves-non-running-items-unchanged ()
+  "recover-stuck-shell does not touch active or done items."
+  (agent-shell-queue-test/isolate
+    (let ((active (agent-shell-queue-test/make-item "q-1" "next" 'active nil))
+          (done (agent-shell-queue-test/make-item "q-2" "old" 'done nil))
+          (buf (get-buffer-create " *asq-recover-unchanged-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf) active done)))
+            (cl-letf (((symbol-function 'agent-shell-interrupt) #'ignore)
+                      ((symbol-function 'agent-shell-queue--poll-for-idle-and-resume) #'ignore))
+              (agent-shell-queue-recover-stuck-shell buf))
+            (should (eq 'active (agent-shell-queue-item-status active)))
+            (should (eq 'done (agent-shell-queue-item-status done))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/recover-calls-agent-shell-interrupt ()
+  "recover-stuck-shell calls agent-shell-interrupt in the target buffer."
+  (agent-shell-queue-test/isolate
+    (let ((interrupted-in nil)
+          (buf (get-buffer-create " *asq-recover-interrupt-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'running nil))))
+            (cl-letf (((symbol-function 'agent-shell-interrupt)
+                       (lambda () (setq interrupted-in (current-buffer))))
+                      ((symbol-function 'agent-shell-queue--poll-for-idle-and-resume) #'ignore))
+              (agent-shell-queue-recover-stuck-shell buf))
+            (should (eq buf interrupted-in)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/poll-resumes-when-shell-idle ()
+  "poll-for-idle-and-resume calls session-resume immediately when shell is not busy."
+  (agent-shell-queue-test/isolate
+    (let ((resumed nil)
+          (buf (get-buffer-create " *asq-poll-idle-test*")))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
+                      ((symbol-function 'agent-shell-queue-session-resume)
+                       (lambda (b) (setq resumed b))))
+              (agent-shell-queue--poll-for-idle-and-resume buf 0))
+            (should (eq buf resumed)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/poll-retries-when-shell-busy ()
+  "poll-for-idle-and-resume schedules a retry timer when shell is still busy."
+  (agent-shell-queue-test/isolate
+    (let ((timer-scheduled nil)
+          (buf (get-buffer-create " *asq-poll-retry-test*")))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_delay _repeat fn &rest args)
+                         (setq timer-scheduled (cons fn args)))))
+              (agent-shell-queue--poll-for-idle-and-resume buf 0))
+            (should timer-scheduled)
+            (should (eq (car timer-scheduled) #'agent-shell-queue--poll-for-idle-and-resume))
+            (should (eq (cadr timer-scheduled) buf))
+            (should (= (caddr timer-scheduled) 1)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/poll-gives-up-after-max-attempts ()
+  "poll-for-idle-and-resume stops retrying after attempt 20."
+  (agent-shell-queue-test/isolate
+    (let ((resumed nil)
+          (timer-scheduled nil)
+          (buf (get-buffer-create " *asq-poll-timeout-test*")))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                      ((symbol-function 'agent-shell-queue-session-resume)
+                       (lambda (_b) (setq resumed t)))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (&rest _) (setq timer-scheduled t))))
+              (agent-shell-queue--poll-for-idle-and-resume buf 21))
+            (should-not resumed)
+            (should-not timer-scheduled))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/poll-abandons-when-buffer-dead ()
+  "poll-for-idle-and-resume does not crash or resume when buffer is killed."
+  (agent-shell-queue-test/isolate
+    (let ((resumed nil)
+          (buf (get-buffer-create " *asq-poll-dead-test*")))
+      (kill-buffer buf)
+      (cl-letf (((symbol-function 'agent-shell-queue-session-resume)
+                 (lambda (_b) (setq resumed t))))
+        (agent-shell-queue--poll-for-idle-and-resume buf 0))
+      (should-not resumed))))
 
 ;;; test-agent-shell-queue.el ends here

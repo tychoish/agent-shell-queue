@@ -351,6 +351,23 @@ are returned unchanged by `agent-shell-queue--migrate-item-if-stale'."
             (setcdr bucket (seq-map #'agent-shell-queue--migrate-item-if-stale (cdr bucket))))
           (agent-shell-queue-store-items agent-shell-queue--store)))
 
+(defun agent-shell-queue--migrate-deferred-statuses ()
+  "Convert any remaining `deferred' items to `blocked.skip' after load."
+  (seq-do (lambda (bucket)
+            (seq-do (lambda (item)
+                      (when (eq (agent-shell-queue-item-status item) 'deferred)
+                        (setf (agent-shell-queue-item-status item) 'blocked.skip)))
+                    (cdr bucket)))
+          (agent-shell-queue-store-items agent-shell-queue--store)))
+
+(defun agent-shell-queue--blocked-status-p (status)
+  "Return non-nil if STATUS is any blocked.* symbol."
+  (and status (string-prefix-p "blocked." (symbol-name status))))
+
+(defun agent-shell-queue--blocked-p (item)
+  "Return non-nil if ITEM has any blocked.* status."
+  (agent-shell-queue--blocked-status-p (agent-shell-queue-item-status item)))
+
 (cl-defstruct (agent-shell-queue-store
                (:constructor agent-shell-queue--make-store)
                (:copier nil))
@@ -385,6 +402,13 @@ before calling the format's serialize helper.")
   "Pause the global queue; no new items will be dispatched."
   (interactive)
   (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
+  (seq-do (lambda (bucket)
+            (seq-do (lambda (item)
+                      (when (eq (agent-shell-queue-item-status item) 'active)
+                        (setf (agent-shell-queue-item-status item) 'blocked.global)))
+                    (cdr bucket)))
+          (agent-shell-queue-store-items agent-shell-queue--store))
+  (agent-shell-queue--save)
   (message "agent-shell-queue: PAUSED — no new items will be dispatched")
   (agent-shell-queue--refresh-buffer))
 
@@ -392,15 +416,41 @@ before calling the format's serialize helper.")
   "Resume the global queue after being paused."
   (interactive)
   (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) nil)
+  (seq-do (lambda (bucket)
+            (seq-do (lambda (item)
+                      (when (eq (agent-shell-queue-item-status item) 'blocked.global)
+                        (setf (agent-shell-queue-item-status item) 'active)))
+                    (cdr bucket)))
+          (agent-shell-queue-store-items agent-shell-queue--store))
+  (agent-shell-queue--save)
   (message "agent-shell-queue: running")
-  (agent-shell-queue--refresh-buffer))
+  (agent-shell-queue--refresh-buffer)
+  (seq-do (lambda (bucket)
+            (when-let* ((buf (get-buffer (car bucket)))
+                        (_ (buffer-live-p buf))
+                        (_ (not (member (car bucket)
+                                        (agent-shell-queue-queue-session-paused
+                                         agent-shell-queue--queue)))))
+              (agent-shell-queue--send-next-for-buffer buf)))
+          (agent-shell-queue-store-items agent-shell-queue--store)))
 
 (defun agent-shell-queue-unpause-all-sessions ()
   "Clear the per-session pause list, resuming all individually paused sessions."
   (interactive)
   (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) nil)
+  (seq-do (lambda (item)
+            (when (eq (agent-shell-queue-item-status item) 'blocked.runner)
+              (setf (agent-shell-queue-item-status item) 'active)))
+          (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store)))
+  (agent-shell-queue--save)
   (message "agent-shell-queue: all session pauses cleared")
-  (agent-shell-queue--refresh-buffer))
+  (agent-shell-queue--refresh-buffer)
+  (unless (agent-shell-queue-queue-paused agent-shell-queue--queue)
+    (seq-do (lambda (bucket)
+              (when-let* ((buf (get-buffer (car bucket)))
+                          (_ (buffer-live-p buf)))
+                (agent-shell-queue--send-next-for-buffer buf)))
+            (agent-shell-queue-store-items agent-shell-queue--store))))
 
 (defun agent-shell-queue-session-pause (&optional buf)
   "Pause dispatch for BUF (default: current agent-shell session)."
@@ -408,6 +458,11 @@ before calling the format's serialize helper.")
    (list (agent-shell-queue--pick-shell-with-state "Pause dispatch for: ")))
   (when-let* ((name (buffer-name buf)))
     (cl-pushnew name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
+    (seq-do (lambda (item)
+              (when (eq (agent-shell-queue-item-status item) 'active)
+                (setf (agent-shell-queue-item-status item) 'blocked.runner)))
+            (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store))))
+    (agent-shell-queue--save)
     (message "agent-shell-queue: %s PAUSED" name)
     (agent-shell-queue--refresh-buffer)))
 
@@ -423,23 +478,69 @@ Any running `pause' or `compact' item for BUF is marked done automatically."
     (setq agent-shell-queue--compact-running
           (seq-remove (lambda (it) (equal (car it) name)) agent-shell-queue--compact-running))
     (seq-do (lambda (it)
-              (when (and (eq (agent-shell-queue-item-status it) 'running)
-                         (memq (agent-shell-queue-item-kind it) '(pause compact)))
+              (cond
+               ((and (eq (agent-shell-queue-item-status it) 'running)
+                     (memq (agent-shell-queue-item-kind it) '(pause compact)))
                 (setf (agent-shell-queue-item-status it) 'done)
                 (setf (agent-shell-queue-item-completed it) (float-time))
-                (agent-shell-queue--append-done-log name it)))
+                (agent-shell-queue--append-done-log name it))
+               ((eq (agent-shell-queue-item-status it) 'blocked.runner)
+                (setf (agent-shell-queue-item-status it) 'active))))
             (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store))))
     (agent-shell-queue--save)
     (message "agent-shell-queue: %s resumed" name)
     (agent-shell-queue--refresh-buffer)
     (agent-shell-queue--send-next-for-buffer buf)))
 
+(defun agent-shell-queue--poll-for-idle-and-resume (buf attempt)
+  "Poll BUF until `shell-maker-busy' is nil, then call `agent-shell-queue-session-resume'.
+Retries every 0.5 seconds up to 20 times (~10 seconds total).
+Called by `agent-shell-queue-recover-stuck-shell'."
+  (cond
+   ((not (buffer-live-p buf))
+    (message "agent-shell-queue: recovery abandoned — buffer was killed"))
+   ((> attempt 20)
+    (message "agent-shell-queue: %s still busy after 10s — call `agent-shell-queue-session-resume' manually"
+             (buffer-name buf)))
+   ((with-current-buffer buf (not (shell-maker-busy)))
+    (agent-shell-queue-session-resume buf))
+   (t
+    (run-with-timer 0.5 nil #'agent-shell-queue--poll-for-idle-and-resume buf (1+ attempt)))))
+
+(defun agent-shell-queue-recover-stuck-shell (&optional buf)
+  "Interrupt a stuck shell and auto-resume queue dispatch when it becomes idle.
+Marks any running item as aborted, sends an interrupt to the shell, then
+polls until the shell is no longer busy before resuming dispatch.
+Use this when the shell is frozen with no prompt appearing after the last turn."
+  (interactive
+   (list (agent-shell-queue--pick-shell-with-state "Recover stuck shell: ")))
+  (when-let* ((buf-name (buffer-name buf))
+              (_ (buffer-live-p buf)))
+    (seq-do (lambda (item)
+              (when (eq (agent-shell-queue-item-status item) 'running)
+                (setf (agent-shell-queue-item-status item) 'aborted)
+                (setf (agent-shell-queue-item-completed item) (float-time))
+                (setf (agent-shell-queue-item-outcome item) 'interrupted)))
+            (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+    (with-current-buffer buf
+      (agent-shell-interrupt))
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)
+    (message "agent-shell-queue: recovering %s — waiting for shell to become idle…" buf-name)
+    (agent-shell-queue--poll-for-idle-and-resume buf 0)))
+
 (defun agent-shell-queue--on-interrupt (&optional _force)
   "Pause the per-buffer queue when `agent-shell-interrupt' is called.
 Installed as :before advice on `agent-shell-interrupt'."
-  (when (and (derived-mode-p 'agent-shell-mode)
-             (assoc (buffer-name) (agent-shell-queue-store-items agent-shell-queue--store)))
-    (cl-pushnew (buffer-name) (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
+  (when-let* ((_ (derived-mode-p 'agent-shell-mode))
+              (buf-name (buffer-name))
+              (_ (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+    (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
+    (seq-do (lambda (item)
+              (when (eq (agent-shell-queue-item-status item) 'active)
+                (setf (agent-shell-queue-item-status item) 'blocked.runner)))
+            (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+    (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)))
 
 (advice-add 'agent-shell-interrupt :before #'agent-shell-queue--on-interrupt)
@@ -979,7 +1080,8 @@ session cannot be resumed and must be re-dispatched."
                           (setf (agent-shell-queue-item-status item) 'active)
                           (setf (agent-shell-queue-item-dispatched item) nil)))
                       (cdr pair)))
-            (agent-shell-queue-store-items agent-shell-queue--store))))
+            (agent-shell-queue-store-items agent-shell-queue--store))
+    (agent-shell-queue--migrate-deferred-statuses)))
 
 (defun agent-shell-queue--ensure-loaded ()
   "Load queue state from disk on first call."
@@ -1110,13 +1212,28 @@ Returns t to proceed, nil to skip.  When user answers \\='a\\=', sets
               (_ nil))))
 
 (defun agent-shell-queue-defer (id)
-  "Toggle status of item ID between `active' and `deferred'.  Save."
+  "Toggle status of item ID between `active' and `blocked.skip'.  Save."
   (when-let* ((pair (agent-shell-queue--item-by-id id))
               (item (cdr pair)))
     (setf (agent-shell-queue-item-status item)
           (if (eq (agent-shell-queue-item-status item) 'active)
-	      'deferred
-	    'active))
+              'blocked.skip
+            'active))
+    (agent-shell-queue--save)))
+
+(defun agent-shell-queue-unblock (id)
+  "Unblock item ID: set blocked.task/blocked.skip to active.
+For blocked.task, cascades active to subsequent blocked.dep items."
+  (when-let* ((pair (agent-shell-queue--item-by-id id))
+              (buf-name (car pair))
+              (item (cdr pair)))
+    (pcase (agent-shell-queue-item-status item)
+      ('blocked.task
+       (setf (agent-shell-queue-item-status item) 'active)
+       (agent-shell-queue--cascade-unblock-dep buf-name id))
+      ((pred agent-shell-queue--blocked-status-p)
+       (setf (agent-shell-queue-item-status item) 'active))
+      (_ (user-error "Item %s is not blocked" id)))
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue-edit (id new-prompt)
@@ -1183,6 +1300,62 @@ Returns the new item's ID."
     (agent-shell-queue--refresh-buffer)
     new-id))
 
+(defun agent-shell-queue--insert-item-after (buf-name item ref-id)
+  "Insert ITEM into BUF-NAME queue immediately after the item with REF-ID.
+Returns the new item's ID."
+  (when-let* ((cell (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+    (let* ((items (cdr cell))
+           (idx (cl-position ref-id items :key #'agent-shell-queue-item-id :test #'equal))
+           (new-items (if idx
+                          (append (seq-take items (1+ idx))
+                                  (list item)
+                                  (seq-drop items (1+ idx)))
+                        (append items (list item)))))
+      (setcdr cell new-items)))
+  (agent-shell-queue-item-id item))
+
+(defun agent-shell-queue--cascade-blocked-dep (buf-name from-id)
+  "Set subsequent active items to blocked.dep after item FROM-ID in BUF-NAME.
+Stops at the next blocked.task item."
+  (when-let* ((cell (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store)))
+              (items (cdr cell))
+              (idx (cl-position from-id items :key #'agent-shell-queue-item-id :test #'equal)))
+    (seq-do (lambda (item)
+              (when (eq (agent-shell-queue-item-status item) 'active)
+                (setf (agent-shell-queue-item-status item) 'blocked.dep)))
+            (seq-take-while
+             (lambda (item) (not (eq (agent-shell-queue-item-status item) 'blocked.task)))
+             (seq-drop items (1+ idx))))))
+
+(defun agent-shell-queue--cascade-unblock-dep (buf-name from-id)
+  "Set subsequent blocked.dep items to active after item FROM-ID in BUF-NAME.
+Stops at the next blocked.task item."
+  (when-let* ((cell (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store)))
+              (items (cdr cell))
+              (idx (cl-position from-id items :key #'agent-shell-queue-item-id :test #'equal)))
+    (seq-do (lambda (item)
+              (when (eq (agent-shell-queue-item-status item) 'blocked.dep)
+                (setf (agent-shell-queue-item-status item) 'active)))
+            (seq-take-while
+             (lambda (item) (not (eq (agent-shell-queue-item-status item) 'blocked.task)))
+             (seq-drop items (1+ idx))))))
+
+(defun agent-shell-queue--insert-resume-task (buf-name aborted-item)
+  "Insert a blocked.task resume item after ABORTED-ITEM in BUF-NAME.
+The item asks to resume from the aborted task's arguments."
+  (let* ((prev-args (agent-shell-queue-item-args aborted-item))
+         (resume-args (format "resume work on previous task:\n\n```\n%s\n```" prev-args))
+         (new-item (agent-shell-queue-item--make
+                    :id (agent-shell-queue--gen-id)
+                    :args resume-args
+                    :status 'blocked.task
+                    :kind 'prompt
+                    :created (float-time)
+                    :executor (agent-shell-queue-item-executor aborted-item))))
+    (agent-shell-queue--insert-item-after
+     buf-name new-item (agent-shell-queue-item-id aborted-item))
+    (agent-shell-queue--cascade-blocked-dep buf-name (agent-shell-queue-item-id new-item))))
+
 (defun agent-shell-queue--assign-item (id new-buf-name)
   "Move the item with ID to the NEW-BUF-NAME bucket.
 NEW-BUF-NAME may be a live buffer name or `agent-shell-queue--unassigned-key'.
@@ -1237,12 +1410,12 @@ that the subsequent --save does not fail on other stale items."
   (agent-shell-queue--migrate-all-stale-items)
   (when-let* ((pair (agent-shell-queue--item-by-id id)))
     (condition-case nil
-        (setf (agent-shell-queue-item-status (cdr pair)) 'deferred)
+        (setf (agent-shell-queue-item-status (cdr pair)) 'blocked.skip)
       (error nil)))
 
   (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
 
-  (message "agent-shell-queue: item %s in %s appears stale after code reload; deferred and queue paused (%s)"
+  (message "agent-shell-queue: item %s in %s appears stale after code reload; blocked and queue paused (%s)"
            id buf-name err)
 
   (agent-shell-queue--save)
@@ -1415,13 +1588,15 @@ all collapsed blocks are folded: only the prose between them."
                                  (block-end (or (next-single-property-change
                                                  pos 'agent-shell-ui-state nil end-pos)
                                                 end-pos)))
-                            (if (and state (text-property-any pos block-end 'invisible t))
+                            (if (text-property-any pos block-end 'invisible t)
                                 ;; Hidden body (collapsed tool call, thinking, etc.) — skip.
                                 (setq pos block-end)
-                              ;; Visible content — accumulate.
+                              ;; Visible content — accumulate.  When a labeled block
+                              ;; (state non-nil, multi-line) is expanded, its first line
+                              ;; is the block title — discard it.  Single-line spans and
+                              ;; spans without state are included verbatim.
                               (let* ((full-seg (buffer-substring-no-properties pos block-end))
-                                     (seg (if state
-                                              ;; Discard the first line (the "title") of a block.
+                                     (seg (if (and state (string-match-p "\n" full-seg))
                                               (let ((lines (split-string full-seg "\n")))
                                                 (string-join (cdr lines) "\n"))
                                             full-seg))
@@ -1556,8 +1731,21 @@ Safe to call with a dead buffer — the subscription token is merely discarded."
   (agent-shell-queue--send-next-for-buffer buf))
 
 (defun agent-shell-queue--on-clean-up (buf-name _event)
-  "Handle a clean-up event for BUF-NAME."
-  (agent-shell-queue--mark-running-incomplete buf-name)
+  "Handle a clean-up event for BUF-NAME (shell buffer killed).
+Running item → aborted with auto-resume task; active items → blocked.runner."
+  (let ((items (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store)))))
+    (seq-do (lambda (item)
+              (pcase (agent-shell-queue-item-status item)
+                ('running
+                 (setf (agent-shell-queue-item-completed item) (float-time))
+                 (setf (agent-shell-queue-item-status item) 'aborted)
+                 (setf (agent-shell-queue-item-outcome item) 'interrupted)
+                 (agent-shell-queue--insert-resume-task buf-name item))
+                ('active
+                 (setf (agent-shell-queue-item-status item) 'blocked.runner))))
+            items))
+  (agent-shell-queue--save)
+  (agent-shell-queue--refresh-buffer)
   (setq agent-shell-queue--subscriptions
         (seq-remove (lambda (it) (equal (car it) buf-name))
                     agent-shell-queue--subscriptions)))
@@ -1787,11 +1975,13 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
                 (aborted "aborted")
                 (running (if bg "running.active.bg" "running.active"))
                 (editing "editing")
-                ((and (eq status 'active) blocked) "paused<shell>")
-                ((and (eq status 'active) (agent-shell-queue-queue-paused agent-shell-queue--queue)) "paused<all>")
+                ((agent-shell-queue--blocked-status-p status)
+                 (if bg (concat (symbol-name status) ".bg") (symbol-name status)))
+                ;; Legacy: old deferred items not yet migrated show as blocked.skip
+                ((eq status 'deferred) (if bg "blocked.skip.bg" "blocked.skip"))
+                ((and (eq status 'active) blocked) "blocked.runner")
+                ((and (eq status 'active) (agent-shell-queue-queue-paused agent-shell-queue--queue)) "blocked.global")
                 ((and detached (eq status 'active)) "detached")
-                ((and (eq status 'deferred) bg) "held.bg")
-                ((eq status 'deferred) "held")
                 ((eq status 'draft) "draft")
                 (bg "scheduled.bg")
                 (t "scheduled")))
@@ -1805,6 +1995,8 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
                              'agent-shell-queue-blocked-face
                            'italic))
                 ((eq status 'draft) 'agent-shell-queue-draft-face)
+                ((or (agent-shell-queue--blocked-status-p status)
+                     (eq status 'deferred)) 'agent-shell-queue-blocked-face)
                 (detached 'agent-shell-queue-detached-face)
                 (unassigned 'agent-shell-queue-unassigned-face)
                 ((eq kind 'compact) 'agent-shell-queue-compact-face)
@@ -1948,14 +2140,59 @@ Temporary buffers (no live session) are excluded from directory scopes."
   (agent-shell-queue-buffer-refresh)
   (force-mode-line-update))
 
+(defun agent-shell-queue--yaml-str (s)
+  "Format string S as a quoted YAML scalar, escaping special characters."
+  (concat "\""
+          (replace-regexp-in-string
+           "\""
+           "\\\\\""
+           (replace-regexp-in-string "\\\\" "\\\\\\\\" s))
+          "\""))
+
+(defun agent-shell-queue--yaml-block (s indent)
+  "Format string S as a YAML literal block scalar with INDENT prefix on content lines."
+  (concat "|\n"
+          (mapconcat (lambda (line)
+                       (if (string-empty-p line) "" (concat indent line)))
+                     (split-string s "\n") "\n")))
+
+(defun agent-shell-queue--item-to-yaml-export (item)
+  "Format ITEM as a YAML mapping string for export.
+Multi-line `prompt' and `response' fields are formatted as literal block scalars."
+  (with-temp-buffer
+    (let* ((id (agent-shell-queue-item-id item))
+           (args (agent-shell-queue-item-args item))
+           (response (agent-shell-queue-item-response item))
+           (status (symbol-name (agent-shell-queue-item-status item)))
+           (kind (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
+           (bg (agent-shell-queue-item-background item))
+           (created (agent-shell-queue-item-created item))
+           (dispatched (agent-shell-queue-item-dispatched item))
+           (completed (agent-shell-queue-item-completed item)))
+      (insert "  - id: " id "\n")
+      (insert "    prompt: ")
+      (if (string-match-p "\n" args)
+          (insert (agent-shell-queue--yaml-block args "      "))
+        (insert (agent-shell-queue--yaml-str args) "\n"))
+      (insert "    status: " status "\n")
+      (insert "    kind: " kind "\n")
+      (insert "    background: " (if bg "true" "false") "\n")
+      (when created (insert "    created: " (number-to-string created) "\n"))
+      (when dispatched (insert "    dispatched: " (number-to-string dispatched) "\n"))
+      (when completed (insert "    completed: " (number-to-string completed) "\n"))
+      (when response
+        (insert "    response: ")
+        (if (string-match-p "\n" response)
+            (insert (agent-shell-queue--yaml-block response "      "))
+          (insert (agent-shell-queue--yaml-str response) "\n"))))
+    (buffer-string)))
+
 ;;;###autoload
 (defun agent-shell-queue-export ()
   "Export items in the current scope to a read-only YAML buffer.
-Includes all statuses (active, deferred, running, done)."
+Multi-line prompt and response fields are formatted as YAML literal block scalars."
   (interactive)
   (agent-shell-queue--ensure-loaded)
-  (unless (fboundp 'yaml-encode)
-    (error "yaml-encode not available; install the `yaml' package"))
   (let* ((scope agent-shell-queue--display-scope)
          (out-name (format "*agent-shell-queue-export: %s*"
                            (agent-shell-queue--scope-label scope)))
@@ -1963,29 +2200,36 @@ Includes all statuses (active, deferred, running, done)."
                             (seq-map (lambda (it) (length (cdr it)))
                                      (agent-shell-queue-store-items agent-shell-queue--store)))
                      1))
-         (buckets (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
+         (visible (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
                     (seq-filter (lambda (it) (agent-shell-queue--scope-matches-p (car it) scope)))
                     (seq-map (lambda (it)
-                               (let* ((items (if multi-p
-                                                 (seq-remove
-                                                  (lambda (item)
-                                                    (and (eq (agent-shell-queue-item-status item) 'done)
-                                                         (memq (agent-shell-queue-item-kind item)
-                                                               '(pause compact context))))
-                                                  (cdr it))
-                                               (cdr it)))
-                                      (h (make-hash-table :test #'equal)))
-                                 (map-put! h "buffer" (car it))
-                                 (map-put! h "items" (vconcat (seq-map #'agent-shell-queue--item-to-yaml-edit items)))
-                                 h))))))
+                               (let ((items (if multi-p
+                                                (seq-remove
+                                                 (lambda (item)
+                                                   (and (eq (agent-shell-queue-item-status item) 'done)
+                                                        (memq (agent-shell-queue-item-kind item)
+                                                              '(pause compact context))))
+                                                 (cdr it))
+                                              (cdr it))))
+                                 (cons (car it) items))))
+                    (seq-remove (lambda (pair) (null (cdr pair))))))
+         (yaml-str
+          (with-temp-buffer
+            (seq-do (lambda (pair)
+                      (insert "- buffer: " (agent-shell-queue--yaml-str (car pair)) "\n")
+                      (insert "  items:\n")
+                      (seq-do (lambda (item)
+                                (insert (agent-shell-queue--item-to-yaml-export item)))
+                              (cdr pair)))
+                    visible)
+            (buffer-string))))
     (with-current-buffer (get-buffer-create out-name)
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (if buckets (yaml-encode (vconcat buckets)) ""))
+        (insert (if visible yaml-str ""))
         (goto-char (point-min))
-
         (when (fboundp 'yaml-mode)
-	  (yaml-mode)))
+          (yaml-mode)))
       (display-buffer (current-buffer)))))
 
 (defvar agent-shell-queue-mode-map
@@ -2014,6 +2258,7 @@ Includes all statuses (active, deferred, running, done)."
     ;; Pause / resume session queue dispatch
     (define-key m (kbd "C-c C-p")        #'agent-shell-queue-session-pause)
     (define-key m (kbd "C-c C-r")        #'agent-shell-queue-session-resume)
+    (define-key m (kbd "C-c C-x")        #'agent-shell-queue-recover-stuck-shell)
     ;; Insert items
     (define-key m (kbd "i")        #'agent-shell-queue-insert-pause)
     (define-key m (kbd "C-d C-c")  #'agent-shell-queue-insert-clear-context)
@@ -2055,7 +2300,7 @@ reinitializing headers on pure content refreshes.")
 
 (defun agent-shell-queue--on-queue-buffer-kill ()
   "Clean up in-flight items when the queue display buffer is killed.
-Running items are marked aborted; active (scheduled) items are deferred.
+Running items are marked aborted; active (scheduled) items are blocked.skip.
 This prevents tasks from executing without any supervisory display."
   (seq-do (lambda (bucket)
             (seq-do (lambda (item)
@@ -2064,7 +2309,7 @@ This prevents tasks from executing without any supervisory display."
                          (setf (agent-shell-queue-item-status item) 'aborted)
                          (setf (agent-shell-queue-item-outcome item) 'canceled))
                         ('active
-                         (setf (agent-shell-queue-item-status item) 'deferred))))
+                         (setf (agent-shell-queue-item-status item) 'blocked.skip))))
                     (cdr bucket)))
           (agent-shell-queue-store-items agent-shell-queue--store))
   (agent-shell-queue--save))
@@ -2171,8 +2416,9 @@ Examples: \"paused\", \"running (2)\", \"3 pending\", \"idle\"."
                             '("invalid" "context" "emacs.done" "emacs.running" "emacs"
                            "wait.done" "wait.running" "wait" "done" "running.blocked"
                            "pause" "compact" "aborted" "running.active.bg" "running.active"
-                           "editing" "paused<shell>" "paused<all>" "held.bg" "held"
-                             "draft" "scheduled.bg" "scheduled" "incomplete"))))
+                           "editing" "blocked.runner" "blocked.global" "blocked.task"
+                           "blocked.dep" "blocked.cond" "blocked.pending" "blocked.skip"
+                           "draft" "scheduled.bg" "scheduled" "incomplete"))))
      3)
   "Width of the Status column: max(6, length of longest status display string) minus 3.")
 
@@ -2381,19 +2627,41 @@ Must be called immediately after `tabulated-list-print'."
   (when-let* ((id (tabulated-list-get-id))
               (pair (agent-shell-queue--item-by-id id))
               ((eq (agent-shell-queue-item-status (cdr pair)) 'active)))
-    (setf (agent-shell-queue-item-status (cdr pair)) 'deferred)
+    (setf (agent-shell-queue-item-status (cdr pair)) 'blocked.skip)
     (agent-shell-queue--save)
     (agent-shell-queue-buffer-refresh)))
 
 (defun agent-shell-queue-buffer-schedule ()
-  "Schedule the paused item at point — resume it for auto-dispatch."
+  "Schedule the paused item at point — resume it for auto-dispatch.
+For blocked.task items, cascades active to subsequent blocked.dep items.
+Draft items are promoted directly to active without cascade."
   (interactive)
   (when-let* ((id (tabulated-list-get-id))
               (pair (agent-shell-queue--item-by-id id))
-              ((eq (agent-shell-queue-item-status (cdr pair)) 'deferred)))
-    (setf (agent-shell-queue-item-status (cdr pair)) 'active)
-    (agent-shell-queue--save)
+              (item (cdr pair))
+              (status (agent-shell-queue-item-status item)))
+    (cond
+     ((agent-shell-queue--blocked-status-p status)
+      (agent-shell-queue-unblock id))
+     ((eq status 'draft)
+      (setf (agent-shell-queue-item-status item) 'active)
+      (agent-shell-queue--save))
+     (t (user-error "Item %s cannot be scheduled from status %s" id status)))
     (agent-shell-queue-buffer-refresh)))
+
+(defun agent-shell-queue-buffer-unblock ()
+  "Unblock the item at point (blocked.task → active with cascade)."
+  (interactive)
+  (when-let* ((id (tabulated-list-get-id)))
+    (agent-shell-queue-unblock id)
+    (agent-shell-queue-buffer-refresh)))
+
+(defun agent-shell-queue-item-view-unblock ()
+  "Unblock the displayed item."
+  (interactive)
+  (when-let* ((id agent-shell-queue--item-view-id))
+    (agent-shell-queue-unblock id)
+    (agent-shell-queue-item-view-refresh)))
 
 (defun agent-shell-queue-buffer-remove ()
   "Remove the item at point from the queue, with confirmation."
@@ -2410,10 +2678,10 @@ Must be called immediately after `tabulated-list-print'."
   "Dispatch item ID with running-queue awareness.
 When no item is currently running for the same buffer, dispatches ID
 immediately (normal path).  When a running item exists for that buffer:
-  running  → append an active copy to the end of the queue for replay
-  active   → signal user-error (already scheduled)
-  deferred → mark active so it runs after the current item finishes
-  done/aborted → re-enqueue as a new copy via `agent-shell-queue-reenqueue'"
+  running       → append an active copy to the end of the queue for replay
+  active        → signal user-error (already scheduled)
+  blocked.*     → unblock so it runs after the current item finishes
+  done/aborted  → re-enqueue as a new copy via `agent-shell-queue-reenqueue'"
   (when-let* ((pair (agent-shell-queue--item-by-id id))
               (buf-name (car pair))
               (item (cdr pair))
@@ -2428,11 +2696,10 @@ immediately (normal path).  When a running item exists for that buffer:
          (message "agent-shell-queue: copy enqueued for replay after current run"))
         ('active
          (user-error "Item is already scheduled; another task is running for %s" buf-name))
-        ('deferred
-         (setf (agent-shell-queue-item-status item) 'active)
-         (agent-shell-queue--save)
+        ((pred agent-shell-queue--blocked-status-p)
+         (agent-shell-queue-unblock id)
          (agent-shell-queue--refresh-buffer)
-         (message "agent-shell-queue: scheduled for dispatch after current run"))
+         (message "agent-shell-queue: item unblocked for dispatch after current run"))
         ((or 'done 'aborted)
          (agent-shell-queue-reenqueue id))
         (_
@@ -2718,7 +2985,13 @@ and the queue advances to the next item."
          :cmd 'agent-shell-queue-item-view-schedule
          :group "Manage Task"
          :annotation "Return item to active dispatch queue"
-         :if (lambda () (memq (agent-shell-queue--iv-status) '(deferred draft))))
+         :if (lambda () (memq (agent-shell-queue--iv-status) '(draft))))
+   (list :key "f"
+         :label "Unblock"
+         :cmd 'agent-shell-queue-item-view-unblock
+         :group "Manage Task"
+         :annotation "Unblock item and cascade to dependent items"
+         :if (lambda () (agent-shell-queue--blocked-status-p (agent-shell-queue--iv-status))))
    (list :key "b"
          :label "Enable background task"
          :cmd 'agent-shell-queue-item-view-enable-background-task
@@ -2942,7 +3215,7 @@ based on the item's current status — see `agent-shell-queue--send-now'."
   (when-let* ((id agent-shell-queue--item-view-id)
               (pair (agent-shell-queue--item-by-id id))
               ((eq (agent-shell-queue-item-status (cdr pair)) 'active)))
-    (setf (agent-shell-queue-item-status (cdr pair)) 'deferred)
+    (setf (agent-shell-queue-item-status (cdr pair)) 'blocked.skip)
     (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)
     (agent-shell-queue-item-view-refresh)))
@@ -2952,7 +3225,7 @@ based on the item's current status — see `agent-shell-queue--send-now'."
   (interactive)
   (when-let* ((id agent-shell-queue--item-view-id)
               (pair (agent-shell-queue--item-by-id id))
-              ((eq (agent-shell-queue-item-status (cdr pair)) 'deferred)))
+              ((eq (agent-shell-queue-item-status (cdr pair)) 'draft)))
     (setf (agent-shell-queue-item-status (cdr pair)) 'active)
     (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)
@@ -3439,6 +3712,7 @@ Pauses the session queue — call `agent-shell-queue-session-resume' to restart.
           (agent-shell-interrupt)))
       (setf (agent-shell-queue-item-status item) 'aborted)
       (setf (agent-shell-queue-item-outcome item) 'canceled)
+      (agent-shell-queue--insert-resume-task buf-name item)
       (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
       (agent-shell-queue--save)
       (agent-shell-queue-buffer-refresh))))
@@ -3459,6 +3733,7 @@ Pauses the session queue — call `agent-shell-queue-session-resume' to restart.
           (agent-shell-interrupt)))
       (setf (agent-shell-queue-item-status item) 'aborted)
       (setf (agent-shell-queue-item-outcome item) 'canceled)
+      (agent-shell-queue--insert-resume-task buf-name item)
       (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
       (agent-shell-queue--save)
       (agent-shell-queue--refresh-buffer)
@@ -3527,8 +3802,14 @@ Does not match the unassigned bucket — only truly detached (dead) targets."
   (eq (agent-shell-queue--point-status) 'active))
 
 (defun agent-shell-queue--point-deferred-p ()
-  "Return non-nil when the item at point is deferred or draft."
-  (memq (agent-shell-queue--point-status) '(deferred draft)))
+  "Return non-nil when the item at point is in any blocked state or draft."
+  (let ((status (agent-shell-queue--point-status)))
+    (or (eq status 'draft)
+        (agent-shell-queue--blocked-status-p status))))
+
+(defun agent-shell-queue--point-blocked-p ()
+  "Return non-nil when the item at point has any blocked.* status."
+  (agent-shell-queue--blocked-status-p (agent-shell-queue--point-status)))
 
 (defun agent-shell-queue--point-done-p ()
   "Return non-nil when the item at point is done or aborted."
@@ -3695,7 +3976,9 @@ Items in the unassigned bucket are moved to the selected shell's queue."
                        (cons "send now" #'agent-shell-queue-buffer-send)
                        (when (eq status 'active)
                          (cons "pause (suspend from dispatch)" #'agent-shell-queue-buffer-pause))
-                       (when (eq status 'deferred)
+                       (when (agent-shell-queue--blocked-status-p status)
+                         (cons "unblock" #'agent-shell-queue-buffer-unblock))
+                       (when (agent-shell-queue--blocked-status-p status)
                          (cons "schedule (resume dispatch)" #'agent-shell-queue-buffer-schedule))
                        (when running
                          (cons "enqueue copy (repeat after current run)" #'agent-shell-queue-buffer-enqueue-running-copy))
@@ -3886,6 +4169,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
   [["Queue control"
     ("p" "Pause (session)" agent-shell-queue-session-pause)
     ("r" "Resume (session)" agent-shell-queue-session-resume)
+    ("R" "Recover stuck shell" agent-shell-queue-recover-stuck-shell)
     ("gp" "Pause (global)" agent-shell-queue-pause)
     ("gr" "Resume (global)" agent-shell-queue-resume)
     ("i" "Toggle intercept mode" agent-shell-queue-toggle-intercept-mode)
@@ -3896,7 +4180,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
      :if agent-shell-queue--point-dispatchable-p)
     ("X" "Abort (interrupt)" agent-shell-queue-buffer-abort
      :if agent-shell-queue--point-running-p)
-    ("!" "Re-enqueue" agent-shell-queue-buffer-reenqueue
+    ("S" "Re-enqueue" agent-shell-queue-buffer-reenqueue
      :if agent-shell-queue--point-done-p)
     ("z" "Mark done" agent-shell-queue-buffer-mark-done
      :if agent-shell-queue--point-not-done-p)
@@ -3907,6 +4191,8 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
      :if agent-shell-queue--point-active-p)
     ("C-c C-r" "Schedule (resume dispatch)" agent-shell-queue-buffer-schedule
      :if agent-shell-queue--point-deferred-p)
+    ("f" "Unblock" agent-shell-queue-buffer-unblock
+     :if agent-shell-queue--point-blocked-p)
     ("E" "Enqueue copy (repeat after current run)" agent-shell-queue-buffer-enqueue-running-copy
      :if agent-shell-queue--point-running-p)
     ("u" "Untrack (remove without aborting)" agent-shell-queue-buffer-untrack-running
@@ -3939,7 +4225,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     ("P" "Insert pause checkpoint" agent-shell-queue-insert-pause)
     ("I" "Insert context drop" agent-shell-queue-insert-clear-context)
     ("C" "Insert compact (manual)" agent-shell-queue-insert-compact)
-    ("!" "Insert Emacs call" agent-shell-queue-enqueue-emacs)
+    (";" "Insert Emacs call" agent-shell-queue-enqueue-emacs)
     ("T" "Insert wait-until (timer)" agent-shell-queue-insert-wait)]
    ["Fork"
     ("xf" "Fork queue at point" agent-shell-queue-buffer-fork
@@ -3982,7 +4268,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
                         "Single-line format"
 		      "Multi-line format")))]
    ["Raw Edit / Import"
-    ("C-e" "Raw edit queue (YAML)" agent-shell-queue-raw-edit)
+    ("Y" "Raw edit queue (YAML)" agent-shell-queue-raw-edit)
     ("C-E" "Import items (YAML)" agent-shell-queue-import)
     ("C-r" "Reload from disk" agent-shell-queue-reload)]])
 
@@ -4550,7 +4836,8 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
     (when (or (null prompt)
               (and (stringp prompt) (string-empty-p (string-trim prompt))))
       (push (format "item '%s': missing or empty prompt" (or id "new")) errors))
-    (unless (memq status '(active deferred draft invalid))
+    (unless (or (memq status '(active draft invalid))
+                (agent-shell-queue--blocked-status-p status))
       (push (format "item '%s': invalid status '%s'" (or id "?") status-str) errors))
     (unless (memq kind '(prompt pause context emacs wait compact))
       (push (format "item '%s': invalid kind '%s'" (or id "?") kind-str) errors))
@@ -4748,7 +5035,9 @@ For each item whose ID already exists, prompts to keep, replace, or assign new I
                                               :id final-id
                                               :args (if (string-empty-p (string-trim (or prompt "")))
                                                         "(imported)" (string-trim prompt))
-                                              :status (if (memq status '(active deferred invalid)) status 'active)
+                                              :status (if (or (memq status '(active invalid))
+                                                              (agent-shell-queue--blocked-status-p status))
+                                                          status 'active)
                                               :kind (if (memq kind '(prompt pause context emacs wait compact)) kind 'prompt)
                                               :background bg
                                               :created (or (map-elt it "created") (float-time)))))
@@ -4801,21 +5090,26 @@ during setup.  Always resumes and saves even if BODY signals an error."
          (agent-shell-queue--save)
          (agent-shell-queue--refresh-buffer)))))
 
+(defun agent-shell-queue--fork-eligible-status-p (item)
+  "Return non-nil if ITEM's status is eligible for fork collection."
+  (let ((status (agent-shell-queue-item-status item)))
+    (or (memq status '(active draft))
+        (agent-shell-queue--blocked-status-p status))))
+
 (defun agent-shell-queue--fork-collect-items (buf-name from-id)
   "Return active items from BUF-NAME's queue at or after FROM-ID.
-If FROM-ID is nil, returns all active/deferred/draft items.
+If FROM-ID is nil, returns all active/blocked/draft items.
 Returns a list of items; does not modify the queue."
   (let* ((items (cdr (assoc buf-name
-                            (agent-shell-queue-store-items agent-shell-queue--store))))
-         (eligible-statuses '(active deferred draft)))
+                            (agent-shell-queue-store-items agent-shell-queue--store)))))
     (if (null from-id)
-        (seq-filter (lambda (it) (memq (agent-shell-queue-item-status it) eligible-statuses)) items)
+        (seq-filter #'agent-shell-queue--fork-eligible-status-p items)
       ;; Search for from-id in the full list (it may be running/done, not just eligible)
       ;; then filter eligible items from that position onward.
       (when-let* ((pos (cl-position from-id items
                                     :key #'agent-shell-queue-item-id
                                     :test #'equal)))
-        (seq-filter (lambda (it) (memq (agent-shell-queue-item-status it) eligible-statuses))
+        (seq-filter #'agent-shell-queue--fork-eligible-status-p
                     (nthcdr pos items))))))
 
 (defun agent-shell-queue--fork-create-worktree (source-buf worktree-branch worktree-path)
