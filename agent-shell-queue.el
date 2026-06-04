@@ -419,6 +419,7 @@ before calling the format's serialize helper.")
 (defun agent-shell-queue-pause ()
   "Pause the global queue; no new items will be dispatched."
   (interactive)
+  (agent-shell-queue--ensure-loaded)
   (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
   (seq-do (lambda (bucket)
             (seq-do (lambda (item)
@@ -433,6 +434,7 @@ before calling the format's serialize helper.")
 (defun agent-shell-queue-resume ()
   "Resume the global queue after being paused."
   (interactive)
+  (agent-shell-queue--ensure-loaded)
   (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) nil)
   (seq-do (lambda (bucket)
             (seq-do (lambda (item)
@@ -456,6 +458,7 @@ before calling the format's serialize helper.")
   "Clear the per-session pause list, resuming all individually paused sessions.
 When the global queue is also paused, prompts to resume it as well."
   (interactive)
+  (agent-shell-queue--ensure-loaded)
   (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) nil)
   (seq-do (lambda (item)
             (when (eq (agent-shell-queue-item-status item) 'blocked.runner)
@@ -477,6 +480,7 @@ When the global queue is also paused, prompts to resume it as well."
   "Pause dispatch for BUF (default: current agent-shell session)."
   (interactive
    (list (agent-shell-queue--pick-shell-with-state "Pause dispatch for: ")))
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((name (buffer-name buf)))
     (cl-pushnew name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
     (seq-do (lambda (item)
@@ -492,6 +496,7 @@ When the global queue is also paused, prompts to resume it as well."
 Any running `pause' or `compact' item for BUF is marked done automatically."
   (interactive
    (list (agent-shell-queue--pick-shell-with-state "Resume dispatch for: ")))
+  (agent-shell-queue--ensure-loaded)
 
   (when-let* ((name (buffer-name buf)))
     (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
@@ -535,6 +540,7 @@ polls until the shell is no longer busy before resuming dispatch.
 Use this when the shell is frozen with no prompt appearing after the last turn."
   (interactive
    (list (agent-shell-queue--pick-shell-with-state "Recover stuck shell: ")))
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((buf-name (buffer-name buf))
               (_ (buffer-live-p buf)))
     (seq-do (lambda (item)
@@ -553,6 +559,7 @@ Use this when the shell is frozen with no prompt appearing after the last turn."
 (defun agent-shell-queue--on-interrupt (&optional _force)
   "Pause the per-buffer queue when `agent-shell-interrupt' is called.
 Installed as :before advice on `agent-shell-interrupt'."
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((_ (derived-mode-p 'agent-shell-mode))
               (buf-name (buffer-name))
               (_ (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
@@ -1214,6 +1221,7 @@ Unassigned items display in blue and sort after all shell-assigned items."
 Drops the `turn-complete' subscription for any bucket that becomes empty.
 Cancels any pending wait timer for the item.
 Always logs the removed item's prompt to *Messages*."
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((pair (assoc id agent-shell-queue--wait-timers)))
     (cancel-timer (cdr pair))
     (setq agent-shell-queue--wait-timers
@@ -1276,18 +1284,21 @@ For blocked.task, cascades active to subsequent blocked.dep items."
 
 (defun agent-shell-queue-edit (id new-prompt)
   "Replace the args of item ID with NEW-PROMPT.  Save."
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((pair (agent-shell-queue--item-by-id id)))
     (setf (agent-shell-queue-item-args (cdr pair)) (agent-shell-queue--clean-args new-prompt))
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue-set-background-task (id flag)
   "Set the background flag of item ID to FLAG.  Save."
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((pair (agent-shell-queue--item-by-id id)))
     (setf (agent-shell-queue-item-background (cdr pair)) flag)
     (agent-shell-queue--save)))
 
 (defun agent-shell-queue--move (id delta)
   "Shift item ID by DELTA positions within its buffer's list."
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((pair (agent-shell-queue--item-by-id id))
               (cell (assoc (car pair) (agent-shell-queue-store-items agent-shell-queue--store)))
               (items (cdr cell))
@@ -1319,6 +1330,7 @@ For blocked.task, cascades active to subsequent blocked.dep items."
 The copy gets a new ID, status `active', and a fresh creation timestamp.
 Args, kind, background, executor, and directory are carried over.
 Returns the new item's ID."
+  (agent-shell-queue--ensure-loaded)
   (let* ((new-id (agent-shell-queue--gen-id))
          (copy (agent-shell-queue-item--make
                 :id new-id
@@ -1341,6 +1353,7 @@ Returns the new item's ID."
 (defun agent-shell-queue--insert-item-after (buf-name item ref-id)
   "Insert ITEM into BUF-NAME queue immediately after the item with REF-ID.
 Returns the new item's ID."
+  (agent-shell-queue--ensure-loaded)
   (when-let* ((cell (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
     (let* ((items (cdr cell))
            (idx (cl-position ref-id items :key #'agent-shell-queue-item-id :test #'equal))
@@ -1428,6 +1441,7 @@ Drops the subscription on the old bucket if it empties; ensures one on the new."
   "Alert and pause BUF-NAME's session queue when its target buffer is gone.
 Emits a high-severity persistent alert referencing ID, adds BUF-NAME to the
 session-paused list, persists state, and returns nil."
+  (agent-shell-queue--ensure-loaded)
   (alert (format "Queue for '%s' paused — target buffer is gone (item %s)" buf-name id)
          :title (format "Queue → %s" buf-name)
          :category 'agent-shell-queue
@@ -1778,6 +1792,7 @@ Safe to call with a dead buffer — the subscription token is merely discarded."
 (defun agent-shell-queue--on-clean-up (buf-name _event)
   "Handle a clean-up event for BUF-NAME (shell buffer killed).
 Running item → aborted with auto-resume task; active items → blocked.runner."
+  (agent-shell-queue--ensure-loaded)
   (let ((items (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store)))))
     (seq-do (lambda (item)
               (pcase (agent-shell-queue-item-status item)
@@ -2347,6 +2362,7 @@ reinitializing headers on pure content refreshes.")
   "Clean up in-flight items when the queue display buffer is killed.
 Running items are marked aborted; active (scheduled) items are blocked.skip.
 This prevents tasks from executing without any supervisory display."
+  (agent-shell-queue--ensure-loaded)
   (seq-do (lambda (bucket)
             (seq-do (lambda (item)
                       (pcase (agent-shell-queue-item-status item)
