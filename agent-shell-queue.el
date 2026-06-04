@@ -125,6 +125,24 @@ is active.  The destination path is controlled separately by
 Override to store the archive at a custom location.  Only consulted when
 `agent-shell-queue-archive-enabled' is non-nil.")
 
+
+(defcustom agent-shell-queue-response-max-length 8192
+  "Maximum length (in characters) of captured response text to store.
+Responses longer than this are truncated with a \"…[truncated]\" suffix.
+
+This prevents very large responses from bloating the queue state file.
+Set to nil to disable truncation and store full responses.
+
+Default: 8192 (8KB) — balances completeness with file size."
+  :type '(choice (integer :tag "Max length in characters")
+                 (const :tag "No limit (store full responses)" nil))
+  :group 'agent-shell-queue)
+
+(defconst agent-shell-queue-response-max-length-absolute 1048576
+  "Absolute maximum length (1MB) for response text, regardless of configuration.
+This hard limit prevents pathological cases from consuming excessive memory
+or creating unmanageable state files.  Applies even when
+`agent-shell-queue-response-max-length' is nil.")
 (defvar agent-shell-queue--last-flush-time nil
   "Float-time of the most recent queue state write to disk.")
 
@@ -674,7 +692,11 @@ the session queue is paused until the mode changes.")
 
 (defun agent-shell-queue--clean-args (args)
   "Remove trailing whitespace from every line of ARGS."
-  (string-join (seq-map #'string-trim-right (split-string args "\n")) "\n"))
+  (string-join
+   (thread-last
+    (split-string args "\n")
+    (seq-map #'string-trim-right))
+   "\n"))
 
 (defun agent-shell-queue--make-item (prompt &optional background kind)
   "Return a new active queue item for PROMPT."
@@ -945,7 +967,13 @@ a subdirectory of `temporary-file-directory' named emacs-<instance>."
 Delegates to `agent-shell-queue-save-function' when set; otherwise writes
 to the file in the current store.
 When `agent-shell-queue-safe-save' is non-nil and no custom save function
-is set, writes a versioned backup before overwriting the state file."
+is set, writes a versioned backup before overwriting the state file.
+
+CRITICAL: Ensures the queue is loaded from disk before saving to prevent
+overwriting existing state with an empty queue."
+  ;; ALWAYS ensure loaded before saving to prevent data loss
+  (agent-shell-queue--ensure-loaded)
+  
   (if agent-shell-queue-save-function
       (funcall agent-shell-queue-save-function)
     (let* ((base-store (agent-shell-queue--current-store))
@@ -1087,12 +1115,19 @@ session cannot be resumed and must be re-dispatched."
     (agent-shell-queue--migrate-deferred-statuses)))
 
 (defun agent-shell-queue--ensure-loaded ()
-  "Load queue state from disk on first call."
+  "Load queue state from disk on first call.
+Queue state is loaded lazily when first accessed, not at Emacs startup.
+This ensures the queue package is fully initialized before loading."
   (unless agent-shell-queue--loaded
     (agent-shell-queue--load)
-    (setq agent-shell-queue--loaded t)))
+    (setq agent-shell-queue--loaded t)
+    (let ((count (length (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store)))))
+      (when (> count 0)
+        (message "agent-shell-queue: loaded %d item%s from disk"
+                 count (if (= count 1) "" "s"))))))
 
 (add-hook 'kill-emacs-hook #'agent-shell-queue--save)
+
 
 ;;; Store predicates
 
@@ -1613,13 +1648,20 @@ all collapsed blocks are folded: only the prose between them."
                      (let ((t1 (replace-regexp-in-string (regexp-quote "<shell-maker-end-of-prompt>") "" text)))
                        (string-trim (replace-regexp-in-string "[a-zA-Z0-9_-]+>\\s-*\\'" "" t1)))))
         (if (and text (not (string-empty-p text)))
-            (let ((stored (if (> (length text) 8192)
-                              (concat (substring text 0 8192) "\n\n…[truncated]")
-                            text)))
+            (let* ((cleaned (agent-shell-queue--clean-args text))
+                   ;; Effective max: configured limit (or absolute if nil), capped by absolute max
+                   (max-length (if agent-shell-queue-response-max-length
+                                   (min agent-shell-queue-response-max-length
+                                        agent-shell-queue-response-max-length-absolute)
+                                 agent-shell-queue-response-max-length-absolute))
+                   (truncated (> (length cleaned) max-length))
+                   (stored (if truncated
+                               (concat (substring cleaned 0 max-length) "\n\n…[truncated]")
+                             cleaned)))
               (setf (agent-shell-queue-item-response (cdr pair)) stored)
               (message "agent-shell-queue: captured response for %s (%d chars%s)"
-                       id (length text)
-                       (if (> (length text) 8192) ", truncated" "")))
+                       id (length cleaned)
+                       (if truncated ", truncated" "")))
           (message "agent-shell-queue: no response captured for %s" id))))))
 
 (defun agent-shell-queue--mark-running-done (buf-name)
