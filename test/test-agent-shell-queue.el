@@ -1157,7 +1157,7 @@ which populates item.response from the shell buffer content."
         (kill-buffer buf)))))
 
 (ert-deftest agent-shell-queue/unpause-all-sessions-skips-dispatch-when-globally-paused ()
-  "unpause-all-sessions does not dispatch when the global queue is paused."
+  "unpause-all-sessions does not dispatch when the global queue is paused and user declines."
   (agent-shell-queue-test/isolate
     (let ((dispatched nil)
           (buf (get-buffer-create " *asq-unpause-global-paused-test*")))
@@ -1168,9 +1168,28 @@ which populates item.response from the shell buffer content."
                               (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
             (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
             (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
-                       (lambda (b) (push (buffer-name b) dispatched))))
+                       (lambda (b) (push (buffer-name b) dispatched)))
+                      ((symbol-function 'y-or-n-p) (lambda (_) nil)))
               (agent-shell-queue-unpause-all-sessions))
             (should-not dispatched))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/unpause-all-sessions-resumes-global-when-confirmed ()
+  "unpause-all-sessions calls resume when globally paused and user confirms."
+  (agent-shell-queue-test/isolate
+    (let ((resumed nil)
+          (buf (get-buffer-create " *asq-unpause-global-resume-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
+            (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
+            (cl-letf (((symbol-function 'agent-shell-queue-resume)
+                       (lambda () (setq resumed t)))
+                      ((symbol-function 'y-or-n-p) (lambda (_) t)))
+              (agent-shell-queue-unpause-all-sessions))
+            (should resumed))
         (kill-buffer buf)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

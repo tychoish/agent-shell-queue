@@ -435,7 +435,8 @@ before calling the format's serialize helper.")
           (agent-shell-queue-store-items agent-shell-queue--store)))
 
 (defun agent-shell-queue-unpause-all-sessions ()
-  "Clear the per-session pause list, resuming all individually paused sessions."
+  "Clear the per-session pause list, resuming all individually paused sessions.
+When the global queue is also paused, prompts to resume it as well."
   (interactive)
   (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) nil)
   (seq-do (lambda (item)
@@ -445,7 +446,9 @@ before calling the format's serialize helper.")
   (agent-shell-queue--save)
   (message "agent-shell-queue: all session pauses cleared")
   (agent-shell-queue--refresh-buffer)
-  (unless (agent-shell-queue-queue-paused agent-shell-queue--queue)
+  (if (agent-shell-queue-queue-paused agent-shell-queue--queue)
+      (when (y-or-n-p "Global queue is paused; resume it too? ")
+        (agent-shell-queue-resume))
     (seq-do (lambda (bucket)
               (when-let* ((buf (get-buffer (car bucket)))
                           (_ (buffer-live-p buf)))
@@ -3006,6 +3009,12 @@ and the queue advances to the next item."
          :annotation "Remove background task flag"
          :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
                              (agent-shell-queue--iv-bg-p))))
+   (list :key "O"
+         :label "Open shell buffer"
+         :cmd 'agent-shell-queue-item-view-open-shell
+         :group "Manage Task"
+         :annotation "Switch to this item's target shell buffer"
+         :if nil)
    (list :key "i"
          :label "Inspect raw"
          :cmd 'agent-shell-queue-item-view-inspect
@@ -4040,6 +4049,24 @@ function, offer to create a new buffer of the same type."
               (pop-to-buffer new-buf)))
         (user-error "Shell buffer %s is not live" buf-name)))))
 
+(defun agent-shell-queue-item-view-open-shell ()
+  "Switch to the shell buffer for the item shown in this view.
+If the buffer is not live and the item's executor provides a create
+function, offer to create a new buffer of the same type."
+  (interactive)
+  (when-let* ((buf-name (agent-shell-queue--iv-target)))
+    (if-let* ((buf (get-buffer buf-name)))
+        (pop-to-buffer buf)
+      (if-let* ((item (agent-shell-queue--iv-item))
+                (executor-fn (agent-shell-queue-item-executor item))
+                (executor-name (agent-shell-queue--executor-name executor-fn))
+                (entry (agent-shell-queue--find-executor executor-name))
+                (create-fn (agent-shell-queue-executor-create entry)))
+          (when (y-or-n-p (format "Buffer %s is not live. Create a new one? " buf-name))
+            (when-let* ((new-buf (funcall create-fn)))
+              (pop-to-buffer new-buf)))
+        (user-error "Shell buffer %s is not live" buf-name)))))
+
 ;;;###autoload
 (defun agent-shell-queue-capture (&optional buf)
   "Open a capture buffer targeting BUF (nil adds to the unassigned queue).
@@ -4204,7 +4231,9 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
      :if (lambda () (and (agent-shell-queue--point-editable-p)
                          (agent-shell-queue--point-bg-p))))
     ("C-d" "Destructive…" agent-shell-queue-destructive-menu
-     :if agent-shell-queue--point-not-running-p)]
+     :if agent-shell-queue--point-not-running-p)
+    ("O" "Open shell for item at point" agent-shell-queue-buffer-open-shell
+     :if agent-shell-queue--point-item)]
    ["Move / Assign" :if agent-shell-queue--point-editable-p
     ("M-<up>" "Move up" agent-shell-queue-buffer-move-up
      :if agent-shell-queue--point-editable-p)
@@ -4241,8 +4270,6 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     ("v" "Export scope to YAML" agent-shell-queue-export)
     ("F" "Flush to disk" agent-shell-queue-flush)
     ("D" "Show disk state" agent-shell-queue-show-disk-state)
-    ("O" "Open shell for item at point" agent-shell-queue-buffer-open-shell
-     :if agent-shell-queue--point-item)
     ("=" "Inspect item raw…" agent-shell-queue-buffer-inspect-item
      :if agent-shell-queue--point-item)]
    ["Display"
