@@ -21,7 +21,7 @@
 ;;   (setq agent-shell-queue-serialization-format 'org)
 ;; Set the state file path to a .org path for clarity:
 ;;   (setq agent-shell-queue-state-file-function
-;;         (lambda () (tychoish/conf-state-path "agent-shell-queue.org")))
+;;         (lambda () (sprite-state-path "agent-shell-queue.org")))
 
 ;;; Code:
 
