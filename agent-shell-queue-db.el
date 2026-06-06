@@ -17,8 +17,8 @@
 ;; All other queue operations (dispatch, capture, reload, etc.) are unchanged.
 ;;
 ;; The schema stores one row per queue item with an explicit position column
-;; to preserve intra-bucket ordering.  Done and running items are excluded
-;; from the persistent state, matching the text-format behaviour.
+;; to preserve intra-bucket ordering.  All items, regardless of status, are
+;; persisted — matching the plain-file backend semantics.
 ;;
 ;; Requires Emacs 29+ (built-in sqlite support).
 
@@ -180,27 +180,28 @@ Called as `agent-shell-queue-save-function' when the DB backend is active."
 Called as `agent-shell-queue-load-function' when the DB backend is active."
   (let ((conn (agent-shell-queue-db--ensure-connection))
         (result nil))
-    (dolist (row (sqlite-select conn agent-shell-queue-db--select-items))
-      (cl-destructuring-bind
-          (id bucket prompt status-str kind-str bg created dispatched completed response executor-name)
-          row
-        (let* ((status (condition-case nil (intern (or status-str "active")) (error 'active)))
-               (kind   (condition-case nil (intern (or kind-str "prompt"))   (error 'prompt)))
-               (item   (agent-shell-queue-item--make
-                        :id id
-                        :args prompt
-                        :status status
-                        :kind kind
-                        :background (eql bg 1)
-                        :created created
-                        :dispatched dispatched
-                        :completed completed
-                        :response response
-                        :executor (agent-shell-queue--executor-from-plist executor-name)))
-               (pair (assoc bucket result)))
-          (if pair
-              (setcdr pair (append (cdr pair) (list item)))
-            (setq result (append result (list (list bucket item))))))))
+    (seq-do (lambda (row)
+              (cl-destructuring-bind
+                  (id bucket prompt status-str kind-str bg created dispatched completed response executor-name)
+                  row
+                (let* ((status (condition-case nil (intern (or status-str "active")) (error 'active)))
+                       (kind   (condition-case nil (intern (or kind-str "prompt"))   (error 'prompt)))
+                       (item   (agent-shell-queue-item--make
+                                :id id
+                                :args prompt
+                                :status status
+                                :kind kind
+                                :background (eql bg 1)
+                                :created created
+                                :dispatched dispatched
+                                :completed completed
+                                :response response
+                                :executor (agent-shell-queue--executor-from-plist executor-name)))
+                       (pair (assoc bucket result)))
+                  (if pair
+                      (setcdr pair (append (cdr pair) (list item)))
+                    (setq result (append result (list (list bucket item))))))))
+            (sqlite-select conn agent-shell-queue-db--select-items))
     (setq agent-shell-queue--items result)))
 
 ;;; Enable / disable
@@ -268,25 +269,27 @@ Shows per-bucket item counts and a tabular dump of all persisted rows."
         (insert (format "Items stored:    %d\n\n" (length rows)))
         (when counts
           (insert "Bucket summary:\n")
-          (dolist (row counts)
-            (insert (format "  %-40s %-10s %d\n" (nth 0 row) (nth 1 row) (nth 2 row))))
+          (seq-do (lambda (row)
+                    (insert (format "  %-40s %-10s %d\n" (nth 0 row) (nth 1 row) (nth 2 row))))
+                  counts)
           (insert "\n"))
         (when rows
           (let ((sep (make-string 100 ?─)))
             (insert (format "%-8s %-30s %-10s %-8s %-6s %s\n"
                             "ID" "Bucket" "Status" "Kind" "BG" "Prompt"))
             (insert sep "\n")
-            (dolist (row rows)
-              (cl-destructuring-bind
-                  (id bucket _prompt status-str kind-str bg _created
-                      _dispatched _completed _response)
-                  row
-                (insert (format "%-8s %-30s %-10s %-8s %-6s %s\n"
-                                id
-                                (truncate-string-to-width bucket 30 nil nil "…")
-                                status-str kind-str
-                                (if (eql bg 1) "yes" "no")
-                                (truncate-string-to-width (nth 2 row) 40 nil nil "…")))))))
+            (seq-do (lambda (row)
+                      (cl-destructuring-bind
+                          (id bucket prompt status-str kind-str bg _created
+                              _dispatched _completed _response _executor)
+                          row
+                        (insert (format "%-8s %-30s %-10s %-8s %-6s %s\n"
+                                        id
+                                        (truncate-string-to-width bucket 30 nil nil "…")
+                                        status-str kind-str
+                                        (if (eql bg 1) "yes" "no")
+                                        (truncate-string-to-width prompt 40 nil nil "…")))))
+                    rows)))
         (goto-char (point-min)))
       (setq buffer-read-only t)
       (setq-local revert-buffer-function
@@ -346,10 +349,6 @@ Call after `agent-shell-queue-db-enable'."
   (let ((conn (agent-shell-queue-db--ensure-connection)))
     (sqlite-execute conn agent-shell-queue-db--create-done))
   (add-hook 'agent-shell-queue-item-done-hook #'agent-shell-queue-db--record-done))
-
-(defvar agent-shell-queue-item-done-hook nil
-  "Hook run when a queue item transitions to done status.
-Each function is called with two arguments: BUF-NAME and ITEM.")
 
 (defun agent-shell-queue-db--record-done (buf-name item)
   "Insert BUF-NAME / ITEM into the done_items table."

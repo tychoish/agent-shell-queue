@@ -153,21 +153,22 @@ a SQLite roundtrip."
       (should (equal "hello world" (nth 1 (car rows))))
       (should (equal "active" (nth 2 (car rows)))))))
 
-(ert-deftest agent-shell-queue-db/save-excludes-done-items ()
-  "Done items are not written to the DB."
+(ert-deftest agent-shell-queue-db/save-includes-done-items ()
+  "Done items are written to the DB alongside active items."
   (agent-shell-queue-db-test/with-db
     (setq agent-shell-queue--items
           (list (list "*shell*"
-                      (agent-shell-queue-db-test/make-item "q1a1" "keep me" 'active)
-                      (agent-shell-queue-db-test/make-item "q1b2" "skip me" 'done))))
+                      (agent-shell-queue-db-test/make-item "q1a1" "active one" 'active)
+                      (agent-shell-queue-db-test/make-item "q1b2" "done one" 'done))))
     (agent-shell-queue-db--save)
     (let ((rows (sqlite-select (agent-shell-queue-db--ensure-connection)
-                               "SELECT id FROM items")))
-      (should (= 1 (length rows)))
-      (should (equal "q1a1" (nth 0 (car rows)))))))
+                               "SELECT id FROM items ORDER BY position")))
+      (should (= 2 (length rows)))
+      (should (equal "q1a1" (nth 0 (nth 0 rows))))
+      (should (equal "q1b2" (nth 0 (nth 1 rows)))))))
 
-(ert-deftest agent-shell-queue-db/save-excludes-running-items ()
-  "Running items are not written to the DB."
+(ert-deftest agent-shell-queue-db/save-includes-running-items ()
+  "Running items are written to the DB alongside active items."
   (agent-shell-queue-db-test/with-db
     (setq agent-shell-queue--items
           (list (list "*shell*"
@@ -175,9 +176,10 @@ a SQLite roundtrip."
                       (agent-shell-queue-db-test/make-item "q1b2" "running" 'running))))
     (agent-shell-queue-db--save)
     (let ((rows (sqlite-select (agent-shell-queue-db--ensure-connection)
-                               "SELECT id FROM items")))
-      (should (= 1 (length rows)))
-      (should (equal "q1a1" (nth 0 (car rows)))))))
+                               "SELECT id FROM items ORDER BY position")))
+      (should (= 2 (length rows)))
+      (should (equal "q1a1" (nth 0 (nth 0 rows))))
+      (should (equal "q1b2" (nth 0 (nth 1 rows)))))))
 
 (ert-deftest agent-shell-queue-db/save-empty-queue ()
   "Saving an empty queue writes no rows."
@@ -512,6 +514,57 @@ reached.  This test documents the actual behaviour."
         (should (equal 2000.0 (agent-shell-queue-item-dispatched loaded)))
         (should (equal 3000.0 (agent-shell-queue-item-completed loaded)))
         (should (equal "done text" (agent-shell-queue-item-response loaded)))))))
+
+(ert-deftest agent-shell-queue-db/roundtrip-done-and-running-statuses ()
+  "Done and running items survive a full save/load cycle."
+  (agent-shell-queue-db-test/with-db
+    (setq agent-shell-queue--items
+          (list (list "*s*"
+                      (agent-shell-queue-db-test/make-item "qa1" "active" 'active)
+                      (agent-shell-queue-db-test/make-item "qa2" "done" 'done)
+                      (agent-shell-queue-db-test/make-item "qa3" "running" 'running))))
+    (agent-shell-queue-db--save)
+    (setq agent-shell-queue--items nil)
+    (agent-shell-queue-db--load)
+    (let ((items (cdr (assoc "*s*" agent-shell-queue--items))))
+      (should (= 3 (length items)))
+      (should (eq 'active  (agent-shell-queue-item-status (nth 0 items))))
+      (should (eq 'done    (agent-shell-queue-item-status (nth 1 items))))
+      (should (eq 'running (agent-shell-queue-item-status (nth 2 items)))))))
+
+;;; Show state
+
+(ert-deftest agent-shell-queue-db/show-state-creates-buffer ()
+  "show-state creates a read-only *agent-shell-queue-db* buffer with DB metadata."
+  (agent-shell-queue-db-test/with-db
+    (agent-shell-queue-db-enable)
+    (setq agent-shell-queue--items
+          (list (list "*shell*"
+                      (agent-shell-queue-db-test/make-item "qa1" "task one" 'active)
+                      (agent-shell-queue-db-test/make-item "qa2" "task two" 'done))))
+    (agent-shell-queue-db--save)
+    (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+      (agent-shell-queue-db-show-state))
+    (let ((buf (get-buffer "*agent-shell-queue-db*")))
+      (should buf)
+      (with-current-buffer buf
+        (should buffer-read-only)
+        (let ((text (buffer-string)))
+          (should (string-match-p "SQLite database:" text))
+          (should (string-match-p "Items stored:.*2" text))
+          (should (string-match-p "qa1" text))
+          (should (string-match-p "qa2" text)))))))
+
+(ert-deftest agent-shell-queue-db/show-state-empty-db ()
+  "show-state on an empty DB shows zero items and no table rows."
+  (agent-shell-queue-db-test/with-db
+    (agent-shell-queue-db-enable)
+    (setq agent-shell-queue--items nil)
+    (agent-shell-queue-db--save)
+    (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+      (agent-shell-queue-db-show-state))
+    (with-current-buffer (get-buffer "*agent-shell-queue-db*")
+      (should (string-match-p "Items stored:.*0" (buffer-string))))))
 
 ;;; Enable / disable
 
