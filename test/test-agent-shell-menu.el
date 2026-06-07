@@ -214,18 +214,18 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
     (should-error (agent-shell-extras--pick-buffer "test: ") :type 'user-error)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell-extras--same-project-buffers
+;;; agent-shell-menu-project-buffers
 
 (ert-deftest agent-shell-menu/same-project-buffers-empty-when-no-agent-buffers ()
   (with-temp-buffer
     (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () nil)))
-      (should (null (agent-shell-extras--same-project-buffers))))))
+      (should (null (agent-shell-menu-project-buffers))))))
 
 (ert-deftest agent-shell-menu/same-project-buffers-excludes-current-buffer ()
   (with-temp-buffer
     (let ((cur (current-buffer)))
       (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list cur))))
-        (should (null (agent-shell-extras--same-project-buffers)))))))
+        (should (null (agent-shell-menu-project-buffers)))))))
 
 (ert-deftest agent-shell-menu/same-project-buffers-includes-same-dir-buffer ()
   (let ((other (generate-new-buffer "*mock-agent*")))
@@ -235,7 +235,7 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
           (with-current-buffer other
             (setq-local default-directory "/tmp/test-proj/"))
           (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list other))))
-            (should (memq other (agent-shell-extras--same-project-buffers)))))
+            (should (memq other (agent-shell-menu-project-buffers)))))
       (kill-buffer other))))
 
 (ert-deftest agent-shell-menu/same-project-buffers-excludes-different-dir-buffer ()
@@ -246,7 +246,7 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
           (with-current-buffer other
             (setq-local default-directory "/tmp/proj-b/"))
           (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list other))))
-            (should (null (agent-shell-extras--same-project-buffers)))))
+            (should (null (agent-shell-menu-project-buffers)))))
       (kill-buffer other))))
 
 (ert-deftest agent-shell-menu/same-project-buffers-returns-only-matching ()
@@ -261,7 +261,7 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
             (setq-local default-directory "/tmp/different/"))
           (cl-letf (((symbol-function 'agent-shell-buffers)
                      (lambda () (list match other))))
-            (let ((result (agent-shell-extras--same-project-buffers)))
+            (let ((result (agent-shell-menu-project-buffers)))
               (should (memq match result))
               (should-not (memq other result)))))
       (kill-buffer match)
@@ -464,7 +464,7 @@ not a raw buffer list or a single annotation string."
   (let* ((other (generate-new-buffer "*mock-proj-session*"))
          captured-table)
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell-extras--same-project-buffers)
+        (cl-letf (((symbol-function 'agent-shell-menu-project-buffers)
                    (lambda () (list other)))
                   ((symbol-function 'agent-shell--buffer-annotation) (lambda (_) "ann"))
                   ((symbol-function 'annotated-completing-read)

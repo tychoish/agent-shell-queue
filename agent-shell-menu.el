@@ -322,7 +322,8 @@ When a permission request is pending, permission responses are spliced into the 
 
 ;;; Project session switching
 
-(defun agent-shell-extras--same-project-buffers ()
+;;;###autoload
+(defun agent-shell-menu-project-buffers ()
   "Return live agent-shell buffers sharing the current buffer's project directory."
   (let ((dir default-directory)
 	(cb (current-buffer)))
@@ -336,7 +337,7 @@ When a permission request is pending, permission responses are spliced into the 
 (defun agent-shell-switch-project-session ()
   "Switch to another agent-shell session in the same project directory."
   (interactive)
-  (let ((bufs (or (agent-shell-extras--same-project-buffers)
+  (let ((bufs (or (agent-shell-menu-project-buffers)
                   (user-error "No other agent-shell sessions for this project"))))
     (switch-to-buffer
      (get-buffer
