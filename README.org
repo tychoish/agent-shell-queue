@@ -9,6 +9,11 @@ restarts.  Interactive capture, edit, and item-view buffers allow queue
 manipulation without leaving Emacs.  Fork operations split a queue across
 multiple sessions for parallel workloads.
 
+This repository also includes ~agent-shell-menu.el~: ACR-based transient menus
+for navigating and controlling agent sessions, covering permission resolution,
+action selection, command insertion, and collapse control.  The menu requires
+the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
+
 * Contents                                                       :TOC:
 - [[#overview][Overview]]
 - [[#installation][Installation]]
@@ -23,6 +28,7 @@ multiple sessions for parallel workloads.
   - [[#capture][Capture]]
   - [[#persistence][Persistence]]
   - [[#buffer-ui][Buffer UI]]
+  - [[#menus][Menus]]
   - [[#optional-backends][Optional Backends]]
 - [[#license][License]]
 
@@ -252,6 +258,51 @@ Widen the queue view to show all sessions globally.
 *** ~agent-shell-queue-show-disk-state~
 
 Display the raw on-disk queue state in a temporary buffer.
+
+** Menus
+
+~agent-shell-menu.el~ provides ACR-based interactive menus for agent-shell
+sessions.  Load it with ~(require 'agent-shell-menu)~ after the queue.
+
+*** ~agent-shell-dispatch~ / ~agent-shell-session-menu~
+
+Main transient prefix covering session management, queue operations, capture,
+intercept mode, interjection, and permission resolution.  Bind to a key:
+
+#+BEGIN_SRC emacs-lisp
+(keymap-global-set "C-c a" #'agent-shell-dispatch)
+#+END_SRC
+
+*** ~agent-shell-switch-buffer~
+
+Switch to an agent-shell buffer with status, cwd, context, and age annotations.
+
+*** ~agent-shell-select-action~
+
+Pick a common agent-shell action and run it via ~annotated-completing-read~.
+Permission responses are spliced into the menu when a permission prompt is active.
+
+*** ~agent-shell-resolve-permission~
+
+Resolve a pending permission prompt via ~annotated-completing-read~.
+
+*** ~agent-shell-select-command~
+
+Insert one of the agent's advertised ~/~ commands at the prompt.
+
+*** ~agent-shell-select-collapse~
+
+Pick a collapse action: bulk expand/collapse, per-category toggles, and
+flip the three expand-by-default customization variables.
+
+*** ~agent-shell-action-alist~
+
+Configurable alist mapping display names to command symbols for
+~agent-shell-select-action~.  Extend to add custom actions:
+
+#+BEGIN_SRC emacs-lisp
+(add-to-list 'agent-shell-action-alist '("my custom action" . my-custom-command))
+#+END_SRC
 
 ** Optional Backends
 

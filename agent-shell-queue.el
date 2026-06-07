@@ -6161,9 +6161,6 @@ Existing sessions are not changed."
 
 (agent-shell-queue--setup-hooks)
 
-(with-eval-after-load 'agent-shell-menu
-  (define-key agent-shell-queue-mode-map (kbd "M") #'agent-shell-session-menu))
-
 (provide 'agent-shell-queue)
 
 ;;; agent-shell-queue.el ends here

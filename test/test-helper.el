@@ -11,6 +11,14 @@
        (root (file-name-directory (directory-file-name test-dir))))
   (add-to-list 'load-path root))
 
+(defun agent-shell-test/suffix-plist (suffix)
+  "Extract the plist from a parsed transient suffix spec SUFFIX.
+Handles both the (CLASS :key ...) cons format and the
+(LEVEL CLASS (:key ...)) tuple format produced by different transient versions."
+  (if (integerp (car suffix))
+      (nth 2 suffix)
+    (cdr suffix)))
+
 ;;; Transient key introspection helpers
 
 (defun transient-test/collect-keys (prefix-sym)
