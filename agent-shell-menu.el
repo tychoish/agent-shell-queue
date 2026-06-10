@@ -147,8 +147,9 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
   (let ((bufs (or (agent-shell-buffers) (user-error "No live agent-shell buffers"))))
     (get-buffer
      (annotated-completing-read
-      (seq-map (lambda (buf) (cons (buffer-name buf) (agent-shell--buffer-annotation buf)))
-	       bufs)
+      (thread-last
+	(agent-shell-buffers)
+	(seq-map (lambda (buf) (cons (buffer-name buf) (agent-shell--buffer-annotation buf)))))
       :prompt prompt
       :category 'agent-shell-buffer
       :require-match t
@@ -158,7 +159,7 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
 (defun agent-shell-switch-buffer ()
   "Switch to an agent-shell buffer with status, cwd, context, and age annotations."
   (interactive)
-  (switch-to-buffer (agent-shell-extras--pick-buffer "agent-shell => ")))
+  (switch-to-buffer (agent-shell-extras--pick-buffer "agent-shell =>")))
 
 ;;; Permission resolution
 

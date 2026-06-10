@@ -4164,4 +4164,6 @@ stopping before the next blocked.task."
         (should (eq 'blocked.dep  (agent-shell-queue-item-status (nth 2 items))))
         (should (eq 'blocked.dep  (agent-shell-queue-item-status (nth 3 items))))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 ;;; test-agent-shell-queue.el ends here
