@@ -4525,7 +4525,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
      :if agent-shell-queue--point-editable-p)
     ("ld" "Move down" agent-shell-queue-buffer-move-down
      :if agent-shell-queue--point-editable-p)
-    ("at" "Assign to shell…" agent-shell-queue-buffer-assign
+    ("A"  "Assign to shell…" agent-shell-queue-buffer-assign
      :if agent-shell-queue--point-editable-p)]]
   [["Capture"
     ("cw" "Compose" agent-shell-queue-capture)
