@@ -39,6 +39,7 @@
 
 (declare-function agent-shell-viewport--shell-buffer "agent-shell-viewport")
 (declare-function agent-shell--new-shell "agent-shell")
+(declare-function agent-shell-ui--toggle-fragment-at-point "agent-shell-ui")
 
 (declare-function agent-review "agent-review")
 (declare-function agent-review-send-to-agent-shell "agent-review")
@@ -502,6 +503,29 @@ File-visiting buffers are sent as @file references; others as raw text."
 ;;;###autoload
 (defalias 'agent-shell-session-menu #'agent-shell-dispatch)
 
+;;; Capture menu — bound to "e" in agent-shell-mode-map
+
+;;;###autoload
+(transient-define-prefix agent-shell-queue-capture-menu ()
+  "Enqueue and capture operations for the current agent-shell session.
+Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
+  [["Capture"
+    ("c"  "Compose prompt"      agent-shell-queue-capture)
+    ("u"  "Unassigned"          agent-shell-queue-capture-unassigned)
+    ("r"  "From region"         agent-shell-queue-capture-from-region)
+    ("y"  "From clipboard"      agent-shell-queue-capture-from-clipboard)
+    ("x"  "From context"        agent-shell-queue-capture-from-context)]
+   ["Enqueue"
+    ("e"  "Enqueue prompt"      agent-shell-queue-enqueue)
+    ("m"  "Emacs form"          agent-shell-queue-enqueue-emacs)]
+   ["Insert"
+    ("p"  "Pause checkpoint"    agent-shell-queue-insert-pause)
+    ("d"  "Context drop"        agent-shell-queue-insert-clear-context)
+    ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
+    ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
+
+(agent-shell-mode-key "e" agent-shell-queue-capture-menu)
+
 ;;; Command menu
 
 ;;;###autoload
@@ -569,7 +593,7 @@ When CATEGORY is non-nil, only affect blocks matching that category."
                            (or (null category)
                                (equal category (agent-shell--block-category id))))
                   (goto-char (map-elt block :start))
-                  (agent-shell-ui-toggle-fragment-at-point))))
+                  (agent-shell-ui--toggle-fragment-at-point))))
             (agent-shell--blocks-in-buffer))))
 
 ;;;###autoload
