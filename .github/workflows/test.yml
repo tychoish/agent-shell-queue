@@ -23,26 +23,14 @@ jobs:
         with:
           version: ${{ matrix.emacs_version }}
 
+      - name: Set up Cask
+        uses: cask/setup-cask@master
+
       - name: Clone annotated-completing-read
         run: git clone https://github.com/tychoish/annotated-completing-read.el /tmp/annotated-completing-read
 
-      - name: Install MELPA dependencies
-        run: |
-          emacs --batch \
-            --eval "(require 'package)" \
-            --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
-            --eval "(package-refresh-contents)" \
-            --eval "(dolist (pkg '(transient alert agent-shell)) (unless (package-installed-p pkg) (package-install pkg)))"
+      - name: Install dependencies
+        run: cask install
 
       - name: Run tests
-        run: |
-          emacs --batch \
-            --eval "(require 'package)" \
-            --eval "(package-initialize)" \
-            -L . \
-            -L /tmp/annotated-completing-read \
-            -l test/test-helper.el \
-            -l test/test-agent-shell-queue.el \
-            -l test/test-agent-shell-queue-persistence.el \
-            -l test/test-agent-shell-menu.el \
-            --eval "(ert-run-tests-batch-and-exit \"agent-shell\")"
+        run: cask exec ert-runner -L /tmp/annotated-completing-read test/test-*.el
