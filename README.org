@@ -76,6 +76,115 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 
 * API Reference
 
+#+BEGIN_COMMENT
+Generated from docstrings in agent-shell-queue.el. To regenerate: open this
+file in Emacs with agent-shell-queue on your load-path, place point in the
+source block below, and run C-c C-c (or M-x org-babel-execute-buffer).
+Do not edit the #+RESULTS: block by hand — it will be overwritten on the next run.
+
+Change el-file to agent-shell-menu.el to document the menu module instead.
+
+Scope is controlled by the `scope' variable at the top of the source block:
+  'exported   -- all public symbols (name contains no package-private --)
+  'autoloaded -- only ;;;###autoload-annotated public symbols
+  (list ...)  -- exactly these named symbols, flat output in given order
+#+END_COMMENT
+
+#+BEGIN_SRC emacs-lisp :results output raw :exports none
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end (save-excursion (org-end-of-subtree t) (point))))
+      (forward-line 1)
+      (while (and (< (point) end) (not (org-at-heading-p)))
+        (forward-line 1))
+      (when (< (point) end)
+        (delete-region (point) end))))
+
+  (let* ((org-dir (file-name-directory (buffer-file-name)))
+         ;; Change to agent-shell-menu.el to document the menu module.
+         (el-file (expand-file-name "agent-shell-queue.el" org-dir))
+         ;; 'exported | 'autoloaded | (list of symbol name strings)
+         (scope 'exported))
+    (add-to-list 'load-path org-dir)
+    (require 'agent-shell-queue)
+
+    (defun asq-doc--format-doc (doc)
+      (let* ((paras (split-string doc "\n\n" t))
+             (fn-para (seq-find (lambda (p) (string-match "\\`(fn " (string-trim p))) paras))
+             (rest-paras (seq-remove (lambda (p) (string-match "\\`(fn " (string-trim p))) paras)))
+        (mapconcat #'identity
+                   (delq nil
+                         (list
+                          (when fn-para (concat ": " (string-trim fn-para)))
+                          (when rest-paras
+                            (mapconcat
+                             (lambda (para)
+                               (if (string-match "\\`[ \t]" para)
+                                   para
+                                 (mapconcat #'string-trim (split-string para "\n" t) " ")))
+                             rest-paras "\n\n"))))
+                   "\n\n")))
+
+    (defun asq-doc--format-sym (name &optional heading)
+      (let* ((sym (intern name))
+             (fn-p (fboundp sym))
+             (var-p (and (not fn-p) (boundp sym)))
+             (doc (or (when fn-p (documentation sym))
+                      (when var-p (documentation-property sym 'variable-documentation)))))
+        (format "%s~%s~\n\n%s\n\n"
+                (concat (or heading "*** ") (if doc "" "TODO "))
+                name
+                (if doc (asq-doc--format-doc doc) "*no docstring*"))))
+
+    (cond
+     ;; Section-based collection for 'exported and 'autoloaded.
+     ;; agent-shell-queue uses `;;; Section Name' (triple-semicolon) headers
+     ;; rather than long ruler lines; the section name is on the same line.
+     ((memq scope '(exported autoloaded))
+      (let (sections current-section current-syms autoload-next)
+        (with-temp-buffer
+          (insert-file-contents el-file)
+          (goto-char (point-min))
+          (while (not (eobp))
+            (let ((line (buffer-substring-no-properties
+                         (line-beginning-position) (line-end-position))))
+              (cond
+               ;; `;;; Section Name' — combined delimiter and name.
+               ;; Skip standard file sections (Commentary, Code).
+               ((and (string-match "^;;; \\([A-Z][^:\n]+\\)$" line)
+                     (not (member (match-string 1 line) '("Commentary" "Code"))))
+                (when current-section
+                  (push (cons current-section (nreverse current-syms)) sections))
+                (setq current-section (match-string 1 line)
+                      current-syms nil
+                      autoload-next nil))
+               ((string-match "^;;;###autoload" line)
+                (setq autoload-next t))
+               ((and current-section
+                     (string-match "^(\\(?:cl-\\)?def[^ ]+ +'?\\([^ ()]+\\)" line)
+                     (not (string-match-p "[a-z]--" (match-string 1 line)))
+                     (or (eq scope 'exported)
+                         (and (eq scope 'autoloaded) autoload-next)))
+                (push (match-string 1 line) current-syms)
+                (setq autoload-next nil))
+               ((not (string-empty-p (string-trim line)))
+                (setq autoload-next nil))))
+            (forward-line 1))
+          (when current-section
+            (push (cons current-section (nreverse current-syms)) sections)))
+        (dolist (section (nreverse sections))
+          (princ (format "** %s\n\n" (car section)))
+          (dolist (name (cdr section))
+            (princ (asq-doc--format-sym name))))))
+
+     ;; Flat output for an explicit symbol list, in the given order.
+     ((listp scope)
+      (dolist (name scope)
+        (princ (asq-doc--format-sym name "** "))))))
+#+END_SRC
+
+#+RESULTS:
+
 ** Configuration
 
 *** ~agent-shell-queue-serialization-format~
