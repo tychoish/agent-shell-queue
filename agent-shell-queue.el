@@ -4526,6 +4526,14 @@ With a prefix argument, opens an unassigned capture instead."
 	       "on"
 	     "off")))
 
+(defun agent-shell-queue-toggle-kind-column ()
+  "Toggle visibility of the Kind column in the queue buffer."
+  (interactive)
+  (setq agent-shell-queue-show-kind-column (not agent-shell-queue-show-kind-column))
+  (agent-shell-queue-buffer-refresh)
+  (message "Queue kind column: %s"
+           (if agent-shell-queue-show-kind-column "on" "off")))
+
 (defun agent-shell-queue-toggle-multiline-format ()
   "Toggle multi-line display format for the queue buffer."
   (interactive)
@@ -4545,20 +4553,23 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     (user-error "Not in an agent-shell queue buffer"))
   (let* ((columns `(("Buffer column" . agent-shell-queue-show-buffer-column)
                     ("Ordinal # column" . agent-shell-queue-show-ordinal-column)
-                    ("Age column" . agent-shell-queue-show-age-column)))
+                    ("Age column" . agent-shell-queue-show-age-column)
+                    ("Kind column" . agent-shell-queue-show-kind-column)))
          (table (make-hash-table :test #'equal)))
     (map-put! table "+ show all columns"
              (if (and agent-shell-queue-show-buffer-column
                       agent-shell-queue-show-ordinal-column
-                      agent-shell-queue-show-age-column)
+                      agent-shell-queue-show-age-column
+                      agent-shell-queue-show-kind-column)
                  "already showing all columns"
-               "enable Buffer, Ordinal, and Age columns"))
+               "enable Buffer, Ordinal, Age, and Kind columns"))
     (map-put! table "+ minimal: status and prompt only"
              (if (not (or agent-shell-queue-show-buffer-column
                           agent-shell-queue-show-ordinal-column
-                          agent-shell-queue-show-age-column))
+                          agent-shell-queue-show-age-column
+                          agent-shell-queue-show-kind-column))
                  "already minimal"
-               "hide Buffer, Ordinal, and Age columns"))
+               "hide Buffer, Ordinal, Age, and Kind columns"))
     (seq-do (lambda (it)
               (let ((on (symbol-value (cdr it))))
                 (map-put! table (car it)
@@ -4578,11 +4589,13 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
        ((equal choice "+ show all columns")
         (setq agent-shell-queue-show-buffer-column t
               agent-shell-queue-show-ordinal-column t
-              agent-shell-queue-show-age-column t))
+              agent-shell-queue-show-age-column t
+              agent-shell-queue-show-kind-column t))
        ((equal choice "+ minimal: status and prompt only")
         (setq agent-shell-queue-show-buffer-column nil
               agent-shell-queue-show-ordinal-column nil
-              agent-shell-queue-show-age-column nil))
+              agent-shell-queue-show-age-column nil
+              agent-shell-queue-show-kind-column nil))
        ((equal choice "Multi-line format")
         (setq agent-shell-queue-multiline-format (not agent-shell-queue-multiline-format)))
        (t
@@ -4729,6 +4742,11 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
                     (if agent-shell-queue-show-age-column
                         "[x] Age column"
                       "[ ] Age column")))
+    ("dk" agent-shell-queue-toggle-kind-column
+     :description (lambda ()
+                    (if agent-shell-queue-show-kind-column
+                        "[x] Kind column"
+                      "[ ] Kind column")))
     ("dm" agent-shell-queue-toggle-multiline-format
      :description (lambda ()
                     (if agent-shell-queue-multiline-format
