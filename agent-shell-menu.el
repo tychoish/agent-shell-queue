@@ -73,6 +73,7 @@
     ("set session model" . (agent-shell-set-session-model . agent-shell-menu--in-session-p))
     ("copy session id" . (agent-shell-copy-session-id . agent-shell-menu--in-session-p))
     ("open transcript" . (agent-shell-open-transcript . agent-shell-menu--in-session-p))
+    ("session info" . (agent-shell-session-info . agent-shell-menu--in-session-p))
     ("collapse menu" . (agent-shell-select-collapse . agent-shell-menu--in-session-p))
     ;; Queue actions
     ("interject" . (agent-shell-queue-interject . agent-shell-queue-interject-available-p))
@@ -518,7 +519,9 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
    ["Enqueue"
     ("ee" "Enqueue prompt"      agent-shell-queue-enqueue)
     ("el" "Emacs Lisp form"     agent-shell-queue-enqueue-emacs)
-    ("ec" "Emacs command"       agent-shell-queue-enqueue-emacs-command)]
+    ("ec" "Emacs command"       agent-shell-queue-enqueue-emacs-command)
+    ("es" "Shell (eshell)"      agent-shell-queue-enqueue-shell-eshell)
+    ("et" "Shell (eat)"         agent-shell-queue-enqueue-shell-eat)]
    ["Insert"
     ("p"  "Pause checkpoint"    agent-shell-queue-insert-pause)
     ("d"  "Context drop"        agent-shell-queue-insert-clear-context)
@@ -677,6 +680,125 @@ three expand-by-default customization variables."
 	(let ((entry (map-elt by-cat choice)))
 	  (agent-shell--set-collapse (< (cdr entry) (car entry))
 				     :category choice)))))))
+
+;;; Session info buffer
+
+(declare-function agent-shell--state "agent-shell")
+(declare-function shell-maker-process "shell-maker")
+
+(defun agent-shell-menu--count-fragments (buf)
+  "Return the number of distinct UI fragments (blocks) in BUF."
+  (with-current-buffer buf
+    (let ((seen (make-hash-table :test #'equal))
+          (pos (point-min))
+          (count 0))
+      (while pos
+        (when-let* ((state (get-text-property pos 'agent-shell-ui-state))
+                    (id (map-elt state :qualified-id))
+                    ((not (map-elt seen id))))
+          (setf (map-elt seen id) t)
+          (cl-incf count))
+        (setq pos (next-single-property-change pos 'agent-shell-ui-state)))
+      count)))
+
+(defun agent-shell-menu--format-uptime (start-time)
+  "Return a human-readable uptime string from START-TIME (a time value)."
+  (if start-time
+      (let* ((delta (float-time (time-since start-time)))
+             (days  (floor (/ delta 86400)))
+             (hours (floor (/ (mod delta 86400) 3600)))
+             (mins  (floor (/ (mod delta 3600) 60)))
+             (secs  (floor (mod delta 60))))
+        (cond
+         ((> days 0)  (format "%dd %dh %dm" days hours mins))
+         ((> hours 0) (format "%dh %dm %ds" hours mins secs))
+         ((> mins 0)  (format "%dm %ds" mins secs))
+         (t           (format "%ds" secs))))
+    "unknown"))
+
+(defun agent-shell-menu--process-start-time (proc)
+  "Return the start time of PROC as a time value, or nil."
+  (when-let* ((attrs (ignore-errors (process-attributes (process-id proc))))
+              (start (alist-get 'start attrs)))
+    start))
+
+;;;###autoload
+(defun agent-shell-session-info ()
+  "Display a read-only ephemeral buffer with live session diagnostics.
+Shows fragment count, agent uptime, queue options, queue depth, and
+the underlying shell process uptime for the current agent-shell buffer."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Not in an agent-shell buffer"))
+  (let* ((shell-buf (current-buffer))
+         (buf-name (buffer-name shell-buf))
+         (state (ignore-errors (agent-shell--state)))
+         (session (when state (map-elt state :session)))
+         (last-activity (when state (map-elt state :last-activity-time)))
+         (request-count (when state (or (map-elt state :request-count) 0)))
+         (fragment-count (agent-shell-menu--count-fragments shell-buf))
+         (proc (ignore-errors (shell-maker-process buf-name)))
+         (proc-start (when proc (agent-shell-menu--process-start-time proc)))
+         (model (when session (map-elt session :model-id)))
+         (mode-id (when session (map-elt session :mode-id)))
+         (queue-only-p (and (boundp 'agent-shell-queue-only-mode)
+                            (buffer-local-value 'agent-shell-queue-only-mode shell-buf)))
+         (intercept-p (and (boundp 'agent-shell-queue-intercept-mode)
+                           (buffer-local-value 'agent-shell-queue-intercept-mode shell-buf)))
+         (globally-paused (ignore-errors
+                            (agent-shell-queue-queue-paused agent-shell-queue--queue)))
+         (session-paused (ignore-errors
+                           (member buf-name
+                                   (agent-shell-queue-queue-session-paused
+                                    agent-shell-queue--queue))))
+         (queue-items (ignore-errors
+                        (cdr (assoc buf-name
+                                    (agent-shell-queue-store-items
+                                     agent-shell-queue--store)))))
+         (queue-depth (length queue-items))
+         (active-items (seq-count (lambda (it)
+                                    (memq (agent-shell-queue-item-status it)
+                                          '(active running)))
+                                  (or queue-items nil)))
+         (info-buf (get-buffer-create (format "*agent-shell-info: %s*" buf-name))))
+    (with-current-buffer info-buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (propertize (format "Session: %s\n" buf-name) 'face 'bold))
+        (insert (make-string (+ 9 (length buf-name)) ?─) "\n\n")
+        (insert (propertize "Agent\n" 'face '(bold underline)))
+        (insert (format "  Fragments (blocks)  %d\n" fragment-count))
+        (insert (format "  Requests sent       %d\n" request-count))
+        (insert (format "  Last activity       %s\n"
+                        (if last-activity
+                            (format "%s ago" (agent-shell-menu--format-uptime last-activity))
+                          "none")))
+        (when model
+          (insert (format "  Model               %s\n" model)))
+        (when mode-id
+          (insert (format "  Mode                %s\n" mode-id)))
+        (insert "\n")
+        (insert (propertize "Process\n" 'face '(bold underline)))
+        (insert (format "  Uptime              %s\n"
+                        (if proc-start
+                            (agent-shell-menu--format-uptime proc-start)
+                          (if proc "running (start unknown)" "not running"))))
+        (insert "\n")
+        (insert (propertize "Queue\n" 'face '(bold underline)))
+        (insert (format "  Depth               %d total, %d active\n"
+                        queue-depth active-items))
+        (insert (format "  Queue-only mode     %s\n" (if queue-only-p "enabled" "disabled")))
+        (insert (format "  Intercept mode      %s\n" (if intercept-p "enabled" "disabled")))
+        (insert (format "  Global pause        %s\n" (if globally-paused "paused" "running")))
+        (insert (format "  Session suspended   %s\n" (if session-paused "yes" "no")))
+        (insert "\n")
+        (insert (propertize "q" 'face 'bold) " to close\n"))
+      (read-only-mode 1)
+      (local-set-key (kbd "q") #'quit-window)
+      (local-set-key (kbd "g") (lambda () (interactive)
+                                 (with-current-buffer shell-buf
+                                   (agent-shell-session-info)))))
+    (pop-to-buffer info-buf '(display-buffer-below-selected))))
 
 ;;; Wire menu key into queue mode map
 

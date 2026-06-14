@@ -341,6 +341,78 @@ warning for non-nil names that have no registry entry."
         (message "agent-shell-queue: unknown executor %S — item will use kind dispatch" name)
         nil))))
 
+;;; Item-type registry
+
+(cl-defstruct (agent-shell-queue-item-type
+               (:constructor agent-shell-queue-item-type--make)
+               (:copier nil))
+  "Registry entry describing a queue item kind with its capabilities.
+KIND: symbol — the :kind field value for items of this type.
+LABEL: string — display name (Kind column and menus).
+BUFFER-PRED: (lambda (buf)) → bool | nil means any buffer including unassigned.
+DISPATCH-FN: (lambda (item buf-name)) — executes the item when dispatched.
+INPUT-SPEC: plist describing how to collect user input:
+  (:kind capture :mode MODE)   open capture buffer in MODE (nil → capture-mode)
+  (:kind read :prompt P :fn F) single read via function F called with P
+  (:kind none)                 no user input; args will be empty
+  (:kind special :fn F)        zero-arg interactive function F handles everything"
+  kind label buffer-pred dispatch-fn input-spec)
+
+(defvar agent-shell-queue--item-types nil
+  "List of `agent-shell-queue-item-type' entries.
+Register entries with `agent-shell-queue-register-item-type'.
+Built-in registrations are added at the end of this file.")
+
+(defcustom agent-shell-queue-strict-buffer-assignment nil
+  "When non-nil, signal `user-error' when no compatible live buffer exists.
+When nil (default), fall through to nil/unassigned assignment instead."
+  :type 'boolean
+  :group 'agent-shell-queue)
+
+(cl-defun agent-shell-queue-register-item-type (&key kind label buffer-pred dispatch-fn input-spec)
+  "Register an item type in `agent-shell-queue--item-types'.
+KIND is a symbol; re-registering an existing KIND replaces the entry.
+See `agent-shell-queue-item-type' for field documentation."
+  (setq agent-shell-queue--item-types
+        (cons (agent-shell-queue-item-type--make
+               :kind kind :label label :buffer-pred buffer-pred
+               :dispatch-fn dispatch-fn :input-spec input-spec)
+              (seq-remove (lambda (e) (eq kind (agent-shell-queue-item-type-kind e)))
+                          agent-shell-queue--item-types))))
+
+(defun agent-shell-queue--type-for-kind (kind)
+  "Return the `agent-shell-queue-item-type' for KIND symbol, or nil."
+  (seq-find (lambda (e) (eq kind (agent-shell-queue-item-type-kind e)))
+            agent-shell-queue--item-types))
+
+(defun agent-shell-queue--types-for-buffer (buf)
+  "Return item types compatible with BUF.
+nil BUF (unassigned) accepts all types."
+  (if (null buf)
+      agent-shell-queue--item-types
+    (seq-filter (lambda (type)
+                  (let ((pred (agent-shell-queue-item-type-buffer-pred type)))
+                    (or (null pred) (funcall pred buf))))
+                agent-shell-queue--item-types)))
+
+(defun agent-shell-queue--validate-kind-for-buffer (kind buf-or-nil)
+  "Signal `user-error' when KIND is incompatible with BUF-OR-NIL.
+nil BUF-OR-NIL (unassigned) always accepts any kind.  Returns t on success."
+  (when-let* ((buf buf-or-nil)
+              (type (agent-shell-queue--type-for-kind kind))
+              (pred (agent-shell-queue-item-type-buffer-pred type)))
+    (unless (funcall pred buf)
+      (user-error "Item kind '%s' cannot be assigned to buffer '%s'"
+                  (agent-shell-queue-item-type-label type)
+                  (buffer-name buf))))
+  t)
+
+(defun agent-shell-queue--kind-needs-session-p (kind)
+  "Return non-nil when KIND requires agent-shell session-mode compatibility."
+  (when-let* ((type (agent-shell-queue--type-for-kind kind)))
+    (eq (agent-shell-queue-item-type-buffer-pred type)
+        #'agent-shell-queue--agent-shell-buffer-p)))
+
 ;;; Data model
 
 (agent-shell-queue--defstruct agent-shell-queue-item
@@ -763,9 +835,69 @@ the session queue is paused until the mode changes.")
   (setf (agent-shell-queue-store-file agent-shell-queue--store)(agent-shell-queue--state-file))
   agent-shell-queue--store)
 
+;;; Buffer predicates
+
+(defun agent-shell-queue--agent-shell-buffer-p (buf)
+  "Return non-nil when BUF is a live agent-shell session buffer."
+  (and (buffer-live-p buf)
+       (with-current-buffer buf (derived-mode-p 'agent-shell-mode))))
+
+(defun agent-shell-queue--eshell-buffer-p (buf)
+  "Return non-nil when BUF is a live eshell buffer."
+  (and (buffer-live-p buf)
+       (with-current-buffer buf (derived-mode-p 'eshell-mode))))
+
+(defun agent-shell-queue--eat-buffer-p (buf)
+  "Return non-nil when BUF is a live eat buffer."
+  (and (buffer-live-p buf)
+       (with-current-buffer buf (derived-mode-p 'eat-mode))))
+
 (defun agent-shell-queue--pick-buffer (prompt)
   "Pick a live agent-shell buffer using PROMPT."
   (funcall agent-shell-queue-pick-buffer-function prompt))
+
+(defun agent-shell-queue--candidate-buffers-for-kind (kind)
+  "Return live buffers compatible with KIND, or nil when kind accepts any.
+When the kind has no buffer-pred (any-buffer), returns all live buffers."
+  (when-let* ((type (agent-shell-queue--type-for-kind kind))
+              (pred (agent-shell-queue-item-type-buffer-pred type)))
+    (seq-filter (lambda (b) (and (buffer-live-p b) (funcall pred b)))
+                (buffer-list))))
+
+(defun agent-shell-queue--pick-buffer-for-kind (kind &optional prompt)
+  "Pick a buffer compatible with KIND via ACR, offering nil/unassigned.
+Returns a live buffer, or nil meaning the unassigned bucket.
+When no compatible buffers exist: falls through to nil unless
+`agent-shell-queue-strict-buffer-assignment' is non-nil."
+  (let* ((type (agent-shell-queue--type-for-kind kind))
+         (pred (when type (agent-shell-queue-item-type-buffer-pred type)))
+         (candidates (if pred
+                         (seq-filter (lambda (b) (and (buffer-live-p b) (funcall pred b)))
+                                     (buffer-list))
+                       (agent-shell-buffers)))
+         (prompt (or prompt "Target: ")))
+    (cond
+     ((null candidates)
+      (when agent-shell-queue-strict-buffer-assignment
+        (user-error "No live buffer compatible with kind '%s'" kind))
+      nil)
+     (t
+      (let* ((rows (seq-map (lambda (buf)
+                              (cons (buffer-name buf)
+                                    (agent-shell-queue--annotation
+                                     (agent-shell-queue--buffer-state-label
+                                      (buffer-name buf))
+                                     60)))
+                            candidates))
+             (table (cons (cons agent-shell-queue--unassigned-key "defer — assign later")
+                          rows))
+             (choice (annotated-completing-read table
+                                                :prompt prompt
+                                                :category 'agent-shell-buffer
+                                                :require-match t)))
+        (if (equal choice agent-shell-queue--unassigned-key)
+            nil
+          (get-buffer choice)))))))
 
 (defun agent-shell-queue--format-age (delta)
   "Format DELTA time-value as a short relative age string.
@@ -1272,25 +1404,39 @@ Registers a `turn-complete' subscription on BUF if one is not already active."
   "Open an Emacs Lisp capture buffer to compose a form for BUF's queue.
 The capture buffer is in `emacs-lisp-mode'.  Confirm with \\`C-c C-c',
 cancel with \\`C-c C-k'.  When dispatched, the form is evaluated via
-`eval'; errors are reported as messages and the item is marked done."
-  (interactive (list (agent-shell-queue--pick-buffer "Target session: ")))
-  (agent-shell-queue--open-elisp-capture buf))
+`eval'; errors are reported as messages and the item is marked done.
+BUF may be nil to enqueue to the unassigned bucket."
+  (interactive (list (agent-shell-queue--pick-buffer-for-kind 'emacs-lisp "Target (or unassigned): ")))
+  (if buf
+      (agent-shell-queue--open-elisp-capture buf)
+    (agent-shell-queue--open-capture nil nil nil 'emacs-lisp 'emacs-lisp-mode)))
 
 ;;;###autoload
 (defun agent-shell-queue-enqueue-emacs-command (command buf)
   "Enqueue an interactive COMMAND to run in Emacs for BUF's queue.
 COMMAND is selected via `read-command' (completing-read over all commands).
-When dispatched, the command is invoked with `call-interactively'."
+When dispatched, the command is invoked with `call-interactively'.
+BUF may be nil to enqueue to the unassigned bucket."
   (interactive
    (list (read-command "Emacs command: ")
-         (agent-shell-queue--pick-buffer "Target session: ")))
-  (with-agent-shell-queue
-    (let ((item (agent-shell-queue--make-item (symbol-name command) nil 'emacs-command)))
-      (setf (agent-shell-queue-item-directory item)
-            (buffer-local-value 'default-directory buf))
-      (agent-shell-queue--add-item-to-bucket (buffer-name buf) item)
-      (agent-shell-queue--ensure-subscription buf)
-      item)))
+         (agent-shell-queue--pick-buffer-for-kind 'emacs-command "Target (or unassigned): ")))
+  (agent-shell-queue--enqueue-args (symbol-name command) 'emacs-command buf))
+
+;;;###autoload
+(defun agent-shell-queue-enqueue-shell-eshell (buf)
+  "Open a shell capture buffer to compose a command for eshell BUF.
+The capture buffer is in `sh-mode'.  Confirm with \\`C-c C-c'.
+BUF may be nil to enqueue to the unassigned bucket."
+  (interactive (list (agent-shell-queue--pick-buffer-for-kind 'shell-eshell "eshell buffer (or unassigned): ")))
+  (agent-shell-queue--open-capture buf nil nil 'shell-eshell 'sh-mode))
+
+;;;###autoload
+(defun agent-shell-queue-enqueue-shell-eat (buf)
+  "Open a shell capture buffer to compose a command for eat BUF.
+The capture buffer is in `sh-mode'.  Confirm with \\`C-c C-c'.
+BUF may be nil to enqueue to the unassigned bucket."
+  (interactive (list (agent-shell-queue--pick-buffer-for-kind 'shell-eat "eat buffer (or unassigned): ")))
+  (agent-shell-queue--open-capture buf nil nil 'shell-eat 'sh-mode))
 
 (defun agent-shell-queue-add-unassigned (prompt &optional background)
   "Add a new item for PROMPT to the unassigned bucket.  Save and refresh.
@@ -1620,6 +1766,7 @@ If the item has a non-nil executor field, it is called as
         (message "agent-shell-queue: cannot dispatch — target shell %s is gone; use t/T to reassign"
                  buf-name))
        ((and (null (agent-shell-queue-item-executor item))
+             (agent-shell-queue--kind-needs-session-p (agent-shell-queue-item-kind item))
              (agent-shell-queue--session-mode-blocked-p buf))
         (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
         (message "agent-shell-queue: dispatch blocked — session %s is in mode %s"
@@ -1637,39 +1784,10 @@ If the item has a non-nil executor field, it is called as
                   (funcall (agent-shell-queue-item-executor item)
                            item
                            (agent-shell-queue-item-args item))
-                (pcase (agent-shell-queue-item-kind item)
-                  ((or 'emacs 'emacs-lisp)
-                   (condition-case eval-err
-                       (eval (read (agent-shell-queue-item-args item)) t)
-                     (error (message "agent-shell-queue: emacs-lisp item %s error: %s" id eval-err)))
-                   (agent-shell-queue--complete-item item buf-name))
-                  ('emacs-command
-                   (condition-case cmd-err
-                       (call-interactively (intern (agent-shell-queue-item-args item)))
-                     (error (message "agent-shell-queue: emacs-command item %s error: %s" id cmd-err)))
-                   (agent-shell-queue--complete-item item buf-name))
-                  ((or 'pause 'compact)
-                   (cl-pushnew (cons buf-name id) agent-shell-queue--compact-running :test #'equal)
-                   (agent-shell-queue--pause-and-save buf-name)
-                   (alert (if (eq (agent-shell-queue-item-kind item) 'pause)
-                              (format "Queue for %s paused — human action required" buf-name)
-                            (format "Manual work required: %s"
-                                    (agent-shell-queue-item-args item)))
-                          :title (format "Queue → %s" buf-name)
-                          :category 'agent-shell-queue
-                          :severity 'high
-                          :persistent t))
-                  ('wait
-                   (let* ((target (date-to-time (agent-shell-queue-item-args item)))
-                          (delay (max 0 (float-time (time-subtract target (current-time)))))
-                          (wait-timer (run-with-timer delay nil
-                                                      #'agent-shell-queue--wait-timer-fire
-                                                      id)))
-                     (push (cons id wait-timer) agent-shell-queue--wait-timers)
-                     (agent-shell-queue--save)
-                     (agent-shell-queue--refresh-buffer)))
-                  (_
-                   (agent-shell-queue--default-executor item (agent-shell-queue-item-args item))))))
+                (if-let* ((type (agent-shell-queue--type-for-kind
+                                 (agent-shell-queue-item-kind item))))
+                    (funcall (agent-shell-queue-item-type-dispatch-fn type) item buf-name)
+                  (agent-shell-queue--default-executor item (agent-shell-queue-item-args item)))))
           (error
            (agent-shell-queue--handle-stale-item id buf-name err))))))))
 
@@ -4163,28 +4281,37 @@ Items in aborted state remain editable; only running, done, or absent items are 
     (agent-shell-queue-buffer-refresh)))
 
 (defun agent-shell-queue-buffer-assign ()
-  "Assign the item at point to an agent-shell buffer.
-Buffers sharing the same `default-directory' as the current target are annotated.
-Items in the unassigned bucket are moved to the selected shell's queue."
+  "Assign the item at point to a compatible buffer or unassigned.
+Candidate buffers are filtered by the item's kind via the type registry.
+Offers nil/unassigned as an option for deferred assignment."
   (interactive)
   (when-let* ((id (tabulated-list-get-id))
-              (pair (agent-shell-queue--item-by-id id))
-              (bufs (or (agent-shell-buffers)
-                        (user-error "No live agent-shell buffers"))))
+              (pair (agent-shell-queue--item-by-id id)))
     (agent-shell-queue--assert-not-running (cdr pair))
-    (let* ((current-dir (when-let* ((b (get-buffer (car pair))))
+    (let* ((item (cdr pair))
+           (kind (agent-shell-queue-item-kind item))
+           (type (agent-shell-queue--type-for-kind kind))
+           (pred (when type (agent-shell-queue-item-type-buffer-pred type)))
+           (bufs (if pred
+                     (seq-filter (lambda (b) (and (buffer-live-p b) (funcall pred b)))
+                                 (buffer-list))
+                   (agent-shell-buffers)))
+           (current-dir (when-let* ((b (get-buffer (car pair))))
                           (buffer-local-value 'default-directory b)))
-           (table (seq-map (lambda (it)
-                             (let* ((name (buffer-name it))
-                                    (dir (buffer-local-value 'default-directory it))
-                                    (dir-str (if (and current-dir (equal dir current-dir))
-                                                 (concat "(same dir) " (abbreviate-file-name dir))
-                                               (abbreviate-file-name (or dir "")))))
-                               (cons name
-                                     (format "%-36s %s"
-                                             dir-str
-                                             (agent-shell-queue--buffer-state-label name)))))
-                           bufs)))
+           (rows (seq-map (lambda (it)
+                            (let* ((name (buffer-name it))
+                                   (dir (buffer-local-value 'default-directory it))
+                                   (dir-str (if (and current-dir (equal dir current-dir))
+                                                (concat "(same dir) " (abbreviate-file-name dir))
+                                              (abbreviate-file-name (or dir "")))))
+                              (cons name
+                                    (agent-shell-queue--annotation
+                                     (format "%s  %s" dir-str
+                                             (agent-shell-queue--buffer-state-label name))
+                                     60))))
+                          bufs))
+           (table (cons (cons agent-shell-queue--unassigned-key "defer — unassigned bucket")
+                        rows)))
       (when-let* ((new-name (annotated-completing-read table
                                                        :prompt "assign to: "
                                                        :category 'agent-shell-buffer
@@ -4620,20 +4747,31 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
 ;;; Enqueue dispatch
 
 (defun agent-shell-queue-enqueue-dispatch ()
-  "Choose an enqueue action via annotated-completing-read and invoke it.
-Available actions: compose a shell prompt, enqueue an Emacs call, enqueue
-from clipboard, or insert a wait-until timer item."
+  "Choose an item kind and target buffer via ACR, then collect input.
+Choices are built from the item-type registry.  nil/unassigned is always
+offered as a target so items can be deferred for later assignment."
   (interactive)
-  (let* ((choices '(("prompt"    "Compose and enqueue a shell prompt")
-                    ("emacs"     "Enqueue an Emacs Lisp call")
-                    ("clipboard" "Enqueue from clipboard")
-                    ("wait"      "Insert a wait-until timer item")))
-         (choice (annotated-completing-read choices :prompt "enqueue: " :require-match t)))
-    (pcase choice
-      ("prompt"    (call-interactively #'agent-shell-queue-capture))
-      ("emacs"     (call-interactively #'agent-shell-queue-enqueue-emacs))
-      ("clipboard" (call-interactively #'agent-shell-queue-capture-from-clipboard))
-      ("wait"      (call-interactively #'agent-shell-queue-insert-wait)))))
+  (agent-shell-queue--ensure-loaded)
+  (let* ((choices (seq-map
+                   (lambda (type)
+                     (cons (agent-shell-queue-item-type-label type)
+                           (let ((pred (agent-shell-queue-item-type-buffer-pred type)))
+                             (cond
+                              ((null pred)                                           "any buffer or unassigned")
+                              ((eq pred #'agent-shell-queue--agent-shell-buffer-p)  "agent-shell session")
+                              ((eq pred #'agent-shell-queue--eshell-buffer-p)       "eshell buffer")
+                              ((eq pred #'agent-shell-queue--eat-buffer-p)          "eat buffer")
+                              (t                                                     "compatible buffer")))))
+                   agent-shell-queue--item-types))
+         (choice (annotated-completing-read choices :prompt "enqueue: " :require-match t))
+         (type (seq-find (lambda (e)
+                           (equal (agent-shell-queue-item-type-label e) choice))
+                         agent-shell-queue--item-types)))
+    (when type
+      (let ((buf (agent-shell-queue--pick-buffer-for-kind
+                  (agent-shell-queue-item-type-kind type)
+                  "Target (or unassigned): ")))
+        (agent-shell-queue--invoke-input-for-type type buf)))))
 
 ;;; Edit popup
 
@@ -4811,25 +4949,37 @@ than duplicate the draft on subsequent saves.")
   "Kind of queue item to create when this capture buffer is confirmed.
 Defaults to `prompt'; set to `emacs-lisp' for Emacs Lisp capture buffers.")
 
-(defun agent-shell-queue--open-capture (target-buf &optional origin-buf initial-content)
+(defun agent-shell-queue--open-capture (target-buf &optional origin-buf initial-content kind mode)
   "Open a capture buffer targeting TARGET-BUF (nil for unassigned queue).
 Multiple capture buffers can be open simultaneously; each is named after its target.
 ORIGIN-BUF is used for context-insertion commands; defaults to current buffer.
-INITIAL-CONTENT, when non-nil, is inserted into the buffer before display."
+INITIAL-CONTENT, when non-nil, is inserted into the buffer before display.
+KIND sets `agent-shell-queue--capture-kind' (defaults to `prompt').
+MODE, when non-nil, is a major-mode function used instead of `agent-shell-queue-capture-mode';
+C-c C-c and C-c C-k are bound in the new mode's local map."
   (let* ((bucket-name (if target-buf
                           (buffer-name target-buf)
                         agent-shell-queue--unassigned-key))
+         (kind-label (when (and kind (not (eq kind 'prompt)))
+                       (concat "  |  " (symbol-name kind))))
          (capture-buf (get-buffer-create
                        (if target-buf
                            (format "*agent-shell-queue-capture: %s*" (buffer-name target-buf))
                          "*agent-shell-queue-capture: unassigned*"))))
     (with-current-buffer capture-buf
       (erase-buffer)
-      (agent-shell-queue-capture-mode)
+      (if mode
+          (progn
+            (funcall mode)
+            (use-local-map (copy-keymap (current-local-map)))
+            (local-set-key (kbd "C-c C-c") #'agent-shell-queue-capture-confirm)
+            (local-set-key (kbd "C-c C-k") #'agent-shell-queue-capture-cancel))
+        (agent-shell-queue-capture-mode))
       (setq agent-shell-queue--capture-target target-buf
             agent-shell-queue--capture-origin (or origin-buf (current-buffer))
             agent-shell-queue--capture-background-task nil
-            agent-shell-queue--capture-after-id nil)
+            agent-shell-queue--capture-after-id nil
+            agent-shell-queue--capture-kind (or kind 'prompt))
       (when (and initial-content (not (string-empty-p initial-content)))
         (insert initial-content))
       (let* ((bucket-items (cdr (assoc bucket-name (agent-shell-queue-store-items agent-shell-queue--store))))
@@ -4837,11 +4987,123 @@ INITIAL-CONTENT, when non-nil, is inserted into the buffer before display."
              (state (agent-shell-queue--activity-state)))
         (setq-local header-line-format
                     (concat
-                     (propertize (format " %s  |  " bucket-name) 'face 'shadow)
+                     (propertize (format " %s%s  |  " bucket-name (or kind-label "")) 'face 'shadow)
                      state
                      (propertize (format "  |  depth: %d" depth) 'face 'shadow)))))
     (pop-to-buffer capture-buf '(display-buffer-below-selected))
     capture-buf))
+
+;;; Registry dispatch functions
+
+(defun agent-shell-queue--dispatch-to-session (item buf-name)
+  "Dispatch ITEM to its agent-shell session via the default executor."
+  (agent-shell-queue--default-executor item (agent-shell-queue-item-args item)))
+
+(defun agent-shell-queue--dispatch-emacs-lisp (item buf-name)
+  "Dispatch an emacs-lisp ITEM by evaluating its args as a Lisp form."
+  (condition-case err
+      (eval (read (agent-shell-queue-item-args item)) t)
+    (error (message "agent-shell-queue: emacs-lisp %s error: %s"
+                    (agent-shell-queue-item-id item) err)))
+  (agent-shell-queue--complete-item item buf-name))
+
+(defun agent-shell-queue--dispatch-emacs-command (item buf-name)
+  "Dispatch an emacs-command ITEM by invoking it interactively."
+  (condition-case err
+      (call-interactively (intern (agent-shell-queue-item-args item)))
+    (error (message "agent-shell-queue: emacs-command %s error: %s"
+                    (agent-shell-queue-item-id item) err)))
+  (agent-shell-queue--complete-item item buf-name))
+
+(defun agent-shell-queue--dispatch-pause-compact (item buf-name)
+  "Dispatch a pause or compact ITEM: pause the queue and alert."
+  (cl-pushnew (cons buf-name (agent-shell-queue-item-id item))
+              agent-shell-queue--compact-running :test #'equal)
+  (agent-shell-queue--pause-and-save buf-name)
+  (alert (if (eq (agent-shell-queue-item-kind item) 'pause)
+             (format "Queue for %s paused — human action required" buf-name)
+           (format "Manual work required: %s" (agent-shell-queue-item-args item)))
+         :title (format "Queue → %s" buf-name)
+         :category 'agent-shell-queue
+         :severity 'high
+         :persistent t))
+
+(defun agent-shell-queue--dispatch-wait (item _buf-name)
+  "Dispatch a wait ITEM: arm a timer to fire at the target time."
+  (let* ((id (agent-shell-queue-item-id item))
+         (target (date-to-time (agent-shell-queue-item-args item)))
+         (delay (max 0 (float-time (time-subtract target (current-time)))))
+         (wait-timer (run-with-timer delay nil #'agent-shell-queue--wait-timer-fire id)))
+    (push (cons id wait-timer) agent-shell-queue--wait-timers)
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)))
+
+(declare-function eshell-insert-and-send "esh-mode")
+
+(defun agent-shell-queue--dispatch-shell-eshell (item buf-name)
+  "Dispatch a shell-eshell ITEM by inserting and sending in the eshell buffer."
+  (if-let* ((buf (get-buffer buf-name)))
+      (progn
+        (with-current-buffer buf
+          (eshell-insert-and-send (agent-shell-queue-item-args item)))
+        (agent-shell-queue--complete-item item buf-name))
+    (message "agent-shell-queue: eshell buffer %s gone for item %s"
+             buf-name (agent-shell-queue-item-id item))))
+
+(declare-function eat-term-send-string "eat")
+
+(defun agent-shell-queue--dispatch-shell-eat (item buf-name)
+  "Dispatch a shell-eat ITEM via eat-term-send-string.
+See ~/garen/plans/emacs/shell-eat-enhancement.org for improvement notes."
+  (if-let* ((buf (get-buffer buf-name)))
+      (progn
+        (with-current-buffer buf
+          (when (bound-and-true-p eat-terminal)
+            (eat-term-send-string eat-terminal
+                                  (concat (agent-shell-queue-item-args item) "\n"))))
+        (agent-shell-queue--complete-item item buf-name))
+    (message "agent-shell-queue: eat buffer %s gone for item %s"
+             buf-name (agent-shell-queue-item-id item))))
+
+;;; Registry input helpers
+
+(defun agent-shell-queue--enqueue-args (args kind buf)
+  "Enqueue ARGS as a KIND item targeting BUF (nil = unassigned bucket)."
+  (with-agent-shell-queue
+    (let ((item (agent-shell-queue--make-item args nil kind)))
+      (if buf
+          (progn
+            (setf (agent-shell-queue-item-directory item)
+                  (buffer-local-value 'default-directory buf))
+            (agent-shell-queue--add-item-to-bucket (buffer-name buf) item)
+            (agent-shell-queue--ensure-subscription buf))
+        (agent-shell-queue--add-item-to-bucket agent-shell-queue--unassigned-key item)))))
+
+(defun agent-shell-queue--invoke-input-for-type (type buf)
+  "Collect user input for TYPE and enqueue the resulting item targeting BUF."
+  (let* ((kind (agent-shell-queue-item-type-kind type))
+         (spec (agent-shell-queue-item-type-input-spec type))
+         (input-kind (plist-get spec :kind)))
+    (pcase input-kind
+      ('capture
+       (let ((mode (plist-get spec :mode)))
+         (if (eq mode 'emacs-lisp-mode)
+             (if buf
+                 (agent-shell-queue--open-elisp-capture buf)
+               (message "agent-shell-queue: emacs-lisp requires a target buffer"))
+           (agent-shell-queue--open-capture buf nil nil kind mode))))
+      ('read
+       (let* ((prompt (plist-get spec :prompt))
+              (fn (plist-get spec :fn))
+              (result (funcall fn prompt))
+              (args (if (symbolp result) (symbol-name result) result)))
+         (agent-shell-queue--enqueue-args args kind buf)))
+      ('none
+       (agent-shell-queue--enqueue-args "" kind buf))
+      ('special
+       (funcall (plist-get spec :fn) buf)))))
+
+;;; Capture buffers
 
 (defun agent-shell-queue--open-elisp-capture (target-buf)
   "Open an Emacs Lisp capture buffer targeting TARGET-BUF's queue.
@@ -6196,10 +6458,12 @@ Existing sessions are not changed."
 
 ;;;###autoload
 (defun agent-shell-queue-ready-capture ()
-  "Clear the ready overlay and open an agent-shell-queue capture buffer."
+  "Clear the ready overlay and open the queue enqueue dispatch menu.
+Any keypress in queue-only mode at the idle prompt routes here, giving
+access to all registered item kinds rather than prompt-only capture."
   (interactive)
   (agent-shell-queue--ready-clear)
-  (call-interactively #'agent-shell-queue-capture))
+  (call-interactively #'agent-shell-queue-enqueue-dispatch))
 
 (defvar-keymap agent-shell-queue-only-mode-map
   "SPC" #'agent-shell-queue-ready-capture
@@ -6238,6 +6502,71 @@ Existing sessions are not changed."
 ;;; Initialize on load
 
 (agent-shell-queue--setup-hooks)
+
+;;; Built-in item type registrations
+
+(agent-shell-queue-register-item-type
+ :kind 'prompt
+ :label "agent-shell-prompt"
+ :buffer-pred #'agent-shell-queue--agent-shell-buffer-p
+ :dispatch-fn #'agent-shell-queue--dispatch-to-session
+ :input-spec '(:kind capture))
+
+(agent-shell-queue-register-item-type
+ :kind 'compact
+ :label "compact"
+ :buffer-pred #'agent-shell-queue--agent-shell-buffer-p
+ :dispatch-fn #'agent-shell-queue--dispatch-pause-compact
+ :input-spec '(:kind capture))
+
+(agent-shell-queue-register-item-type
+ :kind 'context
+ :label "context"
+ :buffer-pred #'agent-shell-queue--agent-shell-buffer-p
+ :dispatch-fn #'agent-shell-queue--dispatch-to-session
+ :input-spec '(:kind none))
+
+(agent-shell-queue-register-item-type
+ :kind 'emacs-lisp
+ :label "emacs-lisp"
+ :buffer-pred nil
+ :dispatch-fn #'agent-shell-queue--dispatch-emacs-lisp
+ :input-spec '(:kind capture :mode emacs-lisp-mode))
+
+(agent-shell-queue-register-item-type
+ :kind 'emacs-command
+ :label "emacs-command"
+ :buffer-pred nil
+ :dispatch-fn #'agent-shell-queue--dispatch-emacs-command
+ :input-spec '(:kind read :prompt "Emacs command: " :fn read-command))
+
+(agent-shell-queue-register-item-type
+ :kind 'pause
+ :label "pause"
+ :buffer-pred nil
+ :dispatch-fn #'agent-shell-queue--dispatch-pause-compact
+ :input-spec '(:kind none))
+
+(agent-shell-queue-register-item-type
+ :kind 'wait
+ :label "wait"
+ :buffer-pred nil
+ :dispatch-fn #'agent-shell-queue--dispatch-wait
+ :input-spec '(:kind special :fn agent-shell-queue-insert-wait))
+
+(agent-shell-queue-register-item-type
+ :kind 'shell-eshell
+ :label "shell-eshell"
+ :buffer-pred #'agent-shell-queue--eshell-buffer-p
+ :dispatch-fn #'agent-shell-queue--dispatch-shell-eshell
+ :input-spec '(:kind capture :mode sh-mode))
+
+(agent-shell-queue-register-item-type
+ :kind 'shell-eat
+ :label "shell-eat"
+ :buffer-pred #'agent-shell-queue--eat-buffer-p
+ :dispatch-fn #'agent-shell-queue--dispatch-shell-eat
+ :input-spec '(:kind capture :mode sh-mode))
 
 (provide 'agent-shell-queue)
 
