@@ -4787,7 +4787,8 @@ Candidates include all non-done, non-running items across all buffers."
 
 (define-derived-mode agent-shell-queue-capture-mode markdown-mode "Queue-Capture"
   "Mode for composing a queued agent-shell prompt.
-\\{agent-shell-queue-capture-mode-map}")
+\\{agent-shell-queue-capture-mode-map}"
+  (setq-local electric-indent-inhibit t))
 
 (defvar-local agent-shell-queue--capture-target nil
   "Target agent-shell buffer for this capture session.")
