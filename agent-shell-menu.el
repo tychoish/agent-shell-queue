@@ -516,8 +516,9 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     ("y"  "From clipboard"      agent-shell-queue-capture-from-clipboard)
     ("x"  "From context"        agent-shell-queue-capture-from-context)]
    ["Enqueue"
-    ("e"  "Enqueue prompt"      agent-shell-queue-enqueue)
-    ("m"  "Emacs form"          agent-shell-queue-enqueue-emacs)]
+    ("ee" "Enqueue prompt"      agent-shell-queue-enqueue)
+    ("el" "Emacs Lisp form"     agent-shell-queue-enqueue-emacs)
+    ("ec" "Emacs command"       agent-shell-queue-enqueue-emacs-command)]
    ["Insert"
     ("p"  "Pause checkpoint"    agent-shell-queue-insert-pause)
     ("d"  "Context drop"        agent-shell-queue-insert-clear-context)
@@ -543,7 +544,8 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     (agent-shell-insert :text (concat "/" (annotated-completing-read
 					   (seq-map (lambda (c)
 						     (cons (map-elt c 'name)
-							   (or (map-elt c 'description) "")))
+							        (replace-regexp-in-string "[\n\r]+" " "
+							    (or (map-elt c 'description) ""))))
 						   commands)
 					   :prompt "agent /command => "
 					   :category 'agent-shell-slash-command

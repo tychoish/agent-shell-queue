@@ -1235,8 +1235,8 @@ PROMPT overrides the default completion prompt.  Useful for debugging."
                                (let* ((item (cdr pair))
                                       (id (agent-shell-queue-item-id item))
                                       (status (symbol-name (agent-shell-queue-item-status item)))
-                                      (preview (truncate-string-to-width
-                                                (agent-shell-queue-item-args item) 50 nil nil "...")))
+                                      (preview (agent-shell-queue--annotation
+                                                (agent-shell-queue-item-args item) 50)))
                                  (cons id (format "[%s] %s  %s" status (car pair) preview)))))))
          (choice (annotated-completing-read
                   choices
@@ -1268,18 +1268,24 @@ Registers a `turn-complete' subscription on BUF if one is not already active."
       item)))
 
 ;;;###autoload
-(defun agent-shell-queue-enqueue-emacs (form buf)
-  "Enqueue a Lisp FORM to run in Emacs before the next prompt dispatched to BUF.
-FORM is read from the minibuffer using `read-expression-map' (same as
-`eval-expression').  When dispatched, the form is evaluated via `eval';
-errors are reported as messages and the item is still marked done so the
-queue advances.  The item blocks the session queue like any other running item."
+(defun agent-shell-queue-enqueue-emacs (buf)
+  "Open an Emacs Lisp capture buffer to compose a form for BUF's queue.
+The capture buffer is in `emacs-lisp-mode'.  Confirm with \\`C-c C-c',
+cancel with \\`C-c C-k'.  When dispatched, the form is evaluated via
+`eval'; errors are reported as messages and the item is marked done."
+  (interactive (list (agent-shell-queue--pick-buffer "Target session: ")))
+  (agent-shell-queue--open-elisp-capture buf))
+
+;;;###autoload
+(defun agent-shell-queue-enqueue-emacs-command (command buf)
+  "Enqueue an interactive COMMAND to run in Emacs for BUF's queue.
+COMMAND is selected via `read-command' (completing-read over all commands).
+When dispatched, the command is invoked with `call-interactively'."
   (interactive
-   (list (read-from-minibuffer "Emacs call: " nil read-expression-map nil
-                               'read-expression-history)
+   (list (read-command "Emacs command: ")
          (agent-shell-queue--pick-buffer "Target session: ")))
   (with-agent-shell-queue
-    (let ((item (agent-shell-queue--make-item form nil 'emacs)))
+    (let ((item (agent-shell-queue--make-item (symbol-name command) nil 'emacs-command)))
       (setf (agent-shell-queue-item-directory item)
             (buffer-local-value 'default-directory buf))
       (agent-shell-queue--add-item-to-bucket (buffer-name buf) item)
@@ -1632,10 +1638,15 @@ If the item has a non-nil executor field, it is called as
                            item
                            (agent-shell-queue-item-args item))
                 (pcase (agent-shell-queue-item-kind item)
-                  ('emacs
+                  ((or 'emacs 'emacs-lisp)
                    (condition-case eval-err
                        (eval (read (agent-shell-queue-item-args item)) t)
-                     (error (message "agent-shell-queue: emacs item %s error: %s" id eval-err)))
+                     (error (message "agent-shell-queue: emacs-lisp item %s error: %s" id eval-err)))
+                   (agent-shell-queue--complete-item item buf-name))
+                  ('emacs-command
+                   (condition-case cmd-err
+                       (call-interactively (intern (agent-shell-queue-item-args item)))
+                     (error (message "agent-shell-queue: emacs-command item %s error: %s" id cmd-err)))
                    (agent-shell-queue--complete-item item buf-name))
                   ((or 'pause 'compact)
                    (cl-pushnew (cons buf-name id) agent-shell-queue--compact-running :test #'equal)
@@ -2099,6 +2110,18 @@ Affected buffer queues are paused and the queue state is saved."
 NEXT-P, when non-nil, marks the item as the next to be dispatched."
   (car (agent-shell-queue--item-display item buf-name next-p)))
 
+(defun agent-shell-queue--item-kind-string (item)
+  "Return the Kind column display string for ITEM."
+  (pcase (agent-shell-queue-item-kind item)
+    ('prompt "agent-shell-prompt")
+    ((or 'emacs 'emacs-lisp) "emacs-lisp")
+    ('emacs-command "emacs-command")
+    ('context "context")
+    ('wait "wait")
+    ('pause "pause")
+    ('compact "compact")
+    (other (symbol-name other))))
+
 (defun agent-shell-queue--item-display (item buf-name &optional _next-p)
   "Return (STATUS-STRING . FACE) for ITEM in BUF-NAME.
 NEXT-P, when non-nil, marks the item as the next to be dispatched."
@@ -2117,17 +2140,12 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
          (status-str
           (cond ((eq status 'invalid) "invalid")
                 ((eq status 'pending-fork) "pending-fork")
-                ((eq kind 'context) "context")
-                ((eq kind 'emacs) (if done "emacs.done" (if running "emacs.running" "emacs")))
-                ((eq kind 'wait) (if done "wait.done" (if running "wait.running" "wait")))
-                ((memq kind '(pause compact))
-                 (cond (done "done")
-                       (running "running.blocked")
-                       (t (symbol-name kind))))
                 ((eq status 'incomplete) "incomplete")
                 (done "done")
                 (aborted "aborted")
-                (running (if bg "running.active.bg" "running.active"))
+                (running (if (memq kind '(pause compact))
+                             "running.blocked"
+                           (if bg "running.active.bg" "running.active")))
                 (editing "editing")
                 ((agent-shell-queue--blocked-status-p status)
                  (if bg (concat (symbol-name status) ".bg") (symbol-name status)))
@@ -2154,7 +2172,7 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
                 (detached 'agent-shell-queue-detached-face)
                 (unassigned 'agent-shell-queue-unassigned-face)
                 ((eq kind 'compact) 'agent-shell-queue-compact-face)
-                ((eq kind 'emacs) 'font-lock-function-name-face)
+                ((memq kind '(emacs emacs-lisp emacs-command)) 'font-lock-function-name-face)
                 ((eq kind 'wait) 'font-lock-string-face)
                 ((or blocked (memq kind '(pause context))) 'agent-shell-queue-blocked-face)
                 (t nil))))
@@ -2199,6 +2217,9 @@ Toggle interactively with `agent-shell-queue-toggle-buffer-column' (db in the me
 (defvar agent-shell-queue-show-age-column t
   "Show the Age column in the queue buffer.")
 
+(defvar agent-shell-queue-show-kind-column t
+  "Show the Kind column in the queue buffer.")
+
 (defvar agent-shell-queue-multiline-format nil
   "Display prompt on a second line with a separator between items.
 When non-nil, `<down>' and `<up>' move by item rather than by line.")
@@ -2210,6 +2231,7 @@ When non-nil, `<down>' and `<up>' move by item rather than by line.")
             agent-shell-queue-show-buffer-column
             agent-shell-queue-show-ordinal-column
             agent-shell-queue-show-age-column
+            agent-shell-queue-show-kind-column
             agent-shell-queue-multiline-format)))
 
 (defun agent-shell-queue--scope-label (scope)
@@ -2474,7 +2496,7 @@ This prevents tasks from executing without any supervisory display."
   (setq tabulated-list-format
         (agent-shell-queue--column-format t (agent-shell-queue--prompt-width t)))
   (setq agent-shell-queue--last-column-structure
-        (list t agent-shell-queue-show-ordinal-column agent-shell-queue-show-age-column))
+        (list t agent-shell-queue-show-kind-column agent-shell-queue-show-ordinal-column agent-shell-queue-show-age-column))
   (setq tabulated-list-sort-key nil)
   (tabulated-list-init-header)
   (tab-line-mode 1)
@@ -2559,14 +2581,19 @@ Examples: \"paused\", \"running (2)\", \"3 pending\", \"idle\"."
 (defconst agent-shell-queue--status-column-width
   (- (max 6 (apply #'max
                    (seq-map #'length
-                            '("invalid" "context" "emacs.done" "emacs.running" "emacs"
-                           "wait.done" "wait.running" "wait" "done" "running.blocked"
-                           "pause" "compact" "aborted" "running.active.bg" "running.active"
-                           "editing" "blocked.runner" "blocked.global" "blocked.task"
-                           "blocked.dep" "blocked.cond" "blocked.pending" "blocked.skip"
-                           "draft" "scheduled.bg" "scheduled" "incomplete"))))
+                            '("invalid" "pending-fork" "done" "running.blocked"
+                              "aborted" "running.active.bg" "running.active"
+                              "editing" "blocked.runner" "blocked.global" "blocked.task"
+                              "blocked.dep" "blocked.cond" "blocked.pending" "blocked.skip"
+                              "draft" "scheduled.bg" "scheduled" "incomplete"))))
      3)
   "Width of the Status column: max(6, length of longest status display string) minus 3.")
+
+(defconst agent-shell-queue--kind-column-width
+  (apply #'max (seq-map #'length
+                        '("agent-shell-prompt" "emacs-lisp" "emacs-command"
+                          "context" "wait" "pause" "compact" "Kind")))
+  "Width of the Kind column.")
 
 (defun agent-shell-queue--column-format (show-buffer-p pw)
   "Build the `tabulated-list-format' vector for current display settings.
@@ -2574,6 +2601,8 @@ SHOW-BUFFER-P controls whether the Buffer column is included.
 PW is the width allocated to the Prompt column."
   (let (cols)
     (push (list "Status" agent-shell-queue--status-column-width t) cols)
+    (when agent-shell-queue-show-kind-column
+      (push (list "Kind" agent-shell-queue--kind-column-width t) cols))
     (when show-buffer-p
       (push (list "Buffer" 19 t) cols))
     (when agent-shell-queue-show-ordinal-column
@@ -2588,11 +2617,13 @@ PW is the width allocated to the Prompt column."
 SHOW-BUFFER-P indicates whether the Buffer column is included."
   (max 20 (- (window-width)
              (+ agent-shell-queue--status-column-width
+                (if agent-shell-queue-show-kind-column (1+ agent-shell-queue--kind-column-width) 0)
                 (if show-buffer-p 19 0)
                 (if agent-shell-queue-show-ordinal-column 4 0)
                 (if agent-shell-queue-show-age-column 5 0)
                 ;; tabulated-list adds one space between columns
                 (+ 1
+                   (if agent-shell-queue-show-kind-column 1 0)
                    (if show-buffer-p 1 0)
                    (if agent-shell-queue-show-ordinal-column 1 0)
                    (if agent-shell-queue-show-age-column 1 0))))))
@@ -2619,6 +2650,7 @@ then places the unassigned bucket last."
   (let* ((ordered (agent-shell-queue--ordered-display-items))
          (show-buffer-p agent-shell-queue-show-buffer-column)
          (column-structure (list show-buffer-p
+                                 agent-shell-queue-show-kind-column
                                  agent-shell-queue-show-ordinal-column
                                  agent-shell-queue-show-age-column))
          (next-id-map (seq-map (lambda (it)
@@ -2663,8 +2695,11 @@ then places the unassigned bucket last."
                          (buf-cell (funcall cell
                                             (if (equal (car pair) agent-shell-queue--unassigned-key)
                                                 "(unassigned)" (car pair))))
+                         (kind-str (agent-shell-queue--item-kind-string item))
                          (row (let (cols)
                                 (push (funcall cell status-str) cols)
+                                (when agent-shell-queue-show-kind-column
+                                  (push (funcall cell kind-str) cols))
                                 (when show-buffer-p (push buf-cell cols))
                                 (when agent-shell-queue-show-ordinal-column
                                   (push (funcall cell (if (> ordinal 0)
@@ -4686,7 +4721,7 @@ Candidates include all non-done, non-running items across all buffers."
                                     (time-since (agent-shell-queue-item-created it))))
                               (pos (1+ it-index))
                               (key (format "%s: %s" id
-                                           (truncate-string-to-width prompt 60 nil nil "…")))
+                                           (agent-shell-queue--annotation prompt 60)))
                               (ann (format "#%d · %s [%s] · %s · %s"
                                            pos buf-name buf-state status age)))
                          (map-put! table key ann)
@@ -4771,6 +4806,10 @@ Candidates include all non-done, non-running items across all buffers."
 Set by `agent-shell-queue-capture-save-draft' and used to update rather
 than duplicate the draft on subsequent saves.")
 
+(defvar-local agent-shell-queue--capture-kind 'prompt
+  "Kind of queue item to create when this capture buffer is confirmed.
+Defaults to `prompt'; set to `emacs-lisp' for Emacs Lisp capture buffers.")
+
 (defun agent-shell-queue--open-capture (target-buf &optional origin-buf initial-content)
   "Open a capture buffer targeting TARGET-BUF (nil for unassigned queue).
 Multiple capture buffers can be open simultaneously; each is named after its target.
@@ -4803,13 +4842,44 @@ INITIAL-CONTENT, when non-nil, is inserted into the buffer before display."
     (pop-to-buffer capture-buf '(display-buffer-below-selected))
     capture-buf))
 
+(defun agent-shell-queue--open-elisp-capture (target-buf)
+  "Open an Emacs Lisp capture buffer targeting TARGET-BUF's queue.
+The buffer is in `emacs-lisp-mode' with C-c C-c / C-c C-k bindings.
+Items created from this buffer have kind `emacs-lisp'."
+  (let* ((capture-buf (get-buffer-create
+                       (format "*agent-shell-queue-elisp: %s*"
+                               (buffer-name target-buf))))
+         (bucket-name (buffer-name target-buf)))
+    (with-current-buffer capture-buf
+      (erase-buffer)
+      (emacs-lisp-mode)
+      (use-local-map (copy-keymap emacs-lisp-mode-map))
+      (local-set-key (kbd "C-c C-c") #'agent-shell-queue-capture-confirm)
+      (local-set-key (kbd "C-c C-k") #'agent-shell-queue-capture-cancel)
+      (setq agent-shell-queue--capture-target target-buf
+            agent-shell-queue--capture-origin (current-buffer)
+            agent-shell-queue--capture-background-task nil
+            agent-shell-queue--capture-after-id nil
+            agent-shell-queue--capture-kind 'emacs-lisp)
+      (let* ((bucket-items (cdr (assoc bucket-name (agent-shell-queue-store-items agent-shell-queue--store))))
+             (depth (agent-shell-queue--active-item-count bucket-items))
+             (state (agent-shell-queue--activity-state)))
+        (setq-local header-line-format
+                    (concat
+                     (propertize (format " %s  |  emacs-lisp  |  " bucket-name) 'face 'shadow)
+                     state
+                     (propertize (format "  |  depth: %d" depth) 'face 'shadow)))))
+    (pop-to-buffer capture-buf '(display-buffer-below-selected))
+    capture-buf))
+
 (defun agent-shell-queue-capture-confirm ()
   "Confirm capture: queue the buffer contents and close."
   (interactive)
   (let ((prompt (string-trim (buffer-string)))
         (buf agent-shell-queue--capture-target)
         (bg agent-shell-queue--capture-background-task)
-        (after-id agent-shell-queue--capture-after-id))
+        (after-id agent-shell-queue--capture-after-id)
+        (kind agent-shell-queue--capture-kind))
     (quit-window t)
     (unless (string-empty-p prompt)
       (message "agent-shell: %s" (truncate-string-to-width prompt 200 nil nil "…"))
@@ -4817,7 +4887,7 @@ INITIAL-CONTENT, when non-nil, is inserted into the buffer before display."
        (after-id
         (when-let* ((pair (agent-shell-queue--item-by-id after-id))
                     (bucket-name (car pair))
-                    (item (agent-shell-queue--make-item prompt bg)))
+                    (item (agent-shell-queue--make-item prompt bg kind)))
           (let ((items (cdr (assoc bucket-name (agent-shell-queue-store-items agent-shell-queue--store)))))
             (if-let* ((idx (cl-position after-id items
                                         :key #'agent-shell-queue-item-id :test #'equal))
@@ -4830,10 +4900,17 @@ INITIAL-CONTENT, when non-nil, is inserted into the buffer before display."
             (agent-shell-queue--save)
             (agent-shell-queue--refresh-buffer))))
        (buf
-        (agent-shell-queue-add prompt buf bg)
+        (with-agent-shell-queue
+          (let ((item (agent-shell-queue--make-item prompt bg kind)))
+            (setf (agent-shell-queue-item-directory item)
+                  (buffer-local-value 'default-directory buf))
+            (agent-shell-queue--add-item-to-bucket (buffer-name buf) item)
+            (agent-shell-queue--ensure-subscription buf)))
         (agent-shell-queue--send-next-for-buffer buf))
        (t
-        (agent-shell-queue-add-unassigned prompt bg))))))
+        (with-agent-shell-queue
+          (let ((item (agent-shell-queue--make-item prompt bg kind)))
+            (agent-shell-queue--add-item-to-bucket agent-shell-queue--unassigned-key item))))))))
 
 (defun agent-shell-queue-capture-cancel ()
   "Discard the capture buffer without queuing."
