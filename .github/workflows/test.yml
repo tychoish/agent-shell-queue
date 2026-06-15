@@ -26,11 +26,8 @@ jobs:
       - name: Set up Cask
         uses: cask/setup-cask@master
 
-      - name: Clone annotated-completing-read
-        run: git clone https://github.com/tychoish/annotated-completing-read.el /tmp/annotated-completing-read
-
       - name: Install dependencies
         run: cask install
 
       - name: Run tests
-        run: cask exec ert-runner -L /tmp/annotated-completing-read test/test-*.el
+        run: cask exec ert-runner test/test-*.el
