@@ -282,16 +282,16 @@ Keys are assigned as 1, 2, 3… in button order."
 
 (defun agent-shell-menu--action-entry-command (entry)
   "Return the command for ENTRY.
-ENTRY cdr may be a plain COMMAND symbol or a (COMMAND . PREDICATE) cons."
+ENTRY cdr may be a plain COMMAND symbol, a function, or a (COMMAND . PREDICATE) cons."
   (let ((val (cdr entry)))
-    (if (consp val) (car val) val)))
+    (if (and (consp val) (not (functionp val))) (car val) val)))
 
 (defun agent-shell-menu--action-entry-visible-p (entry)
   "Return non-nil if ENTRY should appear in the action menu.
 Entries with no predicate are always visible; entries with a (CMD . PRED)
 cdr are visible only when (funcall PRED) returns non-nil."
   (let ((val (cdr entry)))
-    (if (consp val) (funcall (cdr val)) t)))
+    (if (and (consp val) (not (functionp val))) (funcall (cdr val)) t)))
 
 ;;;###autoload
 (defun agent-shell-select-action ()

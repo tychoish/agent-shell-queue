@@ -75,7 +75,7 @@ Clears in-memory items first so the load result is unambiguous."
         (should (equal "q01" (agent-shell-queue-item-id (car restored))))))))
 
 (ert-deftest agent-shell-queue/persist-deferred-items-survive ()
-  "Deferred items persist across save/load."
+  "Deferred items persist across save/load but are migrated to blocked.skip on load."
   (agent-shell-queue-test/with-persist-file
     (let ((item (agent-shell-queue-test/persist-item "q01" "held" nil 'deferred)))
       (setf (agent-shell-queue-store-items agent-shell-queue--store)
@@ -83,7 +83,7 @@ Clears in-memory items first so the load result is unambiguous."
       (agent-shell-queue-test/persist-save-and-reload)
       (let ((restored (car (cdr (assoc "*s*" (agent-shell-queue-store-items agent-shell-queue--store))))))
         (should restored)
-        (should (eq 'deferred (agent-shell-queue-item-status restored)))))))
+        (should (eq 'blocked.skip (agent-shell-queue-item-status restored)))))))
 
 (ert-deftest agent-shell-queue/persist-empty-queue-round-trips ()
   "An empty queue produces no items after save/load."
@@ -225,7 +225,7 @@ ensuring they survive the save/load cycle."
   "Scratch variable written by emacs-kind test items.")
 
 (ert-deftest agent-shell-queue/persist-emacs-kind-dispatches-without-llm ()
-  "An emacs-kind item executes Lisp synchronously with no LLM interaction.
+  "An emacs-lisp-kind item executes Lisp synchronously with no LLM interaction.
 The item completes and the side effect is visible."
   (agent-shell-queue-test/with-persist-file
     (let* ((target (generate-new-buffer "*asq-persist-emacs-target*"))
@@ -234,7 +234,7 @@ The item completes and the side effect is visible."
                   :id "q01"
                   :args (format "(setq agent-shell-queue-persist-test--side-effect %S)" 42)
                   :status 'active
-                  :kind 'emacs
+                  :kind 'emacs-lisp
                   :background nil
                   :created 1000.0)))
       (unwind-protect
@@ -254,7 +254,7 @@ The item completes and the side effect is visible."
         (kill-buffer target)))))
 
 (ert-deftest agent-shell-queue/persist-emacs-kind-survives-then-dispatches ()
-  "An emacs-kind item survives a save/load cycle, then dispatches without LLM."
+  "An emacs-lisp-kind item survives a save/load cycle, then dispatches without LLM."
   (agent-shell-queue-test/with-persist-file
     (let* ((target (generate-new-buffer "*asq-persist-emacs-target2*"))
            (buf-name (buffer-name target))
@@ -262,7 +262,7 @@ The item completes and the side effect is visible."
                   :id "q01"
                   :args (format "(setq agent-shell-queue-persist-test--side-effect %S)" 99)
                   :status 'active
-                  :kind 'emacs
+                  :kind 'emacs-lisp
                   :background nil
                   :created 1000.0)))
       (unwind-protect
@@ -273,7 +273,7 @@ The item completes and the side effect is visible."
             (agent-shell-queue-test/persist-save-and-reload)
             (let ((restored (car (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))))
               (should restored)
-              (should (eq 'emacs (agent-shell-queue-item-kind restored)))
+              (should (eq 'emacs-lisp (agent-shell-queue-item-kind restored)))
               ;; Now unpause and dispatch the restored item.
               (setq agent-shell-queue-persist-test--side-effect nil)
               (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) nil)

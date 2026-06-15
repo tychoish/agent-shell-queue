@@ -29,6 +29,7 @@
           (agent-shell-queue--loaded t))
      (cl-letf (((symbol-function 'agent-shell-queue--save) #'ignore)
                ((symbol-function 'agent-shell-queue--refresh-buffer) #'ignore)
+               ((symbol-function 'agent-shell-queue--ensure-subscription) #'ignore)
                ((symbol-function 'alert) #'ignore))
        ,@body)))
 
@@ -117,8 +118,9 @@
 (ert-deftest agent-shell-queue-types/eshell-buffer-p-accepts-eshell ()
   "eshell-buffer-p returns t for a live buffer in eshell-mode."
   (with-temp-buffer
-    (let ((eshell-mode-map (make-sparse-keymap)))
-      (delay-mode-hooks (eshell-mode))
+    (cl-letf (((symbol-function 'eshell-mode)
+               (lambda () (setq major-mode 'eshell-mode))))
+      (eshell-mode)
       (should (agent-shell-queue--eshell-buffer-p (current-buffer))))))
 
 (ert-deftest agent-shell-queue-types/eshell-buffer-p-rejects-others ()
@@ -260,21 +262,26 @@
 ;;; ─────────────────────────────────────────────────────────────
 ;;; Dispatch: emacs-lisp
 
+(defvar agent-shell-queue-types-test--dispatch-sentinel nil
+  "Dynamic scratch variable for dispatch-emacs-lisp-evaluates-form test.")
+
 (ert-deftest agent-shell-queue-types/dispatch-emacs-lisp-evaluates-form ()
   "dispatch-emacs-lisp evaluates the item's args as a Lisp form."
   (asq-types-test/isolate
-   (let* ((sentinel (list nil))
-          (item (agent-shell-queue-item--make
-                 :id "q-el-1" :args "(setcar sentinel t)" :status 'running
+   (let* ((item (agent-shell-queue-item--make
+                 :id "q-el-1"
+                 :args "(setq agent-shell-queue-types-test--dispatch-sentinel t)"
+                 :status 'running
                  :kind 'emacs-lisp :created 1000.0))
           (pair (list "buf" item))
           completed-id)
+     (setq agent-shell-queue-types-test--dispatch-sentinel nil)
      (cl-letf (((symbol-function 'agent-shell-queue--item-by-id)
                 (lambda (id) pair))
                ((symbol-function 'agent-shell-queue--complete-item)
                 (lambda (item _) (setq completed-id (agent-shell-queue-item-id item)))))
        (agent-shell-queue--dispatch-emacs-lisp item "buf")
-       (should (car sentinel))
+       (should agent-shell-queue-types-test--dispatch-sentinel)
        (should (equal "q-el-1" completed-id))))))
 
 (ert-deftest agent-shell-queue-types/dispatch-emacs-lisp-errors-dont-crash ()
