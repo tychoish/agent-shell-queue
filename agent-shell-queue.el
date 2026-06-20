@@ -865,7 +865,7 @@ When the kind has no buffer-pred (any-buffer), returns all live buffers."
                 (buffer-list))))
 
 (defun agent-shell-queue--pick-buffer-for-kind (kind &optional prompt)
-  "Pick a buffer compatible with KIND via ACR, offering nil/unassigned.
+  "Pick a buffer compatible with KIND via `annotated-completing-read', offering nil/unassigned.
 Returns a live buffer, or nil meaning the unassigned bucket.
 When no compatible buffers exist: falls through to nil unless
 `agent-shell-queue-strict-buffer-assignment' is non-nil."
@@ -4765,7 +4765,7 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
 ;;; Enqueue dispatch
 
 (defun agent-shell-queue-enqueue-dispatch ()
-  "Choose an item kind and target buffer via ACR, then collect input.
+  "Choose an item kind and target buffer via `annotated-completing-read', then collect input.
 Choices are built from the item-type registry.  nil/unassigned is always
 offered as a target so items can be deferred for later assignment."
   (interactive)
