@@ -208,5 +208,30 @@ string-in-paragraph-contents issues during tree walking."
 (cl-defmethod agent-shell-queue-format-file-extension ((_format (eql org)))
   ".org")
 
+;;; Org heading → queue capture
+
+(declare-function agent-shell-queue--open-capture "agent-shell-queue")
+
+;;;###autoload
+(defun agent-shell-queue-org-refile-from-heading (&optional remove-original)
+  "Capture the current org heading's subtree text into the agent-shell-queue.
+Opens a queue capture buffer pre-seeded with the heading content.
+With prefix arg REMOVE-ORIGINAL, delete the original subtree immediately
+after opening the capture buffer."
+  (interactive "P")
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org-mode buffer"))
+  (org-back-to-heading t)
+  (let* ((start (point))
+         (end (save-excursion (org-end-of-subtree t) (point)))
+         (text (buffer-substring-no-properties start end))
+         (origin (current-buffer)))
+    (agent-shell-queue--open-capture nil origin text)
+    (when remove-original
+      (with-current-buffer origin
+        (save-excursion
+          (goto-char start)
+          (org-cut-subtree))))))
+
 (provide 'agent-shell-queue-org)
 ;;; agent-shell-queue-org.el ends here
