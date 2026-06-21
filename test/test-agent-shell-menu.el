@@ -488,28 +488,84 @@ not a raw buffer list or a single annotation string."
   (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
     (should-not (agent-shell-queue-intercept-p))))
 
-(ert-deftest agent-shell-menu/queue-intercept-p-nil-when-mode-off ()
-  "Returns nil when intercept mode is disabled in the shell buffer."
+(ert-deftest agent-shell-menu/queue-intercept-p-nil-when-mode-default ()
+  "Returns nil when input mode is default in the shell buffer."
   (let ((shell (generate-new-buffer " *mock-intercept-off*")))
     (unwind-protect
         (progn
           (with-current-buffer shell
-            (setq-local agent-shell-queue-intercept-mode nil))
+            (setq-local agent-shell-queue-input-mode 'default))
+          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+                     (lambda () shell)))
+            (should-not (agent-shell-queue-intercept-p))))
+      (kill-buffer shell))))
+
+(ert-deftest agent-shell-menu/queue-intercept-p-nil-when-mode-queue-only ()
+  "Returns nil when input mode is queue-only (not queue-intercept)."
+  (let ((shell (generate-new-buffer " *mock-intercept-only*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell
+            (setq-local agent-shell-queue-input-mode 'queue-only))
           (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
                      (lambda () shell)))
             (should-not (agent-shell-queue-intercept-p))))
       (kill-buffer shell))))
 
 (ert-deftest agent-shell-menu/queue-intercept-p-non-nil-when-mode-on ()
-  "Returns non-nil when intercept mode is enabled in the shell buffer."
+  "Returns non-nil when input mode is queue-intercept in the shell buffer."
   (let ((shell (generate-new-buffer " *mock-intercept-on*")))
     (unwind-protect
         (progn
           (with-current-buffer shell
-            (setq-local agent-shell-queue-intercept-mode t))
+            (setq-local agent-shell-queue-input-mode 'queue-intercept))
           (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
                      (lambda () shell)))
             (should (agent-shell-queue-intercept-p))))
+      (kill-buffer shell))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue-only-p
+
+(ert-deftest agent-shell-menu/queue-only-p-nil-when-no-session ()
+  "Returns nil when no shell session is reachable."
+  (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
+    (should-not (agent-shell-queue-only-p))))
+
+(ert-deftest agent-shell-menu/queue-only-p-nil-when-mode-default ()
+  "Returns nil when input mode is default."
+  (let ((shell (generate-new-buffer " *mock-only-off*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell
+            (setq-local agent-shell-queue-input-mode 'default))
+          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+                     (lambda () shell)))
+            (should-not (agent-shell-queue-only-p))))
+      (kill-buffer shell))))
+
+(ert-deftest agent-shell-menu/queue-only-p-nil-when-mode-intercept ()
+  "Returns nil when input mode is queue-intercept (not queue-only)."
+  (let ((shell (generate-new-buffer " *mock-only-intercept*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell
+            (setq-local agent-shell-queue-input-mode 'queue-intercept))
+          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+                     (lambda () shell)))
+            (should-not (agent-shell-queue-only-p))))
+      (kill-buffer shell))))
+
+(ert-deftest agent-shell-menu/queue-only-p-non-nil-when-mode-queue-only ()
+  "Returns non-nil when input mode is queue-only."
+  (let ((shell (generate-new-buffer " *mock-only-on*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell
+            (setq-local agent-shell-queue-input-mode 'queue-only))
+          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+                     (lambda () shell)))
+            (should (agent-shell-queue-only-p))))
       (kill-buffer shell))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

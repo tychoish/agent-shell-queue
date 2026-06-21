@@ -85,10 +85,9 @@
     ("capture from context" . agent-shell-queue-capture-from-context)
     ("queue clear" . agent-shell-queue-enqueue-clear)
     ("queue review" . agent-shell-queue-buffer-open)
-    ("queue-only mode" . (agent-shell-queue-only-mode . agent-shell-menu--in-shell-p))
-    ("queue-only default (new sessions)" . agent-shell-queue-toggle-only-default)
-    ("disable intercept (all buffers)" . agent-shell-queue-disable-intercept-mode-all)
-    ("toggle intercept default (new sessions)" . agent-shell-queue-toggle-intercept-default))
+    ("set input mode" . (agent-shell-queue-toggle-input-mode . agent-shell-menu--in-shell-p))
+    ("set input mode default" . agent-shell-queue-set-input-mode-default)
+    ("reset all sessions to default" . agent-shell-queue-reset-all-input-modes))
   "Alist mapping label strings to commands for `agent-shell-select-action'.
 Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)).
 When a PREDICATE is supplied it is called with no arguments; the entry is
@@ -104,7 +103,8 @@ omitted from the menu when the predicate returns nil.")
 (defmacro agent-shell-mode-key (key fn)
   "Define `agent-shell-output-key-KEY' and bind it in `agent-shell-mode-map'.
 In the output area, or while the shell is busy, calls FN interactively.
-Self-inserts KEY only when at the idle prompt.
+Self-inserts KEY only when at the idle prompt, unless queue-only mode is active
+(in which case routes to `agent-shell-queue-ready-capture' instead).
 Also binds FN directly in `agent-shell-viewport-view-mode-map'."
   (let* ((key-str (if (stringp key) key (symbol-name key)))
          (name (intern (concat "agent-shell-output-key-" key-str)))
@@ -116,7 +116,11 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
          ,(format "In output or busy: `%s'. Self-insert at idle prompt." fn)
          (interactive)
          (if (and (not (shell-maker-busy)) (shell-maker-point-at-last-prompt-p))
-             ,(if char `(self-insert-command 1 ,char) '(ignore))
+             ,(if char
+                  `(if (bound-and-true-p agent-shell-queue-only-mode)
+                       (agent-shell-queue-ready-capture)
+                     (self-insert-command 1 ,char))
+                '(ignore))
            (call-interactively #',fn)))
        (define-key agent-shell-mode-map (kbd ,key-str) #',name)
        (with-eval-after-load 'agent-shell-viewport
@@ -416,8 +420,7 @@ File-visiting buffers are sent as @file references; others as raw text."
   [["Sessions"
     ("ss" "Switch session" agent-shell-switch-buffer)
     ("sb" "Find buffer" agent-shell-manager-find-buffer)
-    ("sm" "Manager toggle" agent-shell-manager-toggle)
-    ("sq" "Open queue" agent-shell-queue-buffer-open)]
+    ("sm" "Manager toggle" agent-shell-manager-toggle)]
    ["Create"
     ("sn" "New shell" agent-shell-new-shell)
     ("st" "New temp shell" agent-shell-new-temp-shell)
@@ -432,7 +435,13 @@ File-visiting buffers are sent as @file references; others as raw text."
     ("ai" "Interrupt" agent-shell-interrupt)
     ("ar" "Resolve permission" agent-shell-resolve-permission)
     ("ac" "Command menu" agent-shell-select-command)
-    ("ax" "Collapse menu" agent-shell-select-collapse)]
+    ("ax" "Collapse menu" agent-shell-select-collapse)
+    ("ij" "Interject" agent-shell-queue-interject
+     :inapt-if-not agent-shell-queue-interject-available-p)
+    ("is" "Send interjection" agent-shell-queue-interjection-send
+     :if agent-shell-menu--interjection-p)
+    ("ic" "Close/Abort interjection" agent-shell-queue-interjection-close
+     :if agent-shell-menu--interjection-p)]
    ["Settings" :if agent-shell-menu--in-session-p
     ("mm" "Set mode" agent-shell-set-session-mode)
     ("mv" "Set model" agent-shell-set-session-model)
@@ -460,46 +469,26 @@ File-visiting buffers are sent as @file references; others as raw text."
     ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
     ("qe" "Enqueue" agent-shell-queue-enqueue)
     ("qd" "Edit task" agent-shell-queue-edit-task)
-    ("qp" "Pause queue" agent-shell-queue-pause
+    ("qp" "Suspend all dispatch" agent-shell-queue-pause
      :inapt-if agent-shell-queue-paused-p)
-    ("qr" "Resume queue" agent-shell-queue-resume
+    ("qr" "Resume all dispatch" agent-shell-queue-resume
      :inapt-if-not agent-shell-queue-paused-p)
-    ("qu" "Unpause all" agent-shell-queue-unpause-all-sessions)]
+    ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
   ;; Per-session queue controls
    ["Session Queue" :if agent-shell-menu--in-session-p
-    ("qsp" "Pause session" agent-shell-queue-session-pause
+    ("qsp" "Suspend this session" agent-shell-queue-session-pause
      :inapt-if agent-shell-queue-session-paused-p)
-    ("qsr" "Resume session" agent-shell-queue-session-resume
+    ("qsr" "Resume this session" agent-shell-queue-session-resume
      :inapt-if-not agent-shell-queue-session-paused-p)
-    ("qoe" "Queue-only Enable" agent-shell-queue-only-enable
-     :inapt-if agent-shell-queue-only-p)
-    ("qod" "Queue-only Disable" agent-shell-queue-only-disable
-     :inapt-if-not agent-shell-queue-only-p)
-    ("qoo" "Queue-only Disable All" agent-shell-queue-only-disable-all)
-    ("qot" agent-shell-queue-toggle-only-default
+    ("qim" agent-shell-queue-toggle-input-mode
      :description (lambda ()
-                    (if (agent-shell-queue-only-p)
-                        "[x] Queue-only default"
-                      "[ ] Queue-only default"))
+                    (format "Input mode: [%s]" (agent-shell-queue-input-mode-value))))
+    ("qix" "Reset all to default" agent-shell-queue-reset-all-input-modes)
+    ("qid" agent-shell-queue-set-input-mode-default
+     :description (lambda ()
+                    (format "Default: [%s]" agent-shell-queue-input-mode-default))
      :if agent-shell-menu--in-shell-p)]
-   ["Queue Intercept"
-    ("qie" "Enable" agent-shell-queue-enable-intercept-mode
-     :inapt-if agent-shell-queue-intercept-p)
-    ("qid" "Disable" agent-shell-queue-disable-intercept-mode
-     :inapt-if-not agent-shell-queue-intercept-p)
-    ("qix" "Disable All" agent-shell-queue-disable-intercept-mode-all)
-    ("qtd" agent-shell-queue-toggle-intercept-default
-     :description (lambda ()
-                    (if (bound-and-true-p agent-shell-queue-intercept-default)
-                        "[x] Default"
-                      "[ ] Default")))]
-   ["Interjection"
-    ("ji" "Interject" agent-shell-queue-interject
-     :inapt-if-not agent-shell-queue-interject-available-p)
-    ("js" "Send interjection" agent-shell-queue-interjection-send
-     :if agent-shell-menu--interjection-p)
-    ("jc" "Close/Abort" agent-shell-queue-interjection-close
-     :if agent-shell-menu--interjection-p)]])
+   ])
 
 ;;;###autoload
 (defalias 'agent-shell-session-menu #'agent-shell-dispatch)
@@ -741,10 +730,9 @@ the underlying shell process uptime for the current agent-shell buffer."
          (proc-start (when proc (agent-shell-menu--process-start-time proc)))
          (model (when session (map-elt session :model-id)))
          (mode-id (when session (map-elt session :mode-id)))
-         (queue-only-p (and (boundp 'agent-shell-queue-only-mode)
-                            (buffer-local-value 'agent-shell-queue-only-mode shell-buf)))
-         (intercept-p (and (boundp 'agent-shell-queue-intercept-mode)
-                           (buffer-local-value 'agent-shell-queue-intercept-mode shell-buf)))
+         (input-mode (if (boundp 'agent-shell-queue-input-mode)
+                         (buffer-local-value 'agent-shell-queue-input-mode shell-buf)
+                       'default))
          (globally-paused (ignore-errors
                             (agent-shell-queue-queue-paused agent-shell-queue--queue)))
          (session-paused (ignore-errors
@@ -787,8 +775,7 @@ the underlying shell process uptime for the current agent-shell buffer."
         (insert (propertize "Queue\n" 'face '(bold underline)))
         (insert (format "  Depth               %d total, %d active\n"
                         queue-depth active-items))
-        (insert (format "  Queue-only mode     %s\n" (if queue-only-p "enabled" "disabled")))
-        (insert (format "  Intercept mode      %s\n" (if intercept-p "enabled" "disabled")))
+        (insert (format "  Input mode          %s\n" input-mode))
         (insert (format "  Global pause        %s\n" (if globally-paused "paused" "running")))
         (insert (format "  Session suspended   %s\n" (if session-paused "yes" "no")))
         (insert "\n")
