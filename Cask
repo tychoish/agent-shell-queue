@@ -5,6 +5,7 @@
 (package-file "agent-shell-queue.el")
 
 (files "agent-shell-queue.el"
+       "agent-shell-queue-persistence.el"
        "agent-shell-queue-db.el"
        "agent-shell-menu.el"
        "agent-shell-queue-org.el")
