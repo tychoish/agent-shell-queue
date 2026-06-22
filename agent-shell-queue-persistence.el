@@ -526,8 +526,14 @@ session cannot be resumed and must be re-dispatched."
                 (insert-file-contents file)
                 (buffer-string))))
           (error
-           (agent-shell-queue--log-write 'load (error-message-string err))
-           (message "agent-shell-queue: ignoring unreadable state: %s" err)))))
+           (let ((msg (error-message-string err)))
+             (agent-shell-queue--log-write 'load msg)
+             (message "agent-shell-queue: ignoring unreadable state: %s" msg)
+             (alert (format "Queue state could not be loaded from %s: %s"
+                            file msg)
+                    :title "agent-shell-queue: load failed"
+                    :severity 'high
+                    :category 'agent-shell-queue))))))
     ;; Items that were running when the session ended cannot be resumed.
     ;; Normalize them to active so they will be re-dispatched.
     (thread-last
