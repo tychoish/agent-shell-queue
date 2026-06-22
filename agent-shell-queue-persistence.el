@@ -41,9 +41,8 @@
 (declare-function agent-shell-queue-queue--make "agent-shell-queue")
 (declare-function agent-shell-queue-queue-paused "agent-shell-queue")
 (declare-function agent-shell-queue-queue-session-paused "agent-shell-queue")
-(declare-function (setf agent-shell-queue-item-status) "agent-shell-queue")
-(declare-function (setf agent-shell-queue-item-dispatched) "agent-shell-queue")
-(declare-function (setf agent-shell-queue-store-items) "agent-shell-queue")
+(declare-function agent-shell-queue--restore-store-items "agent-shell-queue")
+(declare-function agent-shell-queue--normalize-running-item "agent-shell-queue")
 (declare-function yaml-encode "yaml")
 (declare-function yaml-parse-string "yaml")
 
@@ -520,12 +519,12 @@ session cannot be resumed and must be re-dispatched."
            (file (agent-shell-queue-store-file store)))
       (when (file-exists-p file)
         (condition-case err
-            (setf (agent-shell-queue-store-items agent-shell-queue--store)
-                  (agent-shell-queue-deserialize
-                   store
-                   (with-temp-buffer
-                     (insert-file-contents file)
-                     (buffer-string))))
+            (agent-shell-queue--restore-store-items
+             (agent-shell-queue-deserialize
+              store
+              (with-temp-buffer
+                (insert-file-contents file)
+                (buffer-string))))
           (error
            (agent-shell-queue--log-write 'load (error-message-string err))
            (message "agent-shell-queue: ignoring unreadable state: %s" err)))))
@@ -536,8 +535,7 @@ session cannot be resumed and must be re-dispatched."
       (seq-mapcat #'cdr)
       (seq-do (lambda (item)
                 (when (eq (agent-shell-queue-item-status item) 'running)
-                  (setf (agent-shell-queue-item-status item) 'active)
-                  (setf (agent-shell-queue-item-dispatched item) nil)))))
+                  (agent-shell-queue--normalize-running-item item)))))
     (agent-shell-queue--migrate-deferred-statuses)
     (agent-shell-queue--log-write 'load)))
 

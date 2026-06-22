@@ -1011,6 +1011,23 @@ but that yields \"0d\" for a zero delta instead of \"0s\"."
 (declare-function agent-shell-queue--load "agent-shell-queue-persistence")
 (declare-function agent-shell-queue--migrate-queue-struct "agent-shell-queue-persistence")
 
+;;;###autoload
+(defun agent-shell-queue-buffer-archive ()
+  "Archive the item at point to the archive file and remove it from the queue.
+Archiving must be enabled via `agent-shell-queue-archive-enabled'.
+The destination path is provided by `agent-shell-queue-archive-file-function'."
+  (interactive)
+  (unless agent-shell-queue-archive-enabled
+    (user-error "Enable archiving by setting `agent-shell-queue-archive-enabled' to t"))
+  (when-let* ((id (tabulated-list-get-id))
+              (pair (agent-shell-queue--item-by-id id))
+              (item (cdr pair)))
+    (agent-shell-queue--assert-not-running item)
+    (agent-shell-queue--write-archive (car pair) item)
+    (agent-shell-queue-remove id)
+    (agent-shell-queue-buffer-refresh)
+    (message "agent-shell-queue: archived %s" id)))
+
 (defun agent-shell-queue--ensure-loaded ()
   "Load queue state from disk on first call.
 Queue state is loaded lazily when first accessed, not at Emacs startup.
