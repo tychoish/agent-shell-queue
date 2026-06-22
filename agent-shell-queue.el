@@ -499,6 +499,18 @@ before calling the format's serialize helper.")
   (agent-shell-queue--make-store :items nil :format 'plist :file nil)
   "Live queue store.  Items are loaded from disk by --load, written by --save.")
 
+(defun agent-shell-queue--restore-store-items (items)
+  "Set the live store's items to ITEMS.
+Called by the persistence layer after deserializing from disk.  Defined here
+so that the setf on the store struct slot stays in the same file as the struct."
+  (setf (agent-shell-queue-store-items agent-shell-queue--store) items))
+
+(defun agent-shell-queue--normalize-running-item (item)
+  "Reset ITEM's status from `running' to `active' for cross-session reload.
+Defined here so setf on item struct slots stays in the same file as the struct."
+  (setf (agent-shell-queue-item-status item) 'active)
+  (setf (agent-shell-queue-item-dispatched item) nil))
+
 (cl-defstruct (agent-shell-queue-queue
                (:constructor agent-shell-queue-queue--make)
                (:copier nil))
