@@ -87,16 +87,13 @@
     ("queue review" . agent-shell-queue-buffer-open)
     ("set input mode" . (agent-shell-queue-toggle-input-mode . agent-shell-menu--in-shell-p))
     ("set input mode default" . agent-shell-queue-set-input-mode-default)
-    ("reset all sessions to default" . agent-shell-queue-reset-all-input-modes))
+    ("reset all sessions to default" . agent-shell-queue-reset-all-input-modes)
+    ("review changes" . (agent-review . agent-shell-menu--agent-review-available-p))
+    ("send review issues to shell" . (agent-review-send-to-agent-shell . agent-shell-menu--agent-review-available-p)))
   "Alist mapping label strings to commands for `agent-shell-select-action'.
 Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)).
 When a PREDICATE is supplied it is called with no arguments; the entry is
 omitted from the menu when the predicate returns nil.")
-
-(with-eval-after-load 'agent-review
-  (add-to-list 'agent-shell-action-alist '("review changes" . agent-review) t)
-  (add-to-list 'agent-shell-action-alist
-               '("send review issues to shell" . agent-review-send-to-agent-shell) t))
 
 ;;; Key binding
 
@@ -154,7 +151,7 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
     (get-buffer
      (annotated-completing-read
       (thread-last
-	(agent-shell-buffers)
+	bufs
 	(seq-map (lambda (buf) (cons (buffer-name buf) (agent-shell--buffer-annotation buf)))))
       :prompt prompt
       :category 'agent-shell-buffer

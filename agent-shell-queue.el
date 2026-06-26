@@ -277,7 +277,9 @@ Generates constructor TYPE-NAME--make plus:
                          (list kw (if from-plist-fn `(,from-plist-fn ,raw) raw)))))
                    serializable))))))
 
-;;; Executor registry
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; Registries
 
 (cl-defstruct (agent-shell-queue-executor
                (:constructor agent-shell-queue-executor--make)
@@ -342,8 +344,6 @@ warning for non-nil names that have no registry entry."
       (progn
         (message "agent-shell-queue: unknown executor %S — item will use kind dispatch" name)
         nil))))
-
-;;; Item-type registry
 
 (cl-defstruct (agent-shell-queue-item-type
                (:constructor agent-shell-queue-item-type--make)
@@ -2067,14 +2067,13 @@ Toggle interactively with `agent-shell-queue-toggle-buffer-column' (db in the me
 When non-nil, `<down>' and `<up>' move by item rather than by line.")
 
 ;; Persist display preferences and queue state across sessions.
-(with-eval-after-load 'savehist
-  (seq-do (lambda (it) (cl-pushnew it savehist-additional-variables))
-          '(agent-shell-queue--queue
-            agent-shell-queue-show-buffer-column
-            agent-shell-queue-show-ordinal-column
-            agent-shell-queue-show-age-column
-            agent-shell-queue-show-kind-column
-            agent-shell-queue-multiline-format)))
+(defvar savehist-additional-variables nil)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue--queue)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-buffer-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-ordinal-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-age-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-kind-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-multiline-format)
 
 (defun agent-shell-queue--scope-label (scope)
   "Return a short human-readable string for SCOPE."
@@ -5507,7 +5506,7 @@ For each item whose ID already exists, prompts to keep, replace, or assign new I
       (message "agent-shell-queue: imported %d item(s)%s" added skip-note))))
 
 
-;;; Fork operations ─────────────────────────────────────────────────────────────
+;;; Fork Queue Operations
 
 (defface agent-shell-queue-pending-fork-face
   '((t :foreground "mediumpurple3" :slant italic))

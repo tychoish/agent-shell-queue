@@ -11,8 +11,6 @@
 (require 'map)
 (require 'seq)
 
-;;; Forward declarations (functions/vars defined in agent-shell-queue.el)
-
 (declare-function agent-shell-queue--current-store "agent-shell-queue")
 (declare-function agent-shell-queue--ensure-loaded "agent-shell-queue")
 (declare-function agent-shell-queue--make-store "agent-shell-queue")
@@ -62,8 +60,6 @@
 (defvar agent-shell-queue--last-flush-time)
 (defvar agent-shell-queue--next-flush-time)
 (defvar agent-shell-queue-auto-flush-interval)
-
-;;; Write log
 
 (defvar agent-shell-queue--write-log nil
   "Ring buffer of recent persistence events, newest first.
@@ -142,8 +138,6 @@ When `agent-shell-queue-write-log-enabled' is non-nil, also appends to
     (goto-char (point-min)))
   (pop-to-buffer "*agent-shell-queue-write-log*"))
 
-;;; State file path helpers
-
 (defun agent-shell-queue--default-state-file ()
   "Default queue state file path under `user-emacs-directory'."
   (expand-file-name (concat "agent-shell-queue."
@@ -161,8 +155,6 @@ When `agent-shell-queue-write-log-enabled' is non-nil, also appends to
   (when agent-shell-queue-archive-enabled
     (funcall agent-shell-queue-archive-file-function)))
 
-;;; Persistence — plist format
-
 (defun agent-shell-queue--serialize-plist (items)
   "Serialize ITEMS to an s-expression string (plist item format)."
   (with-temp-buffer
@@ -176,8 +168,6 @@ When `agent-shell-queue-write-log-enabled' is non-nil, also appends to
     (unless (listp data)
       (error "Expected list, got %S" data))
     (seq-map (lambda (it) (cons (car it) (seq-map #'agent-shell-queue-item-from-plist (cdr it)))) data)))
-
-;;; Persistence — JSON format
 
 (defun agent-shell-queue--item-to-json (item)
   "Convert ITEM to a JSON-serializable plist.
@@ -241,8 +231,6 @@ executor resolved from the registry (nil when absent or unknown)."
                           (cons (plist-get bucket :buffer)
                                 (seq-map #'agent-shell-queue--item-from-json
                                          (plist-get bucket :items)))))))
-
-;;; Persistence — YAML format
 
 (defun agent-shell-queue--item-to-yaml (item)
   "Convert ITEM to a hash-table suitable for `yaml-encode'.
@@ -385,8 +373,6 @@ a subdirectory of `temporary-file-directory' named emacs-<instance>."
                  agent-shell-queue-instance-name))
        (temporary-file-directory))))
 
-;;; Save
-
 (defun agent-shell-queue--save ()
   "Persist all queue items; all items are persisted regardless of status.
 Delegates to `agent-shell-queue-save-function' when set; otherwise writes
@@ -440,8 +426,6 @@ overwriting existing state with an empty queue."
     (setq agent-shell-queue--next-flush-time
           (time-add (current-time)
                     (seconds-to-time agent-shell-queue-auto-flush-interval)))))
-
-;;; Done log and archive
 
 (defun agent-shell-queue--append-done-log (buf-name item)
   "Append a JSON line for the completed ITEM in BUF-NAME to the done log.
@@ -498,8 +482,6 @@ item was dispatched, ISO-8601 archive timestamp, and runtime (dispatched→compl
                 (write-region (concat entry "\n") nil file t 'silent))
             (unlock-file file)))
       (error (message "agent-shell-queue: archive write failed: %s" err)))))
-
-;;; Load
 
 (defun agent-shell-queue--load ()
   "Populate the live store items from the durable store.
