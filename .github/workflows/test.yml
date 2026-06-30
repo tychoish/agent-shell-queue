@@ -5,15 +5,22 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    container: silex/emacs:${{ matrix.emacs_version }}-ci-cask
+    timeout-minutes: 5
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         emacs_version:
+          - "29.4"
           - "30.2"
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -21,16 +28,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Emacs
-        uses: purcell/setup-emacs@master
-        with:
-          version: ${{ matrix.emacs_version }}
-
-      - name: Set up Cask
-        uses: cask/setup-cask@master
-
-      - name: Install dependencies
-        run: cask install
-
-      - name: Run tests
-        run: cask exec ert-runner test/test-*.el
+      - run: cask install
+      - run: find elpa -name "*.elc" -delete
+      - run: cask exec ert-runner test/test-*.el
