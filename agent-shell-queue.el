@@ -3602,7 +3602,7 @@ Returns a buffer name string, or nil if cancelled."
       (while (and (not (equal (tabulated-list-get-id) id))
                   (not (eobp)))
         (forward-line 1))
-      (agent-shell-queue-buffer-edit))))
+      (agent-shell-queue--open-edit-for-id id))))
 
 ;;; Item raw inspect
 
