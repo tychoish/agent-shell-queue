@@ -784,6 +784,77 @@ the underlying shell process uptime for the current agent-shell buffer."
                                    (agent-shell-session-info)))))
     (pop-to-buffer info-buf '(display-buffer-below-selected))))
 
+;;; Backup restore
+
+;;;###autoload
+(defun agent-shell-queue-restore-from-backup ()
+  "Restore queue items from a versioned backup via annotated-completing-read.
+Lists backup files in the safe-save directory newest-first.  Only items whose
+item-id is not already present in the live queue are added, so the operation
+is safe to run against an active queue.  Saves and refreshes after merging."
+  (interactive)
+  (let* ((dir (agent-shell-queue--safe-save-directory))
+         (_ (unless (file-directory-p dir)
+              (user-error "No backup directory: %s" dir)))
+         (files (seq-filter
+                 (lambda (f)
+                   (string-match-p "\\`agent-shell-queue-archive-[0-9]+"
+                                   (file-name-nondirectory f)))
+                 (directory-files dir t nil t)))
+         (_ (unless files (user-error "No backup files found in %s" dir)))
+         (sorted (sort (copy-sequence files)
+                       (lambda (a b) (file-newer-than-file-p a b))))
+         (table (seq-map (lambda (f)
+                           (cons (file-name-nondirectory f)
+                                 (format-time-string
+                                  "%Y-%m-%d %H:%M"
+                                  (file-attribute-modification-time
+                                   (file-attributes f)))))
+                         sorted))
+         (choice (annotated-completing-read table
+                                            :prompt "restore backup => "
+                                            :category 'agent-shell-queue-backup
+                                            :require-match t
+                                            :history 'agent-shell-queue-restore-from-backup))
+         (chosen-file (expand-file-name choice dir))
+         (ext (file-name-extension chosen-file t))
+         (fmt (cond ((string= ext ".el") 'plist)
+                    ((string= ext ".json") 'json)
+                    ((string= ext ".yaml") 'yaml)
+                    (t (user-error "Unknown backup format: %s" ext)))))
+    (agent-shell-queue--ensure-loaded)
+    (let* ((live-store (agent-shell-queue--current-store))
+           (backup-items (agent-shell-queue-deserialize
+                          (agent-shell-queue--make-store
+                           :format fmt :file chosen-file :items nil)
+                          (with-temp-buffer
+                            (insert-file-contents chosen-file)
+                            (buffer-string))))
+           (current-ids (thread-last
+                          (agent-shell-queue-store-items live-store)
+                          (seq-mapcat #'cdr)
+                          (seq-map #'agent-shell-queue-item-id)))
+           (added 0))
+      (seq-do (lambda (bucket)
+                (let* ((buf-name (car bucket))
+                       (new-items (seq-remove
+                                   (lambda (item)
+                                     (member (agent-shell-queue-item-id item) current-ids))
+                                   (cdr bucket)))
+                       (live-bucket (assoc buf-name
+                                          (agent-shell-queue-store-items live-store))))
+                  (when new-items
+                    (setq added (+ added (length new-items)))
+                    (if live-bucket
+                        (setcdr live-bucket (append (cdr live-bucket) new-items))
+                      (setf (agent-shell-queue-store-items live-store)
+                            (append (agent-shell-queue-store-items live-store)
+                                    (list (cons buf-name new-items))))))))
+              backup-items)
+      (agent-shell-queue--save)
+      (agent-shell-queue--refresh-buffer)
+      (message "agent-shell-queue: restored %d item(s) from %s" added choice))))
+
 ;;; Wire menu key into queue mode map
 
 (define-key agent-shell-queue-mode-map (kbd "M") #'agent-shell-session-menu)

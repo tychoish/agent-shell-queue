@@ -208,6 +208,16 @@ Nil means use a subdirectory of `temporary-file-directory' named
 (defvar agent-shell-queue-safe-save-format nil
   "Serialization format for safe-save backups, or nil to use `agent-shell-queue-serialization-format'.")
 
+(defvar agent-shell-queue-safe-save-max-files nil
+  "Maximum number of versioned backup files to keep in the safe-save directory.
+When non-nil and the backup count exceeds this limit, the oldest file is
+deleted after each save — one file at a time so lowering the limit converges
+gradually.  Requires `agent-shell-queue-safe-save'.")
+
+(defvar agent-shell-queue-idle-flush-delay nil
+  "Seconds of Emacs idle time after which the queue state is flushed to disk.
+Set to nil to disable idle-triggered saves (default).")
+
 ;;; macros
 
 (defmacro with-agent-shell-queue (&rest body)
@@ -865,6 +875,9 @@ Enforces mutual exclusivity and updates the prompt indicator."
 
 (defvar agent-shell-queue--idle-timer nil
   "Idle timer for auto-sending active queue items.")
+
+(defvar agent-shell-queue--idle-flush-timer nil
+  "Idle timer that saves queue state after a period of user inactivity.")
 
 (defvar agent-shell-queue--subscriptions nil
   "Alist of (BUF-NAME . TOKEN) for active `turn-complete' subscriptions.
@@ -1794,13 +1807,23 @@ No-op when the queue is globally paused."
                 (agent-shell-queue-send-item (agent-shell-queue-item-id item))))
             (copy-sequence (agent-shell-queue-store-items agent-shell-queue--store)))))
 
+(defun agent-shell-queue--idle-flush ()
+  "Save queue state to disk on idle.  No-op when the queue has not been loaded."
+  (when agent-shell-queue--loaded
+    (agent-shell-queue--save)))
+
 (defun agent-shell-queue--setup-hooks ()
-  "Start the backup idle-scan timer.
+  "Start the backup idle-scan timer and the optional idle-flush timer.
 Per-buffer draining is registered lazily via `agent-shell-queue--ensure-subscription'
 when items are first added for a given buffer."
   (setq agent-shell-queue--idle-timer
         (or agent-shell-queue--idle-timer
-            (run-with-idle-timer agent-shell-queue-idle-delay t #'agent-shell-queue--auto-send))))
+            (run-with-idle-timer agent-shell-queue-idle-delay t #'agent-shell-queue--auto-send)))
+  (when (and agent-shell-queue-idle-flush-delay
+             (not agent-shell-queue--idle-flush-timer))
+    (setq agent-shell-queue--idle-flush-timer
+          (run-with-idle-timer agent-shell-queue-idle-flush-delay t
+                               #'agent-shell-queue--idle-flush))))
 
 ;;; Queue buffer
 
@@ -1825,6 +1848,9 @@ Queue remains paused after reload; call `agent-shell-queue-resume' when ready."
   (when agent-shell-queue--idle-timer
     (cancel-timer agent-shell-queue--idle-timer)
     (setq agent-shell-queue--idle-timer nil))
+  (when agent-shell-queue--idle-flush-timer
+    (cancel-timer agent-shell-queue--idle-flush-timer)
+    (setq agent-shell-queue--idle-flush-timer nil))
 
   (seq-do (lambda (pair) (cancel-timer (cdr pair))) agent-shell-queue--wait-timers)
   (setq agent-shell-queue--wait-timers nil)

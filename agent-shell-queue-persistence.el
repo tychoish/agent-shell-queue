@@ -60,6 +60,7 @@
 (defvar agent-shell-queue--last-flush-time)
 (defvar agent-shell-queue--next-flush-time)
 (defvar agent-shell-queue-auto-flush-interval)
+(defvar agent-shell-queue-safe-save-max-files)
 
 (defvar agent-shell-queue--write-log nil
   "Ring buffer of recent persistence events, newest first.
@@ -373,6 +374,22 @@ a subdirectory of `temporary-file-directory' named emacs-<instance>."
                  agent-shell-queue-instance-name))
        (temporary-file-directory))))
 
+(defun agent-shell-queue--safe-save-prune (dir ext)
+  "Delete the oldest backup in DIR with extension EXT, if the count exceeds the limit.
+Only removes one file per call.  No-op when `agent-shell-queue-safe-save-max-files' is nil."
+  (when agent-shell-queue-safe-save-max-files
+    (let* ((files (seq-filter
+                   (lambda (f)
+                     (string-match-p (concat "\\`agent-shell-queue-archive-[0-9]+"
+                                             (regexp-quote ext) "\\'")
+                                     (file-name-nondirectory f)))
+                   (directory-files dir t nil t)))
+           (sorted (sort files (lambda (a b) (file-newer-than-file-p a b)))))
+      (when (> (length sorted) agent-shell-queue-safe-save-max-files)
+        (condition-case err
+            (delete-file (car (last sorted)))
+          (error (message "agent-shell-queue: backup prune failed: %s" err)))))))
+
 (defun agent-shell-queue--save ()
   "Persist all queue items; all items are persisted regardless of status.
 Delegates to `agent-shell-queue-save-function' when set; otherwise writes
@@ -411,7 +428,8 @@ overwriting existing state with an empty queue."
                    (agent-shell-queue--make-store
                     :items (agent-shell-queue-store-items base-store)
                     :format fmt
-                    :file nil)))))
+                    :file nil))))
+        (agent-shell-queue--safe-save-prune dir ext))
       (condition-case err
           (progn
             (make-directory (file-name-directory file) t)

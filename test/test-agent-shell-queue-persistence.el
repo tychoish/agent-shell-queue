@@ -377,5 +377,136 @@ The item completes and the side effect is visible."
                 (should (eq t (agent-shell-queue-item-background emacs-item))))))
         (ignore-errors (delete-file archive-file))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Idle flush
+
+(ert-deftest agent-shell-queue/idle-flush-noop-when-not-loaded ()
+  "idle-flush does not call --save when the queue has not been loaded."
+  (let ((agent-shell-queue--loaded nil)
+        (saved nil))
+    (cl-letf (((symbol-function 'agent-shell-queue--save)
+               (lambda () (setq saved t))))
+      (agent-shell-queue--idle-flush)
+      (should-not saved))))
+
+(ert-deftest agent-shell-queue/idle-flush-saves-when-loaded ()
+  "idle-flush calls --save when the queue is loaded."
+  (agent-shell-queue-test/with-persist-file
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'agent-shell-queue--save)
+                 (lambda () (setq saved t))))
+        (agent-shell-queue--idle-flush)
+        (should saved)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Safe-save pruning
+
+(defmacro agent-shell-queue-test/with-backup-dir (&rest body)
+  "Run BODY with a temp backup directory bound as `dir'."
+  (declare (indent 0))
+  `(let ((dir (make-temp-file "asq-backup-" t)))
+     (unwind-protect
+         (progn ,@body)
+       (ignore-errors (delete-directory dir t)))))
+
+(defun agent-shell-queue-test/make-backup (dir timestamp ext &optional mtime)
+  "Create a placeholder backup file in DIR named for TIMESTAMP and EXT.
+When MTIME is non-nil, set the file modification time to that value."
+  (let ((file (expand-file-name
+               (format "agent-shell-queue-archive-%d%s" timestamp ext)
+               dir)))
+    (with-temp-file file (insert "placeholder"))
+    (when mtime
+      (set-file-times file mtime))
+    file))
+
+(defun agent-shell-queue-test/backup-count (dir ext)
+  "Count backup files in DIR matching the standard pattern for EXT."
+  (length (directory-files
+           dir nil
+           (concat "\\`agent-shell-queue-archive-[0-9]+" (regexp-quote ext) "\\'"))))
+
+(ert-deftest agent-shell-queue/safe-save-prune-noop-when-nil ()
+  "Pruning is a no-op when safe-save-max-files is nil."
+  (agent-shell-queue-test/with-backup-dir
+    (let ((agent-shell-queue-safe-save-max-files nil))
+      (agent-shell-queue-test/make-backup dir 1000 ".el")
+      (agent-shell-queue-test/make-backup dir 1001 ".el")
+      (agent-shell-queue-test/make-backup dir 1002 ".el")
+      (agent-shell-queue--safe-save-prune dir ".el")
+      (should (= 3 (agent-shell-queue-test/backup-count dir ".el"))))))
+
+(ert-deftest agent-shell-queue/safe-save-prune-noop-at-limit ()
+  "Pruning does nothing when the count equals the limit."
+  (agent-shell-queue-test/with-backup-dir
+    (let ((agent-shell-queue-safe-save-max-files 3))
+      (agent-shell-queue-test/make-backup dir 1000 ".el")
+      (agent-shell-queue-test/make-backup dir 1001 ".el")
+      (agent-shell-queue-test/make-backup dir 1002 ".el")
+      (agent-shell-queue--safe-save-prune dir ".el")
+      (should (= 3 (agent-shell-queue-test/backup-count dir ".el"))))))
+
+(ert-deftest agent-shell-queue/safe-save-prune-removes-oldest ()
+  "Pruning removes the single oldest file when count exceeds the limit."
+  (agent-shell-queue-test/with-backup-dir
+    (let ((agent-shell-queue-safe-save-max-files 2))
+      (let ((oldest (agent-shell-queue-test/make-backup
+                     dir 1000 ".el" (seconds-to-time 1000000)))
+            (_mid   (agent-shell-queue-test/make-backup
+                     dir 1001 ".el" (seconds-to-time 1001000)))
+            (_new   (agent-shell-queue-test/make-backup
+                     dir 1002 ".el" (seconds-to-time 1002000))))
+        (agent-shell-queue--safe-save-prune dir ".el")
+        (should (= 2 (agent-shell-queue-test/backup-count dir ".el")))
+        (should-not (file-exists-p oldest))))))
+
+(ert-deftest agent-shell-queue/safe-save-prune-removes-one-at-a-time ()
+  "Pruning removes exactly one file per call even when multiple exceed the limit."
+  (agent-shell-queue-test/with-backup-dir
+    (let ((agent-shell-queue-safe-save-max-files 1))
+      (agent-shell-queue-test/make-backup dir 1000 ".el" (seconds-to-time 1000000))
+      (agent-shell-queue-test/make-backup dir 1001 ".el" (seconds-to-time 1001000))
+      (agent-shell-queue-test/make-backup dir 1002 ".el" (seconds-to-time 1002000))
+      (agent-shell-queue--safe-save-prune dir ".el")
+      (should (= 2 (agent-shell-queue-test/backup-count dir ".el"))))))
+
+(ert-deftest agent-shell-queue/safe-save-prune-ignores-unrelated-files ()
+  "Pruning ignores files that do not match the backup filename pattern."
+  (agent-shell-queue-test/with-backup-dir
+    (let ((agent-shell-queue-safe-save-max-files 1))
+      (agent-shell-queue-test/make-backup dir 1000 ".el")
+      (with-temp-file (expand-file-name "other.el" dir) (insert "x"))
+      (with-temp-file (expand-file-name "agent-shell-queue-state.el" dir) (insert "x"))
+      (agent-shell-queue--safe-save-prune dir ".el")
+      (should (= 1 (agent-shell-queue-test/backup-count dir ".el"))))))
+
+(ert-deftest agent-shell-queue/safe-save-prune-respects-ext ()
+  "Pruning only counts and removes files matching the given extension."
+  (agent-shell-queue-test/with-backup-dir
+    (let ((agent-shell-queue-safe-save-max-files 1))
+      (agent-shell-queue-test/make-backup dir 1000 ".el"   (seconds-to-time 1000000))
+      (agent-shell-queue-test/make-backup dir 1001 ".el"   (seconds-to-time 1001000))
+      (agent-shell-queue-test/make-backup dir 2000 ".json" (seconds-to-time 2000000))
+      (agent-shell-queue--safe-save-prune dir ".el")
+      (should (= 1 (agent-shell-queue-test/backup-count dir ".el")))
+      (should (= 1 (agent-shell-queue-test/backup-count dir ".json"))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Safe-save prune integrated with --save
+
+(ert-deftest agent-shell-queue/safe-save-prune-fires-on-save ()
+  "safe-save-max-files is enforced each time --save writes a backup."
+  (agent-shell-queue-test/with-persist-file
+    (agent-shell-queue-test/with-backup-dir
+      (let ((agent-shell-queue-safe-save t)
+            (agent-shell-queue-safe-save-directory dir)
+            (agent-shell-queue-safe-save-max-files 2))
+        ;; Pre-populate with 2 older backups so the next save pushes count to 3.
+        (agent-shell-queue-test/make-backup dir 1000 ".el" (seconds-to-time 1000000))
+        (agent-shell-queue-test/make-backup dir 1001 ".el" (seconds-to-time 1001000))
+        ;; --save writes a new backup then prunes — count should stay at 2.
+        (agent-shell-queue--save)
+        (should (= 2 (agent-shell-queue-test/backup-count dir ".el")))))))
+
 (provide 'test-agent-shell-queue-persistence)
 ;;; test-agent-shell-queue-persistence.el ends here
