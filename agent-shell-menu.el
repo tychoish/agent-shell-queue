@@ -708,6 +708,12 @@ three expand-by-default customization variables."
               (start (alist-get 'start attrs)))
     start))
 
+(defvar agent-shell-info-map (make-sparse-keymap)
+  "Keymap for agent-shell info help buffers.  Inherits `help-mode-map' once loaded.")
+
+(with-eval-after-load 'help-mode
+  (set-keymap-parent agent-shell-info-map help-mode-map))
+
 ;;;###autoload
 (defun agent-shell-session-info ()
   "Display a read-only ephemeral buffer with live session diagnostics.
@@ -745,10 +751,9 @@ the underlying shell process uptime for the current agent-shell buffer."
                                     (memq (agent-shell-queue-item-status it)
                                           '(active running)))
                                   (or queue-items nil)))
-         (info-buf (get-buffer-create (format "*agent-shell-info: %s*" buf-name))))
-    (with-current-buffer info-buf
-      (let ((inhibit-read-only t))
-        (erase-buffer)
+         (info-buf-name (format "*agent-shell-info: %s*" buf-name)))
+    (with-help-window info-buf-name
+      (with-current-buffer standard-output
         (insert (propertize (format "Session: %s\n" buf-name) 'face 'bold))
         (insert (make-string (+ 9 (length buf-name)) ?─) "\n\n")
         (insert (propertize "Agent\n" 'face '(bold underline)))
@@ -774,15 +779,14 @@ the underlying shell process uptime for the current agent-shell buffer."
                         queue-depth active-items))
         (insert (format "  Input mode          %s\n" input-mode))
         (insert (format "  Global pause        %s\n" (if globally-paused "paused" "running")))
-        (insert (format "  Session suspended   %s\n" (if session-paused "yes" "no")))
-        (insert "\n")
-        (insert (propertize "q" 'face 'bold) " to close\n"))
-      (read-only-mode 1)
-      (local-set-key (kbd "q") #'quit-window)
-      (local-set-key (kbd "g") (lambda () (interactive)
-                                 (with-current-buffer shell-buf
-                                   (agent-shell-session-info)))))
-    (pop-to-buffer info-buf '(display-buffer-below-selected))))
+        (insert (format "  Session suspended   %s\n" (if session-paused "yes" "no")))))
+    (when-let* ((buf (get-buffer info-buf-name)))
+      (with-current-buffer buf
+        (let ((m (make-composed-keymap (make-sparse-keymap) agent-shell-info-map)))
+          (define-key m (kbd "g") (lambda () (interactive)
+                                    (with-current-buffer shell-buf
+                                      (agent-shell-session-info))))
+          (use-local-map m))))))
 
 ;;; Backup restore
 

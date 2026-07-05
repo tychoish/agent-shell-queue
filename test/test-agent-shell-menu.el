@@ -337,6 +337,12 @@ used as a transient suffix."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell--permission-suffixes
 
+(defun agent-shell-test/suffix-plist (suffix)
+  "Return properties of transient SUFFIX as a plain plist.
+`transient-parse-suffix' returns (transient-suffix :key K :description D ...)
+so this strips the leading type tag via `cdr'."
+  (cdr suffix))
+
 (ert-deftest agent-shell-menu/permission-suffixes-empty-when-no-pending ()
   "No suffixes generated when no permission is pending."
   (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
@@ -582,6 +588,16 @@ not a raw buffer list or a single annotation string."
   (let* ((keys (transient-test/collect-keys 'agent-shell-dispatch))
          (dups (transient-test/duplicate-keys keys)))
     (should (null dups))))
+
+;;;; agent-shell-session-info (with-help-window migration)
+
+(ert-deftest agent-shell-menu/info-map-inherits-help-mode-map ()
+  "agent-shell-info-map has help-mode-map as an ancestor."
+  (require 'help-mode)
+  (let ((map agent-shell-info-map))
+    (while (and map (not (eq map help-mode-map)))
+      (setq map (keymap-parent map)))
+    (should (eq map help-mode-map))))
 
 
 (provide 'test-agent-shell-menu)
