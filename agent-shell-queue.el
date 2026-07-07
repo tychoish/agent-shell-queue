@@ -65,8 +65,6 @@
   "Alist bucket key for items not yet assigned to any shell.")
 
 (declare-function shell-maker-busy "shell-maker")
-(declare-function agent-shell-subscribe-to "agent-shell")
-(declare-function agent-shell-unsubscribe "agent-shell")
 (declare-function markdown-mode "markdown-mode")
 (declare-function yaml-encode "yaml")
 (declare-function yaml-parse-string "yaml")
@@ -734,7 +732,6 @@ Installed as :before advice on `shell-maker-submit'."
 (advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept)
 
 (declare-function shell-maker-busy "shell-maker")
-(declare-function agent-shell-queue-only-mode "agent-shell-queue")
 
 (defun agent-shell-queue--intercept-clear ()
   (when (overlayp agent-shell-queue--intercept-overlay)
@@ -845,10 +842,6 @@ Enforces mutual exclusivity and updates the prompt indicator."
             cleared)
     (agent-shell-queue--refresh-buffer)
     (message "agent-shell-queue: queue-intercept disabled in %d buffer(s)" (length cleared))))
-
-(declare-function agent-shell-queue--default-state-file "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--default-archive-file "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--archive-file "agent-shell-queue-persistence")
 
 (defun agent-shell-queue--default-pick-buffer (prompt)
   "Pick a live agent-shell buffer using PROMPT via `completing-read'."
@@ -1006,23 +999,6 @@ but that yields \"0d\" for a zero delta instead of \"0s\"."
           (t (format "%dd" (truncate (/ s 86400)))))))
 
 ;;; Persistence — implementation in agent-shell-queue-persistence.el
-
-(declare-function agent-shell-queue--serialize-plist "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--deserialize-plist "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--serialize-json "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--deserialize-json "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--serialize-yaml "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--deserialize-yaml "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--safe-save-directory "agent-shell-queue-persistence")
-(declare-function agent-shell-queue-serialize "agent-shell-queue-persistence")
-(declare-function agent-shell-queue-deserialize "agent-shell-queue-persistence")
-(declare-function agent-shell-queue-register-format "agent-shell-queue-persistence")
-(declare-function agent-shell-queue-format-file-extension "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--append-done-log "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--write-archive "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--log-write "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--load "agent-shell-queue-persistence")
-(declare-function agent-shell-queue--migrate-queue-struct "agent-shell-queue-persistence")
 
 ;;;###autoload
 (defun agent-shell-queue-buffer-archive ()
@@ -4907,8 +4883,6 @@ how the window was opened (i.e. independent of `quit-restore' state)."
         (progn (delete-window win) (kill-buffer buf))
       (kill-buffer buf))))
 
-(declare-function agent-shell-set-session-mode "agent-shell")
-
 (defun agent-shell-queue--capture-plan-mode-choice (buf)
   "When BUF's session is in a blocking mode, prompt for what to do.
 Returns non-nil if the item should be queued as `blocked.skip'.
@@ -5044,8 +5018,6 @@ If a draft was previously saved from this buffer it is updated in place."
                            (thing-at-point 'symbol t)
                            (thing-at-point 'word t)))))
     (insert thing)))
-
-(declare-function annotated-completing-read-context-from-point "annotated-completing-read")
 
 (defun agent-shell-queue-capture-select-context ()
   "Select a string from the origin buffer's context via completing-read and insert it."
@@ -5542,9 +5514,6 @@ For each item whose ID already exists, prompts to keep, replace, or assign new I
   "Default mode for creating new sessions when forking a queue.
 `new' creates a clean new session via `agent-shell-new-shell'.
 `fork' uses the ACP fork session option via `agent-shell-fork'.")
-
-(declare-function agent-shell-new-shell "agent-shell")
-(declare-function agent-shell-fork "agent-shell")
 
 (defmacro agent-shell-queue-with-paused-session (buf &rest body)
   "Execute BODY with BUF's queue session paused, then always resume it.
@@ -6181,8 +6150,6 @@ interjection buffer is already pending."
     (agent-shell-queue--open-interjection-buffer running-item buf-name)))
 
 ;;; Queue-only mode
-
-(declare-function shell-maker-busy "shell-maker")
 
 (defcustom agent-shell-queue-input-mode-default 'default
   "Default input routing mode for new agent-shell sessions.

@@ -38,7 +38,6 @@
 (require 'agent-shell-queue)
 
 (declare-function agent-shell-viewport--shell-buffer "agent-shell-viewport")
-(declare-function agent-shell--new-shell "agent-shell")
 (declare-function agent-shell-ui--toggle-fragment-at-point "agent-shell-ui")
 
 (declare-function agent-review "agent-review")
@@ -669,7 +668,6 @@ three expand-by-default customization variables."
 
 ;;; Session info buffer
 
-(declare-function agent-shell--state "agent-shell")
 (declare-function shell-maker-process "shell-maker")
 
 (defun agent-shell-menu--count-fragments (buf)

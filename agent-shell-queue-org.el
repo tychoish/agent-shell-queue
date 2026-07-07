@@ -210,8 +210,6 @@ string-in-paragraph-contents issues during tree walking."
 
 ;;; Org heading → queue capture
 
-(declare-function agent-shell-queue--open-capture "agent-shell-queue")
-
 ;;;###autoload
 (defun agent-shell-queue-org-refile-from-heading (&optional remove-original)
   "Capture the current org heading's subtree text into the agent-shell-queue.

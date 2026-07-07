@@ -27,14 +27,6 @@
 (require 'cl-lib)
 (require 'agent-shell-queue)
 
-(declare-function agent-shell-queue--ensure-loaded "agent-shell-queue")
-(declare-function agent-shell-queue--refresh-buffer "agent-shell-queue")
-(declare-function agent-shell-queue-export "agent-shell-queue")
-(declare-function agent-shell-queue-import "agent-shell-queue")
-(declare-function agent-shell-queue--scope-label "agent-shell-queue")
-(declare-function agent-shell-queue--item-to-yaml "agent-shell-queue")
-(declare-function agent-shell-queue--executor-name "agent-shell-queue")
-(declare-function agent-shell-queue--executor-from-plist "agent-shell-queue")
 
 ;;; Variables
 
