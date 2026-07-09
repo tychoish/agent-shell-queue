@@ -11,57 +11,57 @@
 (require 'agent-shell-menu)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell--block-category
+;;; agent-shell-menu--block-category
 
 (ert-deftest agent-shell-menu/block-category-thinking ()
   (should (equal "thinking"
-                 (agent-shell--block-category "msg_abc123_agent_thought_chunk"))))
+                 (agent-shell-menu--block-category "msg_abc123_agent_thought_chunk"))))
 
 (ert-deftest agent-shell-menu/block-category-agent-message ()
   (should (equal "agent message"
-                 (agent-shell--block-category "turn_1_agent_message_chunk"))))
+                 (agent-shell-menu--block-category "turn_1_agent_message_chunk"))))
 
 (ert-deftest agent-shell-menu/block-category-user-message ()
   (should (equal "user message"
-                 (agent-shell--block-category "turn_1_user_message_chunk"))))
+                 (agent-shell-menu--block-category "turn_1_user_message_chunk"))))
 
 (ert-deftest agent-shell-menu/block-category-plan ()
   (should (equal "plan"
-                 (agent-shell--block-category "session-plan"))))
+                 (agent-shell-menu--block-category "session-plan"))))
 
 (ert-deftest agent-shell-menu/block-category-plan-any-prefix ()
   (should (equal "plan"
-                 (agent-shell--block-category "some-other-thing-plan"))))
+                 (agent-shell-menu--block-category "some-other-thing-plan"))))
 
 (ert-deftest agent-shell-menu/block-category-session-info ()
   (should (equal "session info"
-                 (agent-shell--block-category "bootstrapping-intro"))))
+                 (agent-shell-menu--block-category "bootstrapping-intro"))))
 
 (ert-deftest agent-shell-menu/block-category-tool-call-default ()
   (should (equal "tool call"
-                 (agent-shell--block-category "tool_use_xyz"))))
+                 (agent-shell-menu--block-category "tool_use_xyz"))))
 
 (ert-deftest agent-shell-menu/block-category-tool-call-unknown-id ()
   (should (equal "tool call"
-                 (agent-shell--block-category "some-random-id-123"))))
+                 (agent-shell-menu--block-category "some-random-id-123"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell--permission-buttons
+;;; agent-shell-menu--permission-buttons
 
 (ert-deftest agent-shell-menu/permission-buttons-empty-buffer ()
   (with-temp-buffer
-    (should (null (agent-shell--permission-buttons)))))
+    (should (null (agent-shell-menu--permission-buttons)))))
 
 (ert-deftest agent-shell-menu/permission-buttons-no-permission-property ()
   (with-temp-buffer
     (insert "some text without button property")
-    (should (null (agent-shell--permission-buttons)))))
+    (should (null (agent-shell-menu--permission-buttons)))))
 
 (ert-deftest agent-shell-menu/permission-buttons-finds-single-button ()
   (with-temp-buffer
     (insert "[ Allow ]")
     (put-text-property 1 10 'button 'permission)
-    (let ((buttons (agent-shell--permission-buttons)))
+    (let ((buttons (agent-shell-menu--permission-buttons)))
       (should (= 1 (length buttons)))
       (should (equal "Allow" (caar buttons))))))
 
@@ -69,14 +69,14 @@
   (with-temp-buffer
     (insert "[  Deny  ]")
     (put-text-property 1 11 'button 'permission)
-    (let ((buttons (agent-shell--permission-buttons)))
+    (let ((buttons (agent-shell-menu--permission-buttons)))
       (should (equal "Deny" (caar buttons))))))
 
 (ert-deftest agent-shell-menu/permission-buttons-returns-position ()
   (with-temp-buffer
     (insert "[ Allow ]")
     (put-text-property 1 10 'button 'permission)
-    (let ((buttons (agent-shell--permission-buttons)))
+    (let ((buttons (agent-shell-menu--permission-buttons)))
       (should (= 1 (cdar buttons))))))
 
 (ert-deftest agent-shell-menu/permission-buttons-finds-multiple-buttons ()
@@ -84,7 +84,7 @@
     (insert "[ Allow ]\n[ Deny ]")
     (put-text-property 1 10 'button 'permission)
     (put-text-property 11 19 'button 'permission)
-    (let ((buttons (agent-shell--permission-buttons)))
+    (let ((buttons (agent-shell-menu--permission-buttons)))
       (should (= 2 (length buttons)))
       (should (equal "Allow" (caar buttons)))
       (should (equal "Deny" (caadr buttons))))))
@@ -93,10 +93,10 @@
   (with-temp-buffer
     (insert "[ Other ]")
     (put-text-property 1 10 'button 'other-value)
-    (should (null (agent-shell--permission-buttons)))))
+    (should (null (agent-shell-menu--permission-buttons)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell--permission-button-action
+;;; agent-shell-menu--permission-button-action
 
 (ert-deftest agent-shell-menu/permission-button-action-invokes-command ()
   "The lambda returned by permission-button-action calls the button's RET command."
@@ -108,7 +108,7 @@
                          (let ((m (make-sparse-keymap)))
                            (define-key m (kbd "RET") cmd)
                            m))
-      (let ((action (agent-shell--permission-button-action 1)))
+      (let ((action (agent-shell-menu--permission-button-action 1)))
         (call-interactively action)))
     (should invoked)))
 
@@ -122,31 +122,31 @@ Wrong type argument: commandp, \"\"."
                        (let ((m (make-sparse-keymap)))
                          (define-key m (kbd "RET") "")
                          m))
-    (let ((action (agent-shell--permission-button-action 1)))
+    (let ((action (agent-shell-menu--permission-button-action 1)))
       (should-not (condition-case err
                       (progn (call-interactively action) nil)
                     (error err))))))
 
 (ert-deftest agent-shell-menu/resolve-permission-uses-buttons-for-lookup ()
-  "Regression: agent-shell-resolve-permission must bind buttons before using it
+  "Regression: agent-shell-menu-resolve-permission must bind buttons before using it
 in assoc — previously buttons was a free variable causing pos to always be nil."
   (let (invoked-pos)
     (with-temp-buffer
       (insert (make-string 50 ?x))
       (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
                 ((symbol-function 'agent-shell--permission-pending-p) (lambda () t))
-                ((symbol-function 'agent-shell--permission-buttons)
+                ((symbol-function 'agent-shell-menu--permission-buttons)
                  (lambda () (list (cons "Allow" 1))))
                 ((symbol-function 'annotated-completing-read)
                  (lambda (_table &rest _) "Allow"))
-                ((symbol-function 'agent-shell--permission-action-at)
+                ((symbol-function 'agent-shell-menu--permission-action-at)
                  (lambda (pos) (setq invoked-pos pos) #'ignore))
                 ((symbol-function 'call-interactively) #'ignore))
-        (agent-shell-resolve-permission)))
+        (agent-shell-menu-resolve-permission)))
     (should (equal 1 invoked-pos))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell-select-action
+;;; agent-shell-menu-select-action
 
 (ert-deftest agent-shell-menu/select-action-calls-command-not-docstring ()
   "Regression: selecting a permission option must invoke the command, not the
@@ -158,15 +158,15 @@ Wrong type argument: commandp, \"\"."
 	 (captured-table nil))
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
 	      ((symbol-function 'agent-shell--permission-pending-p) (lambda (&rest _) t))
-	      ((symbol-function 'agent-shell--permission-buttons)
+	      ((symbol-function 'agent-shell-menu--permission-buttons)
 	       (lambda () (list (cons "Allow" 1))))
-	      ((symbol-function 'agent-shell--permission-button-action)
+	      ((symbol-function 'agent-shell-menu--permission-button-action)
 	       (lambda (_pos) action))
 	      ((symbol-function 'annotated-completing-read)
 	       (lambda (table &rest _)
 		 (setq captured-table table)
 		 "permission: Allow")))
-      (agent-shell-select-action))
+      (agent-shell-menu-select-action))
     (should invoked)
     (should (equal "" (cdr (assoc "permission: Allow" captured-table))))))
 
@@ -175,19 +175,19 @@ Wrong type argument: commandp, \"\"."
   (let (captured-table)
     (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
 	      ((symbol-function 'agent-shell--permission-pending-p) (lambda (&rest _) t))
-	      ((symbol-function 'agent-shell--permission-buttons)
+	      ((symbol-function 'agent-shell-menu--permission-buttons)
 	       (lambda () (list (cons "Allow" 1))))
-	      ((symbol-function 'agent-shell--permission-button-action)
+	      ((symbol-function 'agent-shell-menu--permission-button-action)
 	       (lambda (_pos) (lambda () (interactive))))
 	      ((symbol-function 'annotated-completing-read)
 	       (lambda (table &rest _)
 		 (setq captured-table table)
 		 (caar table))))
-      (agent-shell-select-action))
+      (agent-shell-menu-select-action))
     (should (string-prefix-p "permission:" (caar captured-table)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell-extras--pick-buffer
+;;; agent-shell-menu--pick-buffer
 
 (ert-deftest agent-shell-menu/pick-buffer-passes-alist-not-buffer-list ()
   "Regression: passing (agent-shell-buffers) raw to annotated-completing-read
@@ -196,12 +196,12 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
          (captured nil))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (list mock-buf)))
-                  ((symbol-function 'agent-shell--buffer-annotation) (lambda (_) "ann"))
+                  ((symbol-function 'agent-shell-menu--buffer-annotation) (lambda (_) "ann"))
                   ((symbol-function 'annotated-completing-read)
                    (lambda (table &rest _)
                      (setq captured table)
                      (buffer-name mock-buf))))
-          (agent-shell-extras--pick-buffer "test: ")
+          (agent-shell-menu--pick-buffer "test: ")
           (should (listp captured))
           (should (= 1 (length captured)))
           (should (consp (car captured)))
@@ -211,7 +211,7 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
 
 (ert-deftest agent-shell-menu/pick-buffer-errors-when-no-buffers ()
   (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () nil)))
-    (should-error (agent-shell-extras--pick-buffer "test: ") :type 'user-error)))
+    (should-error (agent-shell-menu--pick-buffer "test: ") :type 'user-error)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-menu-project-buffers
@@ -286,7 +286,7 @@ which buffer is current when the action is invoked."
                                    (lambda () (interactive)
                                      (setq invoked-in (current-buffer))))
                                  m)))
-          (let ((action (agent-shell--session-permission-button-action shell 1)))
+          (let ((action (agent-shell-menu--session-permission-button-action shell 1)))
             (with-temp-buffer
               (call-interactively action)))
           (should (eq shell invoked-in)))
@@ -296,23 +296,23 @@ which buffer is current when the action is invoked."
   "The predicate checks the shell buffer, not the current buffer."
   (let ((shell (generate-new-buffer " *mock-shell-4*")))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+        (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                    (lambda () shell))
                   ((symbol-function 'agent-shell--permission-pending-p)
                    (lambda (&rest _) t)))
-          (should (agent-shell--session-permission-pending-p)))
+          (should (agent-shell-menu--session-permission-pending-p)))
       (kill-buffer shell))))
 
 (ert-deftest agent-shell-menu/in-session-p-nil-when-no-session ()
-  "Returns nil when agent-shell--session-shell-buffer returns nil."
-  (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
+  "Returns nil when agent-shell-menu--session-shell-buffer returns nil."
+  (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () nil)))
     (should-not (agent-shell-menu--in-session-p))))
 
 (ert-deftest agent-shell-menu/in-session-p-non-nil-when-session ()
-  "Returns non-nil when agent-shell--session-shell-buffer returns a buffer."
+  "Returns non-nil when agent-shell-menu--session-shell-buffer returns a buffer."
   (let ((shell (generate-new-buffer " *mock-in-session*")))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+        (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                    (lambda () shell)))
           (should (agent-shell-menu--in-session-p)))
       (kill-buffer shell))))
@@ -335,7 +335,7 @@ used as a transient suffix."
     (should called)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell--permission-suffixes
+;;; agent-shell-menu--permission-suffixes
 
 (defun agent-shell-test/suffix-plist (suffix)
   "Return properties of transient SUFFIX as a plain plist.
@@ -345,20 +345,20 @@ so this strips the leading type tag via `cdr'."
 
 (ert-deftest agent-shell-menu/permission-suffixes-empty-when-no-pending ()
   "No suffixes generated when no permission is pending."
-  (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
-    (should (null (agent-shell--permission-suffixes nil)))))
+  (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () nil)))
+    (should (null (agent-shell-menu--permission-suffixes nil)))))
 
 (ert-deftest agent-shell-menu/permission-suffixes-one-per-button ()
   "One transient suffix is produced per pending permission button."
   (let ((shell (generate-new-buffer " *mock-perm-shell*")))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+        (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                    (lambda () shell))
-                  ((symbol-function 'agent-shell--permission-buttons)
+                  ((symbol-function 'agent-shell-menu--permission-buttons)
                    (lambda () (list (cons "Allow" 10) (cons "Deny" 20))))
-                  ((symbol-function 'agent-shell--session-permission-button-action)
+                  ((symbol-function 'agent-shell-menu--session-permission-button-action)
                    (lambda (_shell _pos) #'ignore)))
-          (let ((suffixes (agent-shell--permission-suffixes nil)))
+          (let ((suffixes (agent-shell-menu--permission-suffixes nil)))
             (should (= 2 (length suffixes)))
             (should (equal "1" (plist-get (agent-shell-test/suffix-plist (nth 0 suffixes)) :key)))
             (should (equal "2" (plist-get (agent-shell-test/suffix-plist (nth 1 suffixes)) :key)))))
@@ -368,13 +368,13 @@ so this strips the leading type tag via `cdr'."
   "Each suffix description includes the permission button label."
   (let ((shell (generate-new-buffer " *mock-perm-shell-2*")))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+        (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                    (lambda () shell))
-                  ((symbol-function 'agent-shell--permission-buttons)
+                  ((symbol-function 'agent-shell-menu--permission-buttons)
                    (lambda () (list (cons "Allow for session" 10))))
-                  ((symbol-function 'agent-shell--session-permission-button-action)
+                  ((symbol-function 'agent-shell-menu--session-permission-button-action)
                    (lambda (_shell _pos) #'ignore)))
-          (let* ((suffix (car (agent-shell--permission-suffixes nil)))
+          (let* ((suffix (car (agent-shell-menu--permission-suffixes nil)))
                  (desc (plist-get (agent-shell-test/suffix-plist suffix) :description)))
             (should (string-match-p "Allow for session" desc))))
       (kill-buffer shell))))
@@ -410,7 +410,7 @@ so this strips the leading type tag via `cdr'."
     (should-not (agent-shell-menu--action-entry-visible-p '("label" . (my-cmd . my-test-pred))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell-select-action predicate filtering
+;;; agent-shell-menu-select-action predicate filtering
 
 (ert-deftest agent-shell-menu/select-action-excludes-hidden-entries ()
   "Entries whose predicate returns nil are absent from the action menu."
@@ -425,10 +425,10 @@ so this strips the leading type tag via `cdr'."
                (lambda (table &rest _)
                  (setq captured-table table)
                  (caar table)))
-              (agent-shell-action-alist
+              (agent-shell-menu-action-alist
                (list (cons "visible-entry" (cons visible-cmd 'agent-shell-menu--visible-pred))
                      (cons "hidden-entry" (cons hidden-cmd 'agent-shell-menu--hidden-pred)))))
-      (agent-shell-select-action))
+      (agent-shell-menu-select-action))
     (should (assoc "visible-entry" captured-table))
     (should-not (assoc "hidden-entry" captured-table))))
 
@@ -442,9 +442,9 @@ so this strips the leading type tag via `cdr'."
                (lambda (table &rest _)
                  (setq captured-table table)
                  (caar table)))
-              (agent-shell-action-alist
+              (agent-shell-menu-action-alist
                (list (cons "plain-entry" plain-cmd))))
-      (agent-shell-select-action))
+      (agent-shell-menu-select-action))
     (should (assoc "plain-entry" captured-table))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -462,7 +462,7 @@ so this strips the leading type tag via `cdr'."
     (should-not (agent-shell-menu--in-shell-p))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; agent-shell-switch-project-session (regression)
+;;; agent-shell-menu-switch-project-session (regression)
 
 (ert-deftest agent-shell-menu/switch-project-session-passes-alist ()
   "Regression: annotated-completing-read must receive an alist of (name . annotation),
@@ -472,14 +472,14 @@ not a raw buffer list or a single annotation string."
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell-menu-project-buffers)
                    (lambda () (list other)))
-                  ((symbol-function 'agent-shell--buffer-annotation) (lambda (_) "ann"))
+                  ((symbol-function 'agent-shell-menu--buffer-annotation) (lambda (_) "ann"))
                   ((symbol-function 'annotated-completing-read)
                    (lambda (table &rest _)
                      (setq captured-table table)
                      (buffer-name other)))
                   ((symbol-function 'get-buffer) #'identity)
                   ((symbol-function 'switch-to-buffer) #'ignore))
-          (agent-shell-switch-project-session)
+          (agent-shell-menu-switch-project-session)
           (should (listp captured-table))
           (should (consp (car captured-table)))
           (should (equal (buffer-name other) (caar captured-table)))
@@ -491,7 +491,7 @@ not a raw buffer list or a single annotation string."
 
 (ert-deftest agent-shell-menu/queue-intercept-p-nil-when-no-session ()
   "Returns nil when no shell session is reachable."
-  (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
+  (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () nil)))
     (should-not (agent-shell-queue-intercept-p))))
 
 (ert-deftest agent-shell-menu/queue-intercept-p-nil-when-mode-default ()
@@ -501,7 +501,7 @@ not a raw buffer list or a single annotation string."
         (progn
           (with-current-buffer shell
             (setq-local agent-shell-queue-input-mode 'default))
-          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                      (lambda () shell)))
             (should-not (agent-shell-queue-intercept-p))))
       (kill-buffer shell))))
@@ -513,7 +513,7 @@ not a raw buffer list or a single annotation string."
         (progn
           (with-current-buffer shell
             (setq-local agent-shell-queue-input-mode 'queue-only))
-          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                      (lambda () shell)))
             (should-not (agent-shell-queue-intercept-p))))
       (kill-buffer shell))))
@@ -525,7 +525,7 @@ not a raw buffer list or a single annotation string."
         (progn
           (with-current-buffer shell
             (setq-local agent-shell-queue-input-mode 'queue-intercept))
-          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                      (lambda () shell)))
             (should (agent-shell-queue-intercept-p))))
       (kill-buffer shell))))
@@ -535,7 +535,7 @@ not a raw buffer list or a single annotation string."
 
 (ert-deftest agent-shell-menu/queue-only-p-nil-when-no-session ()
   "Returns nil when no shell session is reachable."
-  (cl-letf (((symbol-function 'agent-shell--session-shell-buffer) (lambda () nil)))
+  (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () nil)))
     (should-not (agent-shell-queue-only-p))))
 
 (ert-deftest agent-shell-menu/queue-only-p-nil-when-mode-default ()
@@ -545,7 +545,7 @@ not a raw buffer list or a single annotation string."
         (progn
           (with-current-buffer shell
             (setq-local agent-shell-queue-input-mode 'default))
-          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                      (lambda () shell)))
             (should-not (agent-shell-queue-only-p))))
       (kill-buffer shell))))
@@ -557,7 +557,7 @@ not a raw buffer list or a single annotation string."
         (progn
           (with-current-buffer shell
             (setq-local agent-shell-queue-input-mode 'queue-intercept))
-          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                      (lambda () shell)))
             (should-not (agent-shell-queue-only-p))))
       (kill-buffer shell))))
@@ -569,7 +569,7 @@ not a raw buffer list or a single annotation string."
         (progn
           (with-current-buffer shell
             (setq-local agent-shell-queue-input-mode 'queue-only))
-          (cl-letf (((symbol-function 'agent-shell--session-shell-buffer)
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer)
                      (lambda () shell)))
             (should (agent-shell-queue-only-p))))
       (kill-buffer shell))))
@@ -578,26 +578,25 @@ not a raw buffer list or a single annotation string."
 ;;; Transient menu key integrity
 
 (ert-deftest agent-shell-menu/dispatch-no-key-prefix-conflicts ()
-  "No key in agent-shell-dispatch is a strict prefix of another key."
-  (let* ((keys (transient-test/collect-keys 'agent-shell-dispatch))
+  "No key in agent-shell-menu-dispatch is a strict prefix of another key."
+  (let* ((keys (transient-test/collect-keys 'agent-shell-menu-dispatch))
          (conflicts (transient-test/key-prefix-conflicts keys)))
     (should (null conflicts))))
 
 (ert-deftest agent-shell-menu/dispatch-no-duplicate-keys ()
-  "No key appears more than once in agent-shell-dispatch."
-  (let* ((keys (transient-test/collect-keys 'agent-shell-dispatch))
+  "No key appears more than once in agent-shell-menu-dispatch."
+  (let* ((keys (transient-test/collect-keys 'agent-shell-menu-dispatch))
          (dups (transient-test/duplicate-keys keys)))
     (should (null dups))))
 
-;;;; agent-shell-session-info (with-help-window migration)
+;;;; agent-shell-menu-session-info (with-help-window migration)
 
 (ert-deftest agent-shell-menu/info-map-inherits-help-mode-map ()
-  "agent-shell-info-map has help-mode-map as an ancestor."
+  "agent-shell-menu-info-map has help-mode-map as an ancestor."
   (require 'help-mode)
-  (let ((map agent-shell-info-map))
+  (let ((map agent-shell-menu-info-map))
     (while (and map (not (eq map help-mode-map)))
       (setq map (keymap-parent map)))
     (should (eq map help-mode-map))))
-
 
 (provide 'test-agent-shell-menu)

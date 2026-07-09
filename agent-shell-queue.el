@@ -70,6 +70,7 @@
 (declare-function yaml-parse-string "yaml")
 (declare-function yaml-mode "yaml-mode")
 (declare-function json-pretty-print-buffer "json")
+(declare-function agent-shell-menu--session-shell-buffer "agent-shell-menu")
 
 (defun agent-shell-queue--default-instance-name ()
   "Return a string identifying the current Emacs instance."
@@ -4139,12 +4140,12 @@ When the shell buffer is dead, picks a live replacement via completing-read."
 (defun agent-shell-queue-intercept-p ()
   "Return non-nil when queue-intercept mode is active in the current shell buffer."
   (and (featurep 'agent-shell-queue)
-       (when-let* ((shell (agent-shell--session-shell-buffer)))
+       (when-let* ((shell (agent-shell-menu--session-shell-buffer)))
          (eq (buffer-local-value 'agent-shell-queue-input-mode shell) 'queue-intercept))))
 
 (defun agent-shell-queue-input-mode-value ()
   "Return `agent-shell-queue-input-mode' for the current shell buffer, or `default'."
-  (or (when-let* ((shell (agent-shell--session-shell-buffer)))
+  (or (when-let* ((shell (agent-shell-menu--session-shell-buffer)))
         (buffer-local-value 'agent-shell-queue-input-mode shell))
       'default))
 
@@ -4155,7 +4156,7 @@ When the shell buffer is dead, picks a live replacement via completing-read."
 (defun agent-shell-queue-only-p ()
   "Return non-nil when queue-only mode is active in the current shell buffer."
   (and (featurep 'agent-shell-queue)
-       (when-let* ((shell (agent-shell--session-shell-buffer)))
+       (when-let* ((shell (agent-shell-menu--session-shell-buffer)))
          (eq (buffer-local-value 'agent-shell-queue-input-mode shell) 'queue-only))))
 
 (defun agent-shell-queue-only-disable-in-buffer (&optional buf)

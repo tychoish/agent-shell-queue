@@ -22,12 +22,11 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
   - [[#use-package][Use Package]]
   - [[#manual][Manual]]
 - [[#api-reference][API Reference]]
-  - [[#buffersession-management][Buffer/session management]]
+  - [[#session-mode-selection][Session mode selection]]
   - [[#permission-resolution][Permission resolution]]
   - [[#action-menu][Action menu]]
   - [[#project-session-switching][Project session switching]]
   - [[#send-content-to-agent-shell][Send content to agent shell]]
-  - [[#transient-menus][Transient menus]]
   - [[#command-menu][Command menu]]
   - [[#collapse-menu][Collapse menu]]
   - [[#session-info-buffer][Session info buffer]]
@@ -37,6 +36,7 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
   - [[#export][Export]]
   - [[#import][Import]]
   - [[#org-heading--queue-capture][Org heading → queue capture]]
+  - [[#backup-restore][Backup restore]]
   - [[#configuration][Configuration]]
   - [[#registries][Registries]]
   - [[#data-model][Data model]]
@@ -111,25 +111,27 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 #+END_SRC
 
 #+RESULTS:
-*** ~agent-shell-action-alist~ [Variable]
+*** ~agent-shell-menu-action-alist~ [Variable]
 
-Alist mapping label strings to commands for ‘agent-shell-select-action’. Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)). When a PREDICATE is supplied it is called with no arguments; the entry is omitted from the menu when the predicate returns nil.
+Alist mapping label strings to commands for ‘agent-shell-menu-select-action’. Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)). When a PREDICATE is supplied it is called with no arguments; the entry is omitted from the menu when the predicate returns nil.
 
-** Buffer/session management
+** Session mode selection
 
-*** ~agent-shell-switch-buffer~ [Command]
+*** ~agent-shell-menu-select-session-mode~ [Command]
 
-Switch to an agent-shell buffer with status, cwd, context, and age annotations.
+Select a session mode via ‘annotated-completing-read’, annotating the current one. Like ‘agent-shell-set-session-mode’ but annotates each candidate with its description (the same text shown at the start of an agent-shell session) and marks the active mode as "(current)", instead of requiring the user to already know the candidate list.  Unlike ‘agent-shell-cycle-session-mode’ this prompts instead of blindly advancing to the next mode.
+
+Optionally, get notified of completion with ON-SUCCESS function.
 
 ** Permission resolution
 
-*** ~agent-shell-resolve-permission~ [Command]
+*** ~agent-shell-menu-resolve-permission~ [Command]
 
 Resolve a pending permission prompt via ‘annotated-completing-read’.
 
 ** Action menu
 
-*** ~agent-shell-select-action~ [Command]
+*** ~agent-shell-menu-select-action~ [Command]
 
 Pick a common agent-shell action and run it via ‘call-interactively’. When a permission request is pending, permission responses are spliced into the menu.
 
@@ -139,7 +141,7 @@ Pick a common agent-shell action and run it via ‘call-interactively’. When a
 
 Return live agent-shell buffers sharing the current buffer’s project directory.
 
-*** ~agent-shell-switch-project-session~ [Command]
+*** ~agent-shell-menu-switch-project-session~ [Command]
 
 Switch to another agent-shell session in the same project directory.
 
@@ -153,27 +155,25 @@ Prompt for a file and send it to the current agent-shell session. Uses ‘read-f
 
 Pick a buffer and send its contents to the current agent-shell session. File-visiting buffers are sent as @file references; others as raw text.
 
-** Transient menus
-
-*** TODO ~agent-shell-session-menu~ [Command]
-
-*no docstring*
-
 ** Command menu
 
-*** ~agent-shell-select-command~ [Command]
+*** ~agent-shell-menu-select-command~ [Command]
 
 Insert one of the agent’s advertised ‘/’ commands at the prompt.
 
 ** Collapse menu
 
-*** ~agent-shell-select-collapse~ [Command]
+*** ~agent-shell-menu-select-collapse~ [Command]
 
 Pick a collapse action via ‘annotated-completing-read’. Offers bulk expand/collapse, per-category toggles, and entries to flip the three expand-by-default customization variables.
 
 ** Session info buffer
 
-*** ~agent-shell-session-info~ [Command]
+*** ~agent-shell-menu-info-map~ [Variable]
+
+Keymap for agent-shell info help buffers.  Inherits ‘help-mode-map’ once loaded.
+
+*** ~agent-shell-menu-session-info~ [Command]
 
 Display a read-only ephemeral buffer with live session diagnostics. Shows fragment count, agent uptime, queue options, queue depth, and the underlying shell process uptime for the current agent-shell buffer.
 
@@ -261,6 +261,10 @@ Function returning the JSONL archive file path.  Called with no arguments. Overr
 
 Seconds between automatic queue flushes.  Set to nil to disable.
 
+*** ~agent-shell-queue-safe-save-max-files~ [Variable]
+
+Maximum number of versioned backup files to keep in the safe-save directory. When non-nil and the backup count exceeds this limit, the oldest file is deleted after each save — one file at a time so lowering the limit converges gradually.  Requires ‘agent-shell-queue-safe-save’.
+
 *** ~agent-shell-queue-write-log-max-entries~ [Option]
 
 Maximum entries retained in ‘agent-shell-queue--write-log’.
@@ -272,6 +276,12 @@ When non-nil, append each persistence event to *agent-shell-queue-log* and emit 
 *** ~agent-shell-queue-show-write-log~ [Command]
 
 Display the in-memory write log in a readable buffer.
+
+** Backup restore
+
+*** ~agent-shell-queue-restore-from-backup~ [Command]
+
+Restore queue items from a versioned backup via annotated-completing-read. Lists backup files in the safe-save directory newest-first.  Only items whose item-id is not already present in the live queue are added, so the operation is safe to run against an active queue.  Saves and refreshes after merging.
 
 *** ~agent-shell-queue-instance-name~ [Variable]
 
@@ -358,6 +368,14 @@ Directory for versioned queue backups written when ‘agent-shell-queue-safe-sav
 *** ~agent-shell-queue-safe-save-format~ [Variable]
 
 Serialization format for safe-save backups, or nil to use ‘agent-shell-queue-serialization-format’.
+
+*** ~agent-shell-queue-safe-save-max-files~ [Variable]
+
+Maximum number of versioned backup files to keep in the safe-save directory. When non-nil and the backup count exceeds this limit, the oldest file is deleted after each save — one file at a time so lowering the limit converges gradually.  Requires ‘agent-shell-queue-safe-save’.
+
+*** ~agent-shell-queue-idle-flush-delay~ [Variable]
+
+Seconds of Emacs idle time after which the queue state is flushed to disk. Set to nil to disable idle-triggered saves (default).
 
 ** Registries
 
@@ -684,6 +702,10 @@ Key             Binding
 RET		agent-shell-queue-ready-capture SPC		agent-shell-queue-ready-capture
 
 <remap> <self-insert-command>	agent-shell-queue-ready-capture
+
+
+
+
 
 
 
