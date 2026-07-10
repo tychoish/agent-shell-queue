@@ -536,14 +536,14 @@ File-visiting buffers are sent as @file references; others as raw text."
     ("fa" "Insert fork after" agent-shell-queue-insert-fork-after)
     ("fr" "Release pending fork" agent-shell-queue-release-pending-fork)]]
   ;; Queue row: global queue ops, intercept config, and capture
-  [["Capture"
-    ("cw" "Compose (write)" agent-shell-queue-capture)
-    ("cu" "Unassigned" agent-shell-queue-capture-unassigned)
-    ("cr" "From region" agent-shell-queue-capture-from-region)
-    ("cy" "From clipboard" agent-shell-queue-capture-from-clipboard)
-    ("cc" "From context" agent-shell-queue-capture-from-context)
-    ("wf" "Send file" agent-shell-menu-send-file)
-    ("wb" "Send buffer" agent-shell-menu-send-buffer)]
+  [["Send"
+    ("wb" "Send buffer" agent-shell-menu-send-buffer)
+    ("wt" "Send file to…" agent-shell-send-file-to)
+    ("wo" "Send other file" agent-shell-send-other-file)
+    ("wr" "Send region to…" agent-shell-send-region-to)
+    ("wc" "Send screenshot to…" agent-shell-send-screenshot-to)
+    ("wi" "Send clipboard image to…" agent-shell-send-clipboard-image-to)
+    ("ws" "Send dwim" agent-shell-send-dwim)]
    ["Queue"
     ("qq" "Open queue" agent-shell-queue-buffer-open)
     ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
@@ -554,6 +554,12 @@ File-visiting buffers are sent as @file references; others as raw text."
     ("qr" "Resume all dispatch" agent-shell-queue-resume
      :inapt-if-not agent-shell-queue-paused-p)
     ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
+   ["Capture"
+    ("cw" "Compose (write)" agent-shell-queue-capture)
+    ("cu" "Unassigned" agent-shell-queue-capture-unassigned)
+    ("cr" "From region" agent-shell-queue-capture-from-region)
+    ("cy" "From clipboard" agent-shell-queue-capture-from-clipboard)
+    ("cc" "From context" agent-shell-queue-capture-from-context)]
   ;; Per-session queue controls
    ["Session Queue" :if agent-shell-menu--in-session-p
     ("qsp" "Suspend this session" agent-shell-queue-session-pause
