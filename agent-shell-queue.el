@@ -545,6 +545,7 @@ Defined here so setf on item struct slots stays in the same file as the struct."
        (member (buffer-name (current-buffer))
                (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
 
+;;;###autoload
 (defun agent-shell-queue-pause ()
   "Pause the global queue; no new items will be dispatched."
   (interactive)
@@ -558,6 +559,7 @@ Defined here so setf on item struct slots stays in the same file as the struct."
             (agent-shell-queue-store-items agent-shell-queue--store))
     (message "agent-shell-queue: PAUSED — no new items will be dispatched")))
 
+;;;###autoload
 (defun agent-shell-queue-resume ()
   "Resume the global queue after being paused."
   (interactive)
