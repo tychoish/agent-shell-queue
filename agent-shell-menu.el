@@ -498,17 +498,14 @@ File-visiting buffers are sent as @file references; others as raw text."
    :setup-children agent-shell-menu--permission-suffixes]
   ;; Session management (always), act/write/settings/fork (session-conditional)
   [["Sessions"
-    ("ss" "Switch session" agent-shell-switch-buffer)
-    ("sb" "Find buffer" agent-shell-manager-find-buffer)
-    ("sm" "Manager toggle" agent-shell-manager-toggle)]
-   ["Create"
     ("sn" "New shell" agent-shell-new-shell)
     ("st" "New temp shell" agent-shell-new-temp-shell)
     ("sh" "Hydrate (resume)" agent-shell-resume-session)
     ("sd" "New in directory" agent-shell-menu-new-shell-in-dir)
+    ("ss" "Switch session" agent-shell-switch-buffer)
     ("rr" "Review changes" agent-review
      :if agent-shell-menu--agent-review-available-p)
-    ("rs" "Send issues to shell" agent-review-send-to-agent-shell
+    ("rs" "Send issues to review agent" agent-review-send-to-agent-shell
      :if agent-shell-menu--agent-review-available-p)]
    ["Actions" :if agent-shell-menu--in-session-p
     ("aa" "Action menu" agent-shell-menu-select-action)
