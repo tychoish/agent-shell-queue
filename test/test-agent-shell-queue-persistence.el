@@ -23,6 +23,7 @@ The queue starts paused so nothing is dispatched automatically."
   `(let* ((tmp (make-temp-file "asq-persist-" nil ".el"))
           (agent-shell-queue--store
            (agent-shell-queue--make-store :items nil :format 'plist :file tmp))
+          (agent-shell-queue-state-file-function (lambda () tmp))
           (agent-shell-queue--queue
            (agent-shell-queue-queue--make :paused t))
           (agent-shell-queue--loaded t)

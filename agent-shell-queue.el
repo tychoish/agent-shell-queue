@@ -1033,7 +1033,14 @@ This ensures the queue package is fully initialized before loading."
         (message "agent-shell-queue: loaded %d item%s from disk"
                  count (if (= count 1) "" "s"))))))
 
-(add-hook 'kill-emacs-hook #'agent-shell-queue--save)
+(defun agent-shell-queue--save-on-exit ()
+  "Persist queue state at Emacs exit, but only if it was loaded this session.
+Avoids creating or clobbering the state file for sessions that never touched
+the queue, such as a batch process that merely requires this file."
+  (when agent-shell-queue--loaded
+    (agent-shell-queue--save)))
+
+(add-hook 'kill-emacs-hook #'agent-shell-queue--save-on-exit)
 
 ;;; Store predicates
 
