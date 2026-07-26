@@ -220,29 +220,28 @@ Optionally, get notified of completion with ON-SUCCESS function."
                             (let ((desc (map-elt mode :description))
                                   (current-p (equal (map-elt mode :id) current-mode-id)))
                               (cons (map-elt mode :name)
-                                    (cond
-                                     ((and desc current-p)
-                                      (concat (propertize "[current]" 'face 'bold) " " desc))
-                                     (desc desc)
-                                     (current-p (propertize "[current]" 'face 'bold))
-                                     (t nil)))))
+                                    (cons (cond
+                                           ((and desc current-p)
+                                            (concat (propertize "[current]" 'face 'bold) " " desc))
+                                           (desc desc)
+                                           (current-p (propertize "[current]" 'face 'bold))
+                                           (t nil))
+                                          (map-elt mode :id)))))
                           available-modes))
            (default-mode-name (and current-mode-id
                                    (agent-shell--resolve-session-mode-name
                                     current-mode-id available-modes)))
-           (selection (annotated-completing-read
-                       table
-                       :prompt "Set session mode: "
-                       :require-match t
-                       :default default-mode-name))
-           (selected-mode-id (map-elt (seq-find (lambda (mode)
-                                                   (equal (map-elt mode :name) selection))
-                                                 available-modes)
-                                      :id)))
+           (selected-mode-id (annotated-completing-read
+                              table
+                              :prompt "Set session mode: "
+                              :require-match t
+                              :default default-mode-name)))
       (unless selected-mode-id
-        (user-error "Unknown session mode: %s" selection))
+        (user-error "Unknown session mode"))
       (when (and current-mode-id (string= selected-mode-id current-mode-id))
-        (error "Session mode already %s" selection))
+        (error "Session mode already %s"
+               (or (agent-shell--resolve-session-mode-name selected-mode-id available-modes)
+                   selected-mode-id)))
       (agent-shell--config-option-set-mode-id
        :mode-id selected-mode-id
        :on-success on-success))))

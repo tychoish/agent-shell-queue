@@ -487,6 +487,65 @@ not a raw buffer list or a single annotation string."
       (kill-buffer other))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-menu-select-session-mode (target/value migration)
+
+(ert-deftest agent-shell-menu/select-session-mode-table-carries-id-as-target ()
+  "The table passed to `annotated-completing-read' carries each mode's :id
+as a triple-form target, so the selected mode-id needs no further lookup."
+  (let ((modes '((:id "code" :name "Code" :description "write code")
+                 (:id "plan" :name "Plan" :description "make a plan")))
+        captured-table)
+    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+              ((symbol-function 'agent-shell--state) (lambda () 'fake-state))
+              ((symbol-function 'map-nested-elt) (lambda (&rest _) "session-id"))
+              ((symbol-function 'agent-shell--get-available-modes) (lambda (&rest _) modes))
+              ((symbol-function 'agent-shell--current-mode-id) (lambda (&rest _) "code"))
+              ((symbol-function 'agent-shell--resolve-session-mode-name)
+               (lambda (id available-modes)
+                 (map-elt (seq-find (lambda (m) (equal (map-elt m :id) id)) available-modes) :name)))
+              ((symbol-function 'annotated-completing-read)
+               (lambda (table &rest _) (setq captured-table table) "plan"))
+              ((symbol-function 'agent-shell--config-option-set-mode-id) #'ignore))
+      (agent-shell-menu-select-session-mode))
+    (should (equal "plan" (cddr (assoc "Plan" captured-table))))
+    (should (equal "code" (cddr (assoc "Code" captured-table))))))
+
+(ert-deftest agent-shell-menu/select-session-mode-sets-mode-by-id ()
+  "The mode-id returned by `annotated-completing-read' (via target resolution)
+is passed straight through to `agent-shell--config-option-set-mode-id',
+with no intermediate name-to-id lookup."
+  (let ((modes '((:id "code" :name "Code" :description "write code")
+                 (:id "plan" :name "Plan" :description "make a plan")))
+        captured-mode-id)
+    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+              ((symbol-function 'agent-shell--state) (lambda () 'fake-state))
+              ((symbol-function 'map-nested-elt) (lambda (&rest _) "session-id"))
+              ((symbol-function 'agent-shell--get-available-modes) (lambda (&rest _) modes))
+              ((symbol-function 'agent-shell--current-mode-id) (lambda (&rest _) "code"))
+              ((symbol-function 'agent-shell--resolve-session-mode-name)
+               (lambda (id available-modes)
+                 (map-elt (seq-find (lambda (m) (equal (map-elt m :id) id)) available-modes) :name)))
+              ((symbol-function 'annotated-completing-read) (lambda (&rest _) "plan"))
+              ((symbol-function 'agent-shell--config-option-set-mode-id)
+               (lambda (&rest args) (setq captured-mode-id (plist-get args :mode-id)))))
+      (agent-shell-menu-select-session-mode))
+    (should (equal "plan" captured-mode-id))))
+
+(ert-deftest agent-shell-menu/select-session-mode-errors-when-already-active ()
+  "Selecting the mode that is already active signals an error."
+  (let ((modes '((:id "code" :name "Code" :description "write code"))))
+    (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+              ((symbol-function 'agent-shell--state) (lambda () 'fake-state))
+              ((symbol-function 'map-nested-elt) (lambda (&rest _) "session-id"))
+              ((symbol-function 'agent-shell--get-available-modes) (lambda (&rest _) modes))
+              ((symbol-function 'agent-shell--current-mode-id) (lambda (&rest _) "code"))
+              ((symbol-function 'agent-shell--resolve-session-mode-name)
+               (lambda (id available-modes)
+                 (map-elt (seq-find (lambda (m) (equal (map-elt m :id) id)) available-modes) :name)))
+              ((symbol-function 'annotated-completing-read) (lambda (&rest _) "code")))
+      (should-error (agent-shell-menu-select-session-mode)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue-intercept-p
 
 (ert-deftest agent-shell-menu/queue-intercept-p-nil-when-no-session ()
