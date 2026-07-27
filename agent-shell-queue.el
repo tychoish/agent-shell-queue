@@ -5243,7 +5243,7 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
   (map-into
    (seq-map (lambda (it) (cons (agent-shell-queue-item-id it) it))
             (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store))))
-   '(hash-table :test equal)))
+   '(hash-table :test equal))
 
 ;;;###autoload
 (defun agent-shell-queue-raw-edit ()
