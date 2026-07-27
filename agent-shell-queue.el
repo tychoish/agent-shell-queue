@@ -3664,10 +3664,10 @@ Binds p/j/y to switch formats, g to refresh, q to quit."
     ('yaml
      (unless (fboundp 'yaml-encode)
        (user-error "yaml-encode not available; install the `yaml' package"))
-     (let ((h (make-hash-table :test #'equal)))
-       (map-put! h "buffer" target)
-       (map-put! h "item" (agent-shell-queue--item-to-yaml item))
-       (yaml-encode h)))
+     (yaml-encode
+      (map-into (list (cons "buffer" target)
+                      (cons "item" (agent-shell-queue--item-to-yaml item)))
+                '(hash-table :test equal))))
     (_ (user-error "Unknown inspect format: %S" format))))
 
 (defun agent-shell-queue-inspect-refresh ()
@@ -4301,30 +4301,33 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
                     ("Ordinal # column" . agent-shell-queue-show-ordinal-column)
                     ("Age column" . agent-shell-queue-show-age-column)
                     ("Kind column" . agent-shell-queue-show-kind-column)))
-         (table (make-hash-table :test #'equal)))
-    (map-put! table "+ show all columns"
-             (if (and agent-shell-queue-show-buffer-column
-                      agent-shell-queue-show-ordinal-column
-                      agent-shell-queue-show-age-column
-                      agent-shell-queue-show-kind-column)
-                 "already showing all columns"
-               "enable Buffer, Ordinal, Age, and Kind columns"))
-    (map-put! table "+ minimal: status and prompt only"
-             (if (not (or agent-shell-queue-show-buffer-column
-                          agent-shell-queue-show-ordinal-column
-                          agent-shell-queue-show-age-column
-                          agent-shell-queue-show-kind-column))
-                 "already minimal"
-               "hide Buffer, Ordinal, Age, and Kind columns"))
-    (seq-do (lambda (it)
-              (let ((on (symbol-value (cdr it))))
-                (map-put! table (car it)
-                          (if on "visible · click to hide" "hidden · click to show"))))
-            columns)
-    (map-put! table "Multi-line format"
-             (if agent-shell-queue-multiline-format
-                 "on · prompt on second line · click to disable"
-               "off · single-line · click to enable"))
+         (table (map-into
+                 (append
+                  (list (cons "+ show all columns"
+                              (if (and agent-shell-queue-show-buffer-column
+                                       agent-shell-queue-show-ordinal-column
+                                       agent-shell-queue-show-age-column
+                                       agent-shell-queue-show-kind-column)
+                                  "already showing all columns"
+                                "enable Buffer, Ordinal, Age, and Kind columns"))
+                        (cons "+ minimal: status and prompt only"
+                              (if (not (or agent-shell-queue-show-buffer-column
+                                           agent-shell-queue-show-ordinal-column
+                                           agent-shell-queue-show-age-column
+                                           agent-shell-queue-show-kind-column))
+                                  "already minimal"
+                                "hide Buffer, Ordinal, Age, and Kind columns")))
+                  (seq-map (lambda (it)
+                             (cons (car it)
+                                   (if (symbol-value (cdr it))
+                                       "visible · click to hide"
+                                     "hidden · click to show")))
+                           columns)
+                  (list (cons "Multi-line format"
+                              (if agent-shell-queue-multiline-format
+                                  "on · prompt on second line · click to disable"
+                                "off · single-line · click to enable"))))
+                 '(hash-table :test equal))))
     (when-let* ((choice (annotated-completing-read
                         table
                         :prompt "queue columns: "
@@ -4610,8 +4613,8 @@ Candidates include all non-done, non-running items across all buffers."
                                            (agent-shell-queue--annotation prompt 60)))
                               (ann (format "#%d · %s [%s] · %s · %s"
                                            pos buf-name buf-state status age)))
-                         (map-put! table key ann)
-                         (map-put! id-by-key key id)))
+                         (setf (map-elt table key) ann)
+                         (setf (map-elt id-by-key key) id)))
                      (cl-incf it-index))
                    (cdr pair))))
               (agent-shell-queue-store-items agent-shell-queue--store))
@@ -5053,19 +5056,21 @@ Works in both capture and edit buffers."
   "Pick a buffer and insert its entire contents at point.
 Works in both capture and edit buffers."
   (interactive)
-  (let ((table (make-hash-table :test #'equal)))
-    (dolist (buf (seq-remove (lambda (b) (string-prefix-p " " (buffer-name b)))
-                             (buffer-list)))
-      (map-put! table (buffer-name buf)
-                (with-current-buffer buf
-                  (format "%-20s %s"
-                          (symbol-name major-mode)
-                          (or (buffer-file-name) "")))))
-    (when-let* ((name (annotated-completing-read table
-                                                 :prompt "Insert buffer: "
-                                                 :require-match t))
-                (buf (get-buffer name)))
-      (insert (with-current-buffer buf (buffer-string))))))
+  (when-let* ((name (annotated-completing-read
+		     (map-into
+		      (seq-map (lambda (buf)
+				 (cons (buffer-name buf)
+				       (with-current-buffer buf
+					 (format "%-20s %s"
+						 (symbol-name major-mode)
+						 (or (buffer-file-name) "")))))
+			       (seq-remove (lambda (b) (string-prefix-p " " (buffer-name b)))
+					   (buffer-list)))
+		      '(hash-table :test equal))
+                     :prompt "Insert buffer: "
+                     :require-match t))
+              (buf (get-buffer name)))
+    (insert (with-current-buffer buf (buffer-string)))))
 
 ;;; Entry points
 
@@ -5196,20 +5201,21 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
 
 (defun agent-shell-queue--item-to-yaml-edit (item)
   "Convert ITEM to a hash-table for raw editing; omits nil timestamp fields."
-  (let ((h (make-hash-table :test #'equal)))
-    (map-put! h "id" (agent-shell-queue-item-id item))
-    (map-put! h "prompt" (agent-shell-queue-item-args item))
-    (map-put! h "status" (symbol-name (agent-shell-queue-item-status item)))
-    (map-put! h "kind" (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
-    (map-put! h "background" (if (agent-shell-queue-item-background item) t nil))
-    (map-put! h "created" (agent-shell-queue-item-created item))
-    (when-let* ((d (agent-shell-queue-item-dispatched item)))
-      (map-put! h "dispatched" d))
-    (when-let* ((c (agent-shell-queue-item-completed item)))
-      (map-put! h "completed" c))
-    (when-let* ((dir (agent-shell-queue-item-directory item)))
-      (map-put! h "directory" dir))
-    h))
+  (map-into
+   (append
+    (list (cons "id" (agent-shell-queue-item-id item))
+          (cons "prompt" (agent-shell-queue-item-args item))
+          (cons "status" (symbol-name (agent-shell-queue-item-status item)))
+          (cons "kind" (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
+          (cons "background" (if (agent-shell-queue-item-background item) t nil))
+          (cons "created" (agent-shell-queue-item-created item)))
+    (when (agent-shell-queue-item-dispatched item)
+      (list (cons "dispatched" (agent-shell-queue-item-dispatched item))))
+    (when (agent-shell-queue-item-completed item)
+      (list (cons "completed" (agent-shell-queue-item-completed item))))
+    (when (agent-shell-queue-item-directory item)
+      (list (cons "directory" (agent-shell-queue-item-directory item)))))
+   '(hash-table :test equal)))
 
 (defun agent-shell-queue--render-to-yaml ()
   "Render active/deferred queue items to a YAML string for raw editing."
@@ -5222,12 +5228,11 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
                                                              (lambda (item)
                                                                (memq (agent-shell-queue-item-status item)
                                                                      '(done running)))
-                                                             (cdr pair)))
-                                                     (h (make-hash-table :test #'equal)))
-                                           (map-put! h "buffer" (car pair))
-                                           (map-put! h "items"
-                                                     (vconcat (seq-map #'agent-shell-queue--item-to-yaml-edit items)))
-                                           h)))
+                                                             (cdr pair))))
+                                           (map-into (list (cons "buffer" (car pair))
+                                                           (cons "items"
+                                                                 (vconcat (seq-map #'agent-shell-queue--item-to-yaml-edit items))))
+                                                     '(hash-table :test equal)))))
                               (seq-remove #'null))))
     (if buckets
 	(yaml-encode (vconcat buckets))
@@ -5235,11 +5240,10 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
 
 (defun agent-shell-queue--make-edit-snapshot ()
   "Return a hash-table mapping item ID to item struct for all current items."
-  (let ((table (make-hash-table :test #'equal)))
-    (seq-do (lambda (it) (map-put! table (agent-shell-queue-item-id it) it))
-            (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
-              (seq-mapcat #'cdr)))
-    table))
+  (map-into
+   (seq-map (lambda (it) (cons (agent-shell-queue-item-id it) it))
+            (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store))))
+   '(hash-table :test equal)))
 
 ;;;###autoload
 (defun agent-shell-queue-raw-edit ()

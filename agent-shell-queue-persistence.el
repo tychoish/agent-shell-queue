@@ -238,20 +238,20 @@ executor resolved from the registry (nil when absent or unknown)."
 (defun agent-shell-queue--item-to-yaml (item)
   "Convert ITEM to a hash-table suitable for `yaml-encode'.
 Status is stored as a string; background as t or nil."
-  (let ((h (make-hash-table :test 'equal)))
-    (map-put! h "id" (agent-shell-queue-item-id item))
-    (map-put! h "args" (agent-shell-queue-item-args item))
-    (map-put! h "status" (symbol-name (agent-shell-queue-item-status item)))
-    (map-put! h "kind" (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
-    (map-put! h "background" (if (agent-shell-queue-item-background item) t nil))
-    (map-put! h "created" (agent-shell-queue-item-created item))
-    (map-put! h "dispatched" (agent-shell-queue-item-dispatched item))
-    (map-put! h "completed" (agent-shell-queue-item-completed item))
-    (map-put! h "response" (or (agent-shell-queue-item-response item) :null))
-    (map-put! h "outcome" (if-let* ((o (agent-shell-queue-item-outcome item))) (symbol-name o) :null))
-    (map-put! h "directory" (or (agent-shell-queue-item-directory item) :null))
-    (map-put! h "executor" (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null))
-    h))
+  (map-into
+   (list (cons "id" (agent-shell-queue-item-id item))
+         (cons "args" (agent-shell-queue-item-args item))
+         (cons "status" (symbol-name (agent-shell-queue-item-status item)))
+         (cons "kind" (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
+         (cons "background" (if (agent-shell-queue-item-background item) t nil))
+         (cons "created" (agent-shell-queue-item-created item))
+         (cons "dispatched" (agent-shell-queue-item-dispatched item))
+         (cons "completed" (agent-shell-queue-item-completed item))
+         (cons "response" (or (agent-shell-queue-item-response item) :null))
+         (cons "outcome" (if-let* ((o (agent-shell-queue-item-outcome item))) (symbol-name o) :null))
+         (cons "directory" (or (agent-shell-queue-item-directory item) :null))
+         (cons "executor" (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null)))
+   '(hash-table :test equal)))
 
 (defun agent-shell-queue--item-from-yaml (obj)
   "Reconstruct a queue item from a hash-table OBJ produced by `yaml-parse-string'."
@@ -278,10 +278,10 @@ Status is stored as a string; background as t or nil."
   (yaml-encode
    (vconcat
     (seq-map (lambda (pair)
-               (let ((h (make-hash-table :test 'equal)))
-                 (map-put! h "buffer" (car pair))
-                 (map-put! h "items" (vconcat (seq-map #'agent-shell-queue--item-to-yaml (cdr pair))))
-                 h))
+               (map-into
+                (list (cons "buffer" (car pair))
+                      (cons "items" (vconcat (seq-map #'agent-shell-queue--item-to-yaml (cdr pair)))))
+                '(hash-table :test equal)))
              items))))
 
 (defun agent-shell-queue--deserialize-yaml (str)
