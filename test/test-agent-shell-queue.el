@@ -1245,6 +1245,64 @@ can continue dispatching."
                             (agent-shell-queue-queue-session-paused
                              agent-shell-queue--queue)))))))
 
+;;; agent-shell-queue--check-stall / --schedule-stall-check
+
+(ert-deftest agent-shell-queue/check-stall-alerts-when-still-running ()
+  (agent-shell-queue-test/isolate-no-sub
+    (let (alert-args
+          (buf (get-buffer-create " *asq-stall-test*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "prompt" 'running nil))))
+            (cl-letf (((symbol-function 'alert)
+                       (lambda (&rest args) (setq alert-args args)))
+                      ((symbol-function 'shell-maker-busy) (lambda () t)))
+              (agent-shell-queue--check-stall "q-1")
+              (should alert-args)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/check-stall-no-op-when-done ()
+  (agent-shell-queue-test/isolate-no-sub
+    (let (alert-args
+          (buf (get-buffer-create " *asq-stall-test2*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "prompt" 'done nil))))
+            (cl-letf (((symbol-function 'alert)
+                       (lambda (&rest args) (setq alert-args args))))
+              (agent-shell-queue--check-stall "q-1")
+              (should-not alert-args)))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/check-stall-no-op-when-item-missing ()
+  (agent-shell-queue-test/isolate-no-sub
+    (let (alert-args)
+      (cl-letf (((symbol-function 'alert)
+                 (lambda (&rest args) (setq alert-args args))))
+        (agent-shell-queue--check-stall "no-such-id")
+        (should-not alert-args)))))
+
+(ert-deftest agent-shell-queue/schedule-stall-check-schedules-timer-when-enabled ()
+  (let (scheduled-args
+        (agent-shell-queue-stall-timeout 180))
+    (cl-letf (((symbol-function 'run-with-timer)
+               (lambda (&rest args) (setq scheduled-args args))))
+      (agent-shell-queue--schedule-stall-check "q-1")
+      (should (equal (list 180 nil #'agent-shell-queue--check-stall "q-1")
+                     scheduled-args)))))
+
+(ert-deftest agent-shell-queue/schedule-stall-check-noop-when-disabled ()
+  (let (scheduled-args
+        (agent-shell-queue-stall-timeout nil))
+    (cl-letf (((symbol-function 'run-with-timer)
+               (lambda (&rest args) (setq scheduled-args args))))
+      (agent-shell-queue--schedule-stall-check "q-1")
+      (should-not scheduled-args))))
+
 (ert-deftest agent-shell-queue/send-item-uses-executor-when-set ()
   "When item has a non-nil executor, send-item calls it instead of agent-shell-insert."
   (agent-shell-queue-test/isolate-no-sub

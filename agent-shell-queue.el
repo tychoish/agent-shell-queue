@@ -217,6 +217,14 @@ gradually.  Requires `agent-shell-queue-safe-save'.")
   "Seconds of Emacs idle time after which the queue state is flushed to disk.
 Set to nil to disable idle-triggered saves (default).")
 
+(defvar agent-shell-queue-stall-timeout 180
+  "Seconds after dispatch before a still-running item is reported as stalled.
+The ACP/shell-maker layer has no watchdog of its own: a wedged Lisp event
+loop or a desynced busy flag leaves a dispatched item showing `running'
+with no further user-visible feedback, indefinitely.  This is a one-shot
+check, not a retry loop — it only surfaces the condition via `alert', it
+does not cancel or resend the item.  Set to nil to disable.")
+
 ;;; macros
 
 (defmacro with-agent-shell-queue (&rest body)
@@ -1455,6 +1463,30 @@ insertion so response capture can find the reply."
  #'agent-shell-queue--default-executor
  nil)
 
+(defun agent-shell-queue--check-stall (id)
+  "Alert if the item with ID is still `running' `agent-shell-queue-stall-timeout' after dispatch.
+Fires once; does not cancel, resend, or otherwise touch the item — this is
+purely a user-visible signal for a turn that never produced completion
+feedback (see `agent-shell-queue-stall-timeout')."
+  (when-let* ((pair (agent-shell-queue--item-by-id id))
+              (item (cdr pair))
+              (buf-name (car pair))
+              (_ (eq (agent-shell-queue-item-status item) 'running)))
+    (alert (format "no completion signal after %ss (shell busy: %s)"
+                    agent-shell-queue-stall-timeout
+                    (when-let* ((buf (get-buffer buf-name)))
+                      (with-current-buffer buf (shell-maker-busy))))
+           :title (format "agent-shell-queue: %s stalled" buf-name)
+           :category 'agent-shell-queue
+           :severity 'high
+           :persistent t)))
+
+(defun agent-shell-queue--schedule-stall-check (id)
+  "Schedule a one-shot stall check for item ID after `agent-shell-queue-stall-timeout'."
+  (when agent-shell-queue-stall-timeout
+    (run-with-timer agent-shell-queue-stall-timeout nil
+                     #'agent-shell-queue--check-stall id)))
+
 (defun agent-shell-queue-send-item (id)
   "Send the item with ID to its target buffer, marking it as running.
 Items flagged as background are wrapped with `agent-shell-queue-background-prefix'.
@@ -1483,6 +1515,7 @@ If the item has a non-nil executor field, it is called as
             (progn
               (setf (agent-shell-queue-item-status item) 'running)
               (setf (agent-shell-queue-item-dispatched item) (float-time))
+              (agent-shell-queue--schedule-stall-check id)
               (agent-shell-queue--save)
               (agent-shell-queue--refresh-buffer)
               (if (agent-shell-queue-item-executor item)
