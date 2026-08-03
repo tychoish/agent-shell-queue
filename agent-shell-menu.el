@@ -670,8 +670,9 @@ When CATEGORY is non-nil, only affect blocks matching that category."
 ;;;###autoload
 (defun agent-shell-menu-select-collapse ()
   "Pick a collapse action via `annotated-completing-read'.
-Offers bulk expand/collapse, per-category toggles, and entries to flip the
-three expand-by-default customization variables."
+Offers bulk expand/collapse, per-category toggles, entries to flip the
+three expand-by-default customization variables globally, and a
+buffer-local variant that only changes the default for this session."
   (interactive)
   (unless (or (derived-mode-p 'agent-shell-mode)
 	      (derived-mode-p 'agent-shell-viewport-view-mode))
@@ -706,6 +707,12 @@ three expand-by-default customization variables."
                    (symbol-value 'agent-shell-user-message-expand-by-default))
               "already expanded by default"
             "set thinking, tool calls, and user messages to expand by default"))
+    (setf (map-elt table "* this session: expand by default")
+          (if (and (local-variable-p 'agent-shell-thought-process-expand-by-default)
+                   (local-variable-p 'agent-shell-tool-use-expand-by-default)
+                   (local-variable-p 'agent-shell-user-message-expand-by-default))
+              "already set for this session only"
+            "expand everything now, and default new blocks to expanded in this buffer only"))
     (seq-do (lambda (cat)
               (let* ((entry (map-elt by-cat cat))
                      (total (car entry))
@@ -738,6 +745,12 @@ three expand-by-default customization variables."
         (set 'agent-shell-tool-use-expand-by-default t)
         (set 'agent-shell-user-message-expand-by-default t)
         (message "All block types set to expand by default"))
+       ((equal choice "* this session: expand by default")
+        (setq-local agent-shell-thought-process-expand-by-default t)
+        (setq-local agent-shell-tool-use-expand-by-default t)
+        (setq-local agent-shell-user-message-expand-by-default t)
+        (agent-shell-menu--set-collapse nil)
+        (message "This session now defaults to expanded (buffer-local; other sessions unaffected)"))
        ((assoc choice toggles)
 	(let ((var (cdr (assoc choice toggles))))
 	  (set var (not (symbol-value var)))
