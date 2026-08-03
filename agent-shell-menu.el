@@ -545,10 +545,8 @@ File-visiting buffers are sent as @file references; others as raw text."
     ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
     ("qe" "Enqueue" agent-shell-queue-enqueue)
     ("qd" "Edit task" agent-shell-queue-edit-task)
-    ("qp" "Suspend all dispatch" agent-shell-queue-pause
-     :inapt-if agent-shell-queue-paused-p)
-    ("qr" "Resume all dispatch" agent-shell-queue-resume
-     :inapt-if-not agent-shell-queue-paused-p)
+    ("qp" "Suspend all dispatch" agent-shell-queue-pause)
+    ("qr" "Resume all dispatch" agent-shell-queue-resume)
     ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
    ["Capture"
     ("cw" "Compose (write)" agent-shell-queue-capture)
@@ -817,8 +815,6 @@ the underlying shell process uptime for the current agent-shell buffer."
          (input-mode (if (boundp 'agent-shell-queue-input-mode)
                          (buffer-local-value 'agent-shell-queue-input-mode shell-buf)
                        'default))
-         (globally-paused (ignore-errors
-                            (agent-shell-queue-queue-paused agent-shell-queue--queue)))
          (session-paused (ignore-errors
                            (member buf-name
                                    (agent-shell-queue-queue-session-paused
@@ -859,7 +855,6 @@ the underlying shell process uptime for the current agent-shell buffer."
         (insert (format "  Depth               %d total, %d active\n"
                         queue-depth active-items))
         (insert (format "  Input mode          %s\n" input-mode))
-        (insert (format "  Global pause        %s\n" (if globally-paused "paused" "running")))
         (insert (format "  Session suspended   %s\n" (if session-paused "yes" "no")))))
     (when-let* ((buf (get-buffer info-buf-name)))
       (with-current-buffer buf

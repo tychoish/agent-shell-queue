@@ -1,8 +1,9 @@
 ;;; test-agent-shell-queue-persistence.el --- Round-trip persistence tests -*- lexical-binding: t -*-
 
 ;; Tests that queue state survives save/load cycles as it would between
-;; Emacs sessions.  The queue is always paused so no items are dispatched
-;; unless a test explicitly unpauses and calls send-item.
+;; Emacs sessions.  Items are never auto-dispatched here — tests call
+;; `agent-shell-queue-send-item' explicitly, bypassing the auto-scan/turn-complete
+;; dispatch paths entirely, so no pause state is needed to keep them inert.
 ;;
 ;; Run filtered:
 ;;   (ert "^agent-shell-queue/persist")
@@ -18,14 +19,15 @@
   "Run BODY with an isolated queue backed by a real temp plist state file.
 Unlike `agent-shell-queue-test/isolate', `agent-shell-queue--save' and
 `agent-shell-queue--load' execute for real against the temp file.
-The queue starts paused so nothing is dispatched automatically."
+Nothing auto-dispatches here since no idle timer or turn-complete
+subscription runs; tests call `agent-shell-queue-send-item' explicitly."
   (declare (indent 0))
   `(let* ((tmp (make-temp-file "asq-persist-" nil ".el"))
           (agent-shell-queue--store
            (agent-shell-queue--make-store :items nil :format 'plist :file tmp))
           (agent-shell-queue-state-file-function (lambda () tmp))
           (agent-shell-queue--queue
-           (agent-shell-queue-queue--make :paused t))
+           (agent-shell-queue-queue--make))
           (agent-shell-queue--loaded t)
           (agent-shell-queue--subscriptions nil)
           (agent-shell-queue--stale-item-ids nil)
@@ -203,16 +205,14 @@ Clears in-memory items first so the load result is unambiguous."
 ;;; Paused queue persistence
 
 (ert-deftest agent-shell-queue/persist-paused-queue-items-stay-active ()
-  "Items added to a paused queue are never dispatched and remain active,
+  "Items are never auto-dispatched in this test fixture and remain active,
 ensuring they survive the save/load cycle."
   (agent-shell-queue-test/with-persist-file
-    ;; Queue is paused (the macro default); add three items.
     (let ((items (list (agent-shell-queue-test/persist-item "q01" "a")
                        (agent-shell-queue-test/persist-item "q02" "b")
                        (agent-shell-queue-test/persist-item "q03" "c"))))
       (setf (agent-shell-queue-store-items agent-shell-queue--store)
             (list (cons "*s*" items)))
-      (should (agent-shell-queue-queue-paused agent-shell-queue--queue))
       (agent-shell-queue-test/persist-save-and-reload)
       (let ((restored (cdr (assoc "*s*" (agent-shell-queue-store-items agent-shell-queue--store)))))
         (should (= 3 (length restored)))
@@ -243,8 +243,6 @@ The item completes and the side effect is visible."
             (setf (agent-shell-queue-store-items agent-shell-queue--store)
                   (list (list buf-name item)))
             (setq agent-shell-queue-persist-test--side-effect nil)
-            ;; Unpause and dispatch.
-            (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) nil)
             (cl-letf (((symbol-function 'run-with-timer) #'ignore)
                       ((symbol-function 'agent-shell-queue--append-done-log) #'ignore))
               (agent-shell-queue-send-item "q01"))
@@ -270,14 +268,12 @@ The item completes and the side effect is visible."
           (progn
             (setf (agent-shell-queue-store-items agent-shell-queue--store)
                   (list (list buf-name item)))
-            ;; Save and reload while still paused.
             (agent-shell-queue-test/persist-save-and-reload)
             (let ((restored (car (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))))
               (should restored)
               (should (eq 'emacs-lisp (agent-shell-queue-item-kind restored)))
-              ;; Now unpause and dispatch the restored item.
+              ;; Dispatch the restored item.
               (setq agent-shell-queue-persist-test--side-effect nil)
-              (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) nil)
               (cl-letf (((symbol-function 'run-with-timer) #'ignore)
                         ((symbol-function 'agent-shell-queue--append-done-log) #'ignore))
                 (agent-shell-queue-send-item (agent-shell-queue-item-id restored)))

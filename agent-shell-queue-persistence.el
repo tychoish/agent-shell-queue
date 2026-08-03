@@ -37,7 +37,6 @@
 (declare-function agent-shell-queue-item-executor "agent-shell-queue")
 (declare-function agent-shell-queue-queue-p "agent-shell-queue")
 (declare-function agent-shell-queue-queue--make "agent-shell-queue")
-(declare-function agent-shell-queue-queue-paused "agent-shell-queue")
 (declare-function agent-shell-queue-queue-session-paused "agent-shell-queue")
 (declare-function agent-shell-queue--restore-store-items "agent-shell-queue")
 (declare-function agent-shell-queue--normalize-running-item "agent-shell-queue")
@@ -552,15 +551,12 @@ session cannot be resumed and must be re-dispatched."
 Detects any mismatch between the persisted vector length and the current struct
 definition by comparing against a freshly-constructed instance.  This handles
 any past or future field addition without per-field migration logic.
-Preserves `paused' and `session-paused' from the old value when readable."
+Preserves `session-paused' from the old value when readable."
   (when (and (agent-shell-queue-queue-p agent-shell-queue--queue)
              (/= (length agent-shell-queue--queue)
                  (length (agent-shell-queue-queue--make))))
     (setq agent-shell-queue--queue
           (agent-shell-queue-queue--make
-           :paused (condition-case nil
-                     (agent-shell-queue-queue-paused agent-shell-queue--queue)
-                     (error nil))
            :session-paused (condition-case nil
                              (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
                              (error nil))))))

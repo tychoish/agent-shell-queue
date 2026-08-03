@@ -25,7 +25,6 @@ Shadows both the live store and queue globals so no test touches real state."
           (agent-shell-queue--queue
            (agent-shell-queue-queue--make
             :store 'agent-shell-queue--store
-            :paused nil
             :session-paused nil
             :editing-ids nil
             :interjection-pending nil))
@@ -670,15 +669,6 @@ which populates item.response from the shell buffer content."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue--activity-state
 
-(ert-deftest agent-shell-queue/activity-state-paused ()
-  "Global pause overrides everything."
-  (agent-shell-queue-test/isolate
-    (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
-    (setf (agent-shell-queue-store-items agent-shell-queue--store)
-          (agent-shell-queue-test/populate '("b" ("q-1" "p" running nil))))
-    (should (equal "PAUSED"
-                   (substring-no-properties (agent-shell-queue--activity-state))))))
-
 (ert-deftest agent-shell-queue/activity-state-running ()
   (agent-shell-queue-test/isolate
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
@@ -1024,16 +1014,52 @@ which populates item.response from the shell buffer content."
                    (seq-map #'agent-shell-queue-item-id (cdar (agent-shell-queue-store-items agent-shell-queue--store)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Pause: global and per-session
+;;; Pause: batch (all sessions) and per-session
 
-(ert-deftest agent-shell-queue/pause-and-resume-sets-flag ()
-  "pause sets the flag; resume clears it."
+(ert-deftest agent-shell-queue/pause-adds-every-known-buffer-to-session-paused ()
+  "pause (batch) adds every buffer name in the store to --session-paused."
   (agent-shell-queue-test/isolate
-    (should-not (agent-shell-queue-queue-paused agent-shell-queue--queue))
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf1" ("q-1" "a" active nil))
+                                            '("buf2" ("q-2" "b" active nil))))
     (agent-shell-queue-pause)
-    (should (agent-shell-queue-queue-paused agent-shell-queue--queue))
-    (agent-shell-queue-resume)
-    (should-not (agent-shell-queue-queue-paused agent-shell-queue--queue))))
+    (should (member "buf1" (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+    (should (member "buf2" (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))))
+
+(ert-deftest agent-shell-queue/pause-marks-active-items-as-blocked-runner ()
+  "pause (batch) converts active items in every bucket to blocked.runner."
+  (agent-shell-queue-test/isolate
+    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'active nil)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "buf1" item)))
+      (agent-shell-queue-pause)
+      (should (eq 'blocked.runner (agent-shell-queue-item-status item))))))
+
+(ert-deftest agent-shell-queue/resume-is-alias-for-unpause-all-sessions ()
+  "resume (batch) delegates to `agent-shell-queue-unpause-all-sessions'."
+  (agent-shell-queue-test/isolate
+    (let (called)
+      (cl-letf (((symbol-function 'agent-shell-queue-unpause-all-sessions)
+                 (lambda () (setq called t))))
+        (agent-shell-queue-resume))
+      (should called))))
+
+(ert-deftest agent-shell-queue/pause-then-resume-round-trip-clears-session-paused ()
+  "pause (batch) then resume (batch) leaves no buffer in --session-paused."
+  (agent-shell-queue-test/isolate
+    (let ((buf (get-buffer-create " *asq-pause-resume-roundtrip*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf)
+                              (agent-shell-queue-test/make-item "q-1" "p" 'active nil))))
+            (agent-shell-queue-pause)
+            (should (member (buffer-name buf) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+            (agent-shell-queue-resume)
+            (should-not (agent-shell-queue-queue-session-paused agent-shell-queue--queue))
+            (should (eq 'active (agent-shell-queue-item-status
+                                  (car (cdr (assoc (buffer-name buf) (agent-shell-queue-store-items agent-shell-queue--store))))))))
+        (kill-buffer buf)))))
 
 (ert-deftest agent-shell-queue/session-pause-adds-name ()
   "session-pause adds the buffer name to --session-paused."
@@ -1063,71 +1089,6 @@ which populates item.response from the shell buffer content."
     (agent-shell-queue-unpause-all-sessions)
     (should-not (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
 
-(ert-deftest agent-shell-queue/pause-marks-active-as-blocked-global ()
-  "pause converts active items to blocked.global."
-  (agent-shell-queue-test/isolate
-    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'active nil)))
-      (setf (agent-shell-queue-store-items agent-shell-queue--store)
-            (list (list "buf1" item)))
-      (agent-shell-queue-pause)
-      (should (eq 'blocked.global (agent-shell-queue-item-status item))))))
-
-(ert-deftest agent-shell-queue/resume-restores-blocked-global-to-active ()
-  "resume converts blocked.global items back to active."
-  (agent-shell-queue-test/isolate
-    (let ((item (agent-shell-queue-test/make-item "q-1" "hello" 'blocked.global nil)))
-      (setf (agent-shell-queue-store-items agent-shell-queue--store)
-            (list (list "buf1" item)))
-      (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer) #'ignore))
-        (agent-shell-queue-resume))
-      (should (eq 'active (agent-shell-queue-item-status item))))))
-
-(ert-deftest agent-shell-queue/resume-triggers-dispatch-for-live-buffers ()
-  "resume calls --send-next-for-buffer for each live buffer with items."
-  (agent-shell-queue-test/isolate
-    (let ((dispatched nil)
-          (buf (get-buffer-create " *asq-resume-dispatch-test*")))
-      (unwind-protect
-          (progn
-            (setf (agent-shell-queue-store-items agent-shell-queue--store)
-                  (list (list (buffer-name buf)
-                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.global nil))))
-            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
-                       (lambda (b) (push (buffer-name b) dispatched))))
-              (agent-shell-queue-resume))
-            (should (member (buffer-name buf) dispatched)))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-shell-queue/resume-skips-dispatch-for-dead-buffers ()
-  "resume does not crash or dispatch for buffer names with no live buffer."
-  (agent-shell-queue-test/isolate
-    (let ((dispatched nil))
-      (setf (agent-shell-queue-store-items agent-shell-queue--store)
-            (list (list " *asq-dead-buf*"
-                        (agent-shell-queue-test/make-item "q-1" "p" 'blocked.global nil))))
-      (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
-                 (lambda (b) (push (buffer-name b) dispatched))))
-        (agent-shell-queue-resume))
-      (should-not dispatched))))
-
-(ert-deftest agent-shell-queue/resume-skips-dispatch-for-session-paused-buffers ()
-  "resume does not dispatch for buffers still in the session-paused list."
-  (agent-shell-queue-test/isolate
-    (let ((dispatched nil)
-          (buf (get-buffer-create " *asq-resume-skip-test*")))
-      (unwind-protect
-          (progn
-            (setf (agent-shell-queue-store-items agent-shell-queue--store)
-                  (list (list (buffer-name buf)
-                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.global nil))))
-            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
-                  (list (buffer-name buf)))
-            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
-                       (lambda (b) (push (buffer-name b) dispatched))))
-              (agent-shell-queue-resume))
-            (should-not dispatched))
-        (kill-buffer buf)))))
-
 (ert-deftest agent-shell-queue/unpause-all-sessions-restores-blocked-runner-items ()
   "unpause-all-sessions converts blocked.runner items back to active."
   (agent-shell-queue-test/isolate
@@ -1155,41 +1116,17 @@ which populates item.response from the shell buffer content."
             (should (member (buffer-name buf) dispatched)))
         (kill-buffer buf)))))
 
-(ert-deftest agent-shell-queue/unpause-all-sessions-skips-dispatch-when-globally-paused ()
-  "unpause-all-sessions does not dispatch when the global queue is paused and user declines."
+(ert-deftest agent-shell-queue/unpause-all-sessions-skips-dispatch-for-dead-buffers ()
+  "unpause-all-sessions does not crash or dispatch for buffer names with no live buffer."
   (agent-shell-queue-test/isolate
-    (let ((dispatched nil)
-          (buf (get-buffer-create " *asq-unpause-global-paused-test*")))
-      (unwind-protect
-          (progn
-            (setf (agent-shell-queue-store-items agent-shell-queue--store)
-                  (list (list (buffer-name buf)
-                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
-            (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
-            (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
-                       (lambda (b) (push (buffer-name b) dispatched)))
-                      ((symbol-function 'y-or-n-p) (lambda (_) nil)))
-              (agent-shell-queue-unpause-all-sessions))
-            (should-not dispatched))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-shell-queue/unpause-all-sessions-resumes-global-when-confirmed ()
-  "unpause-all-sessions calls resume when globally paused and user confirms."
-  (agent-shell-queue-test/isolate
-    (let ((resumed nil)
-          (buf (get-buffer-create " *asq-unpause-global-resume-test*")))
-      (unwind-protect
-          (progn
-            (setf (agent-shell-queue-store-items agent-shell-queue--store)
-                  (list (list (buffer-name buf)
-                              (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
-            (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
-            (cl-letf (((symbol-function 'agent-shell-queue-resume)
-                       (lambda () (setq resumed t)))
-                      ((symbol-function 'y-or-n-p) (lambda (_) t)))
-              (agent-shell-queue-unpause-all-sessions))
-            (should resumed))
-        (kill-buffer buf)))))
+    (let ((dispatched nil))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list " *asq-dead-buf*"
+                        (agent-shell-queue-test/make-item "q-1" "p" 'blocked.runner nil))))
+      (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                 (lambda (b) (push (buffer-name b) dispatched))))
+        (agent-shell-queue-unpause-all-sessions))
+      (should-not dispatched))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Dispatch: editing-ids and buffer-paused prevent sends
@@ -1223,23 +1160,6 @@ which populates item.response from the shell buffer content."
                   (list (list (buffer-name buf)
                               (agent-shell-queue-test/make-item "q-1" "p" 'active nil))))
             (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) (list (buffer-name buf)))
-            (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
-                      ((symbol-function 'agent-shell-insert)
-                       (lambda (&rest _) (setq sent t))))
-              (agent-shell-queue--auto-send)
-              (should-not sent)))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-shell-queue/send-next-skips-when-globally-paused ()
-  (agent-shell-queue-test/isolate-no-sub
-    (let ((sent nil)
-          (buf (get-buffer-create " *asq-global-pause-test*")))
-      (unwind-protect
-          (progn
-            (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
-            (setf (agent-shell-queue-store-items agent-shell-queue--store)
-                  (list (list (buffer-name buf)
-                              (agent-shell-queue-test/make-item "q-1" "p" 'active nil))))
             (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
                       ((symbol-function 'agent-shell-insert)
                        (lambda (&rest _) (setq sent t))))
@@ -3767,7 +3687,7 @@ Applies to all capture paths, not just insert-after."
                    (setf (agent-shell-queue-item-response item) "agent answer")))
                 ((symbol-function 'agent-shell-queue--append-done-log) #'ignore)
                 ((symbol-function 'agent-shell-queue--alert-if-empty) #'ignore)
-                ((symbol-function 'agent-shell-queue--interjection-clear-session-pause) #'ignore))
+                ((symbol-function 'agent-shell-queue--session-unpause-name) #'ignore))
         (agent-shell-queue--mark-running-done "buf1"))
       (should (eq 'done (agent-shell-queue-item-status item)))
       (should (equal "agent answer" (agent-shell-queue-item-interjection-result item)))
@@ -3915,21 +3835,16 @@ Applies to all capture paths, not just insert-after."
 ;; `agent-shell-queue--migrate-queue-struct' must detect and rebuild such
 ;; values before any accessor is called.
 
-(defun agent-shell-queue-test/make-stale-queue-struct (&optional paused session-paused)
-  "Return a `agent-shell-queue-queue' record with one fewer field than current.
-Uses `record' so `agent-shell-queue-queue-p' recognises it, matching what
-savehist restores when it reads a `#s(...)' printed by an older Emacs session.
-PAUSED and SESSION-PAUSED are placed at their respective slots."
-  ;; A fresh struct has (length fresh) elements: type-tag + N fields.
-  ;; Build a stale one with (length fresh - 1) elements by using `record'
-  ;; directly.  Drop the last field (interjection-pending or whatever is newest).
-  (let* ((fresh (agent-shell-queue-queue--make))
-         (n-fields (- (length fresh) 2)))  ; total fields minus the last one
-    (apply #'record (type-of fresh)
-           (cons 'agent-shell-queue--store            ; store
-                 (cons paused                         ; paused
-                       (cons session-paused           ; session-paused
-                             (make-list (max 0 (- n-fields 2)) nil)))))))
+(defun agent-shell-queue-test/make-stale-queue-struct (&optional session-paused)
+  "Return a `agent-shell-queue-queue' record with one fewer field than current
+\(store, session-paused, editing-ids — missing the trailing interjection-pending
+field).  Uses `record' so `agent-shell-queue-queue-p' recognises it, matching
+what savehist restores when it reads a `#s(...)' printed by an older Emacs
+session.  SESSION-PAUSED is placed at its slot."
+  (record (type-of (agent-shell-queue-queue--make))
+          'agent-shell-queue--store
+          session-paused
+          nil))
 
 (ert-deftest agent-shell-queue/migrate-queue-struct-noop-when-current ()
   "Migration is a no-op when the struct already has the current layout."
@@ -3946,16 +3861,10 @@ PAUSED and SESSION-PAUSED are placed at their respective slots."
     (should (= (length agent-shell-queue--queue)
                (length (agent-shell-queue-queue--make))))))
 
-(ert-deftest agent-shell-queue/migrate-queue-struct-preserves-paused ()
-  "Migration preserves `paused' from a stale struct when the slot exists."
-  (let ((agent-shell-queue--queue (agent-shell-queue-test/make-stale-queue-struct t nil)))
-    (agent-shell-queue--migrate-queue-struct)
-    (should (agent-shell-queue-queue-paused agent-shell-queue--queue))))
-
 (ert-deftest agent-shell-queue/migrate-queue-struct-preserves-session-paused ()
   "Migration preserves `session-paused' from a stale struct when the slot exists."
   (let ((agent-shell-queue--queue
-         (agent-shell-queue-test/make-stale-queue-struct nil '("*foo*" "*bar*"))))
+         (agent-shell-queue-test/make-stale-queue-struct '("*foo*" "*bar*"))))
     (agent-shell-queue--migrate-queue-struct)
     (should (equal '("*foo*" "*bar*")
                    (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))))
@@ -3966,7 +3875,6 @@ PAUSED and SESSION-PAUSED are placed at their respective slots."
         (agent-shell-queue--store
          (agent-shell-queue--make-store :items nil :format 'plist :file nil)))
     (should-not (agent-shell-queue-interject-available-p))
-    (should-not (agent-shell-queue-paused-p))
     (should-not (agent-shell-queue-session-paused-p))))
 
 (ert-deftest agent-shell-queue/isolate-macro-creates-current-layout-struct ()
@@ -4163,6 +4071,69 @@ stopping before the next blocked.task."
         (should (eq 'blocked.task (agent-shell-queue-item-status (nth 1 items))))
         (should (eq 'blocked.dep  (agent-shell-queue-item-status (nth 2 items))))
         (should (eq 'blocked.dep  (agent-shell-queue-item-status (nth 3 items))))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-queue-raw-edit: freeze/thaw only newly-paused sessions
+
+(ert-deftest agent-shell-queue/raw-edit-pauses-only-not-already-paused-sessions ()
+  "raw-edit pauses every bucket not already in session-paused, and marks
+their active items blocked.runner — a buffer already individually paused is
+left untouched (still just once in the list)."
+  (agent-shell-queue-test/isolate
+    (let ((buf1 (get-buffer-create " *asq-raw-edit-buf1*"))
+          (buf2 (get-buffer-create " *asq-raw-edit-buf2*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf1) (agent-shell-queue-test/make-item "q-1" "a" 'active nil))
+                        (list (buffer-name buf2) (agent-shell-queue-test/make-item "q-2" "b" 'active nil))))
+            ;; buf1 is already individually paused before raw edit starts.
+            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+                  (list (buffer-name buf1)))
+            (cl-letf (((symbol-function 'yaml-encode) (lambda (&rest _) ""))
+                      ((symbol-function 'pop-to-buffer) #'ignore))
+              (agent-shell-queue-raw-edit))
+            (unwind-protect
+                (progn
+                  (should (member (buffer-name buf1) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+                  (should (member (buffer-name buf2) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+                  (should (= 1 (seq-count (lambda (n) (equal n (buffer-name buf1)))
+                                          (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
+                  (with-current-buffer "*agent-shell-queue-raw-edit*"
+                    (should (equal (list (buffer-name buf2))
+                                   agent-shell-queue--raw-edit-newly-paused))))
+              (when (get-buffer "*agent-shell-queue-raw-edit*")
+                (kill-buffer "*agent-shell-queue-raw-edit*"))))
+        (kill-buffer buf1)
+        (kill-buffer buf2)))))
+
+(ert-deftest agent-shell-queue/raw-edit-cancel-restores-exact-prior-pause-state ()
+  "raw-edit-cancel unpauses exactly the sessions raw-edit newly paused,
+leaving sessions that were already individually paused beforehand untouched."
+  (agent-shell-queue-test/isolate
+    (let ((buf1 (get-buffer-create " *asq-raw-edit-cancel-buf1*"))
+          (buf2 (get-buffer-create " *asq-raw-edit-cancel-buf2*")))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (list (list (buffer-name buf1) (agent-shell-queue-test/make-item "q-1" "a" 'active nil))
+                        (list (buffer-name buf2) (agent-shell-queue-test/make-item "q-2" "b" 'active nil))))
+            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+                  (list (buffer-name buf1)))
+            (cl-letf (((symbol-function 'yaml-encode) (lambda (&rest _) ""))
+                      ((symbol-function 'pop-to-buffer) #'ignore))
+              (agent-shell-queue-raw-edit))
+            (with-current-buffer "*agent-shell-queue-raw-edit*"
+              (cl-letf (((symbol-function 'quit-window) #'ignore))
+                (agent-shell-queue-raw-edit-cancel)))
+            ;; buf1 (paused before raw edit) remains paused.
+            (should (member (buffer-name buf1) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+            ;; buf2 (only paused because of raw edit) is unpaused again.
+            (should-not (member (buffer-name buf2) (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
+        (kill-buffer buf1)
+        (kill-buffer buf2)
+        (when (get-buffer "*agent-shell-queue-raw-edit*")
+          (kill-buffer "*agent-shell-queue-raw-edit*"))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

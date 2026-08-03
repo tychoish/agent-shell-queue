@@ -22,7 +22,6 @@
           (agent-shell-queue--queue
            (agent-shell-queue-queue--make
             :store 'agent-shell-queue--store
-            :paused nil
             :session-paused nil
             :editing-ids nil
             :interjection-pending nil))

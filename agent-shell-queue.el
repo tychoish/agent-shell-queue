@@ -525,7 +525,6 @@ Defined here so setf on item struct slots stays in the same file as the struct."
                (:copier nil))
   "Queue runtime state and reference to the active store."
   (store 'agent-shell-queue--store) ; symbol naming the live store variable
-  (paused nil) ; boolean: global pause flag
   (session-paused nil) ; list of buffer names paused from dispatch
   (editing-ids nil) ; list of item IDs currently open in an edit buffer
   (interjection-pending nil)) ; boolean: blocks dispatch while interjection is in progress
@@ -534,56 +533,54 @@ Defined here so setf on item struct slots stays in the same file as the struct."
   (agent-shell-queue-queue--make)
   "The active queue object.  Persisted via `savehist-additional-variables'.")
 
-(defun agent-shell-queue-paused-p ()
-  "Return non-nil when the global queue is paused."
-  (and agent-shell-queue--queue
-       (agent-shell-queue-queue-paused agent-shell-queue--queue)))
-
 (defun agent-shell-queue-session-paused-p ()
   "Return non-nil when the current buffer's session queue dispatch is paused."
   (and agent-shell-queue--queue
        (member (buffer-name (current-buffer))
                (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
 
+(defun agent-shell-queue--session-pause-name (name)
+  "Add NAME to the session-paused list and mark its active items blocked.runner.
+Shared by `agent-shell-queue-session-pause' (single buffer), `agent-shell-queue-pause'
+\(batch, every known buffer), and `agent-shell-queue--on-interrupt'."
+  (cl-pushnew name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
+  (seq-do (lambda (item)
+            (when (eq (agent-shell-queue-item-status item) 'active)
+              (setf (agent-shell-queue-item-status item) 'blocked.runner)))
+          (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store)))))
+
+(defun agent-shell-queue--session-unpause-name (name)
+  "Remove NAME from the session-paused list and mark its blocked.runner items active.
+Shared by `agent-shell-queue-unpause-all-sessions' (batch, every known buffer)
+and `agent-shell-queue-session-resume' (single buffer)."
+  (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+        (seq-remove (lambda (n) (equal n name))
+                    (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+  (seq-do (lambda (item)
+            (when (eq (agent-shell-queue-item-status item) 'blocked.runner)
+              (setf (agent-shell-queue-item-status item) 'active)))
+          (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store)))))
+
 ;;;###autoload
 (defun agent-shell-queue-pause ()
-  "Pause the global queue; no new items will be dispatched."
+  "Pause dispatch for every known session (batch `agent-shell-queue-session-pause')."
   (interactive)
   (with-agent-shell-queue
-    (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
     (seq-do (lambda (bucket)
-              (seq-do (lambda (item)
-                        (when (eq (agent-shell-queue-item-status item) 'active)
-                          (setf (agent-shell-queue-item-status item) 'blocked.global)))
-                      (cdr bucket)))
+              (agent-shell-queue--session-pause-name (car bucket)))
             (agent-shell-queue-store-items agent-shell-queue--store))
-    (message "agent-shell-queue: PAUSED — no new items will be dispatched")))
+    (message "agent-shell-queue: all sessions PAUSED")))
 
 ;;;###autoload
 (defun agent-shell-queue-resume ()
-  "Resume the global queue after being paused."
+  "Resume dispatch for every known session.
+Alias for `agent-shell-queue-unpause-all-sessions'."
   (interactive)
-  (with-agent-shell-queue
-    (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) nil)
-    (seq-do (lambda (bucket)
-              (seq-do (lambda (item)
-                        (when (eq (agent-shell-queue-item-status item) 'blocked.global)
-                          (setf (agent-shell-queue-item-status item) 'active)))
-                      (cdr bucket)))
-            (agent-shell-queue-store-items agent-shell-queue--store))
-    (message "agent-shell-queue: running"))
-  (seq-do (lambda (bucket)
-            (when-let* ((buf (get-buffer (car bucket)))
-                        (_ (buffer-live-p buf))
-                        (_ (not (member (car bucket)
-                                        (agent-shell-queue-queue-session-paused
-                                         agent-shell-queue--queue)))))
-              (agent-shell-queue--send-next-for-buffer buf)))
-          (agent-shell-queue-store-items agent-shell-queue--store)))
+  (agent-shell-queue-unpause-all-sessions))
 
+;;;###autoload
 (defun agent-shell-queue-unpause-all-sessions ()
-  "Clear the per-session pause list, resuming all individually paused sessions.
-When the global queue is also paused, prompts to resume it as well."
+  "Clear the per-session pause list, resuming all individually paused sessions."
   (interactive)
   (with-agent-shell-queue
     (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) nil)
@@ -592,14 +589,11 @@ When the global queue is also paused, prompts to resume it as well."
                 (setf (agent-shell-queue-item-status item) 'active)))
             (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store)))
     (message "agent-shell-queue: all session pauses cleared"))
-  (if (agent-shell-queue-queue-paused agent-shell-queue--queue)
-      (when (y-or-n-p "Global queue is paused; resume it too? ")
-        (agent-shell-queue-resume))
-    (seq-do (lambda (bucket)
-              (when-let* ((buf (get-buffer (car bucket)))
-                          (_ (buffer-live-p buf)))
-                (agent-shell-queue--send-next-for-buffer buf)))
-            (agent-shell-queue-store-items agent-shell-queue--store))))
+  (seq-do (lambda (bucket)
+            (when-let* ((buf (get-buffer (car bucket)))
+                        (_ (buffer-live-p buf)))
+              (agent-shell-queue--send-next-for-buffer buf)))
+          (agent-shell-queue-store-items agent-shell-queue--store)))
 
 (defun agent-shell-queue-session-pause (&optional buf)
   "Pause dispatch for BUF (default: current agent-shell session)."
@@ -607,11 +601,7 @@ When the global queue is also paused, prompts to resume it as well."
    (list (agent-shell-queue--pick-shell-with-state "Pause dispatch for: ")))
   (when-let* ((name (buffer-name buf)))
     (with-agent-shell-queue
-      (cl-pushnew name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
-      (seq-do (lambda (item)
-                (when (eq (agent-shell-queue-item-status item) 'active)
-                  (setf (agent-shell-queue-item-status item) 'blocked.runner)))
-              (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store))))
+      (agent-shell-queue--session-pause-name name)
       (message "agent-shell-queue: %s PAUSED" name))))
 
 (defun agent-shell-queue-session-resume (&optional buf)
@@ -621,21 +611,17 @@ Any running `pause' or `compact' item for BUF is marked done automatically."
    (list (agent-shell-queue--pick-shell-with-state "Resume dispatch for: ")))
   (when-let* ((name (buffer-name buf)))
     (with-agent-shell-queue
-      (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
-            (delete name (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
       (setq agent-shell-queue--compact-running
             (seq-remove (lambda (it) (equal (car it) name)) agent-shell-queue--compact-running))
       (seq-do (lambda (it)
-                (cond
-                 ((and (eq (agent-shell-queue-item-status it) 'running)
-                       (memq (agent-shell-queue-item-kind it) '(pause compact)))
+                (when (and (eq (agent-shell-queue-item-status it) 'running)
+                           (memq (agent-shell-queue-item-kind it) '(pause compact)))
                   (setf (agent-shell-queue-item-status it) 'done)
                   (setf (agent-shell-queue-item-completed it) (float-time))
                   (agent-shell-queue--append-done-log name it)
-                  (run-hook-with-args 'agent-shell-queue-item-done-hook name it))
-                 ((eq (agent-shell-queue-item-status it) 'blocked.runner)
-                  (setf (agent-shell-queue-item-status it) 'active))))
+                  (run-hook-with-args 'agent-shell-queue-item-done-hook name it)))
               (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store))))
+      (agent-shell-queue--session-unpause-name name)
       (message "agent-shell-queue: %s resumed" name))
     (agent-shell-queue--send-next-for-buffer buf)))
 
@@ -682,11 +668,7 @@ Installed as :before advice on `agent-shell-interrupt'."
   (when-let* ((_ (derived-mode-p 'agent-shell-mode))
               (buf-name (buffer-name))
               (_ (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
-    (cl-pushnew buf-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
-    (seq-do (lambda (item)
-              (when (eq (agent-shell-queue-item-status item) 'active)
-                (setf (agent-shell-queue-item-status item) 'blocked.runner)))
-            (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+    (agent-shell-queue--session-pause-name buf-name)
     (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)))
 
@@ -1639,7 +1621,7 @@ Only fires the empty-queue alert when at least one item was actually marked done
                 (agent-shell-queue--mark-item-done buf-name item 'success)
                 (setf (agent-shell-queue-queue-interjection-pending agent-shell-queue--queue) nil)
                 ;; Clear the session pause so the next item dispatches normally.
-                (agent-shell-queue--interjection-clear-session-pause buf-name)
+                (agent-shell-queue--session-unpause-name buf-name)
                 (setq marked t))
                ((memq (agent-shell-queue-item-status item) '(aborted incomplete))
                 (setq halted t))))
@@ -1700,7 +1682,6 @@ The queue must be manually resumed via `agent-shell-queue-session-resume'."
 (defun agent-shell-queue--dispatch-if-ready (buf)
   "Send the next dispatchable item for BUF if all conditions are met."
   (when (and (buffer-live-p buf)
-             (not (agent-shell-queue-queue-paused agent-shell-queue--queue))
              (not (member (buffer-name buf) (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
     (with-current-buffer buf
       (when-let* ((_ (not (shell-maker-busy)))
@@ -1713,7 +1694,7 @@ The queue must be manually resumed via `agent-shell-queue-session-resume'."
   "Attempt to send the first active queue item for BUF.
 Deferred via a zero-delay timer to let the current event complete before
 submitting the next prompt.  Deferred items are skipped.
-No-op when the queue is globally paused."
+No-op when BUF's session is paused."
   (run-with-timer 0 nil #'agent-shell-queue--dispatch-if-ready buf))
 
 (defun agent-shell-queue--drop-subscription (buf-name)
@@ -1778,9 +1759,8 @@ Also subscribes to `clean-up' so the registry is updated when BUF is killed."
   "Backup scan: send the first active item for each idle agent-shell bucket.
 Runs infrequently; deferred items are always skipped.
 Primary draining is handled by per-buffer `turn-complete' subscriptions.
-No-op when the queue is globally paused."
-  (when (and agent-shell-queue--loaded (agent-shell-queue-store-items agent-shell-queue--store)
-             (not (agent-shell-queue-queue-paused agent-shell-queue--queue)))
+Session-paused buckets are skipped."
+  (when (and agent-shell-queue--loaded (agent-shell-queue-store-items agent-shell-queue--store))
     (agent-shell-queue--migrate-all-stale-items)
     (seq-do (lambda (it)
               (when-let* ((buf-name (car it))
@@ -1827,9 +1807,14 @@ when items are first added for a given buffer."
 Stops the idle timer, drops all turn-complete subscriptions, reloads
 `agent-shell-queue.el' from source, re-reads queue state from disk, and
 reinstates subscriptions for buffers with active/running items.
-Queue remains paused after reload; call `agent-shell-queue-resume' when ready."
+Every known session is paused before reload — the session-paused list
+survives the reload (it lives on `agent-shell-queue--queue', which `defvar'
+does not reset) — so nothing dispatches until `agent-shell-queue-resume'
+is called."
   (interactive)
-  (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
+  (seq-do (lambda (bucket)
+            (agent-shell-queue--session-pause-name (car bucket)))
+          (agent-shell-queue-store-items agent-shell-queue--store))
   (agent-shell-queue--save)
   (when agent-shell-queue--idle-timer
     (cancel-timer agent-shell-queue--idle-timer)
@@ -2006,7 +1991,6 @@ NEXT-P, when non-nil, marks the item as the next to be dispatched."
                 ;; Legacy: old deferred items not yet migrated show as blocked.skip
                 ((eq status 'deferred) (if bg "blocked.skip.bg" "blocked.skip"))
                 ((and (eq status 'active) blocked) "blocked.runner")
-                ((and (eq status 'active) (agent-shell-queue-queue-paused agent-shell-queue--queue)) "blocked.global")
                 ((and detached (eq status 'active)) "detached")
                 ((eq status 'draft) "draft")
                 (bg "scheduled.bg")
@@ -2396,7 +2380,6 @@ This prevents tasks from executing without any supervisory display."
 (defun agent-shell-queue--activity-state ()
   "Return a propertized string describing the queue's current activity level."
   (cond
-   ((agent-shell-queue-queue-paused agent-shell-queue--queue) (propertize "PAUSED" 'face 'warning))
    ((thread-last (agent-shell-queue-store-items agent-shell-queue--store)
                  (seq-mapcat #'cdr)
                  (seq-some (lambda (it) (eq (agent-shell-queue-item-status it) 'running))))
@@ -2436,7 +2419,7 @@ Examples: \"paused\", \"running (2)\", \"3 pending\", \"idle\"."
                    (seq-map #'length
                             '("invalid" "pending-fork" "done" "running.blocked"
                               "aborted" "running.active.bg" "running.active"
-                              "editing" "blocked.runner" "blocked.global" "blocked.task"
+                              "editing" "blocked.runner" "blocked.task"
                               "blocked.dep" "blocked.cond" "blocked.pending" "blocked.skip"
                               "draft" "scheduled.bg" "scheduled" "incomplete"))))
      3)
@@ -4388,12 +4371,10 @@ format switch.  Changes take effect immediately via `agent-shell-queue-buffer-re
     ("fb" "Insert before" agent-shell-queue-buffer-insert-fork-before)
     ("fa" "Insert after" agent-shell-queue-buffer-insert-fork-after)
     ("fr" "Release pending" agent-shell-queue-release-pending-fork)]
-   ["Global"
-    ("gp" "Pause" agent-shell-queue-pause
-     :inapt-if agent-shell-queue-paused-p)
-    ("gr" "Resume" agent-shell-queue-resume
-     :inapt-if-not agent-shell-queue-paused-p)
-    ("ga" "Resume all" agent-shell-queue-unpause-all-sessions)
+   ["All"
+    ("gp" "Pause all" agent-shell-queue-pause)
+    ("gr" "Resume all" agent-shell-queue-resume)
+    ("ga" "Resume all sessions" agent-shell-queue-unpause-all-sessions)
     ("gi" "Reset all to default" agent-shell-queue-reset-all-input-modes)
     ("gm" agent-shell-queue-set-input-mode-default
      :description (lambda ()
@@ -5189,15 +5170,17 @@ BUF is the target agent-shell buffer; nil adds to the unassigned queue."
 
 (define-derived-mode agent-shell-queue-raw-edit-mode text-mode "Queue-RawEdit"
   "Mode for directly editing the queue in YAML format.
-The queue is paused while this buffer is live.
+Every session not already paused is paused while this buffer is live.
 Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-queue-raw-edit-cancel].
 \\{agent-shell-queue-raw-edit-mode-map}")
 
 (defvar-local agent-shell-queue--raw-edit-snapshot nil
   "Hash-table of id→item for the queue state when raw edit was started.")
 
-(defvar-local agent-shell-queue--raw-edit-was-paused nil
-  "Whether the queue was already paused before entering raw edit mode.")
+(defvar-local agent-shell-queue--raw-edit-newly-paused nil
+  "Buffer names added to the session-paused list when raw edit was started.
+Only these are removed again on confirm/cancel, so a buffer that was already
+individually paused before raw edit began stays paused afterward.")
 
 (defun agent-shell-queue--item-to-yaml-edit (item)
   "Convert ITEM to a hash-table for raw editing; omits nil timestamp fields."
@@ -5242,29 +5225,34 @@ Confirm with \\[agent-shell-queue-raw-edit-confirm], cancel with \\[agent-shell-
   "Return a hash-table mapping item ID to item struct for all current items."
   (map-into
    (seq-map (lambda (it) (cons (agent-shell-queue-item-id it) it))
-            (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store))))
-   '(hash-table :test equal))
+            (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store)))
+   '(hash-table :test equal)))
 
 ;;;###autoload
 (defun agent-shell-queue-raw-edit ()
   "Open the queue for direct YAML editing.
-The queue is paused while the edit buffer is live.
+Every session not already paused is paused while the edit buffer is live.
 Confirm changes with \\[agent-shell-queue-raw-edit-confirm];
 cancel with \\[agent-shell-queue-raw-edit-cancel]."
   (interactive)
   (agent-shell-queue--ensure-loaded)
   (unless (fboundp 'yaml-encode)
     (user-error "Raw edit requires the `yaml' package"))
-  (let* ((was-paused (agent-shell-queue-queue-paused agent-shell-queue--queue))
-         (buf (get-buffer-create "*agent-shell-queue-raw-edit*")))
-    (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) t)
+  (let* ((buf (get-buffer-create "*agent-shell-queue-raw-edit*"))
+         (newly-paused
+          (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
+                       (seq-map #'car)
+                       (seq-remove (lambda (name)
+                                     (member name (agent-shell-queue-queue-session-paused
+                                                   agent-shell-queue--queue)))))))
+    (seq-do #'agent-shell-queue--session-pause-name newly-paused)
     (agent-shell-queue--refresh-buffer)
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
         (agent-shell-queue-raw-edit-mode)
         (setq agent-shell-queue--raw-edit-snapshot (agent-shell-queue--make-edit-snapshot)
-              agent-shell-queue--raw-edit-was-paused was-paused)
+              agent-shell-queue--raw-edit-newly-paused newly-paused)
         (insert (agent-shell-queue--render-to-yaml))))
     (pop-to-buffer buf '(display-buffer-below-selected (window-height . 0.5)))))
 
@@ -5350,7 +5338,7 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
     (user-error "Raw edit requires the `yaml' package"))
   (let* ((text (buffer-string))
          (snapshot agent-shell-queue--raw-edit-snapshot)
-         (was-paused agent-shell-queue--raw-edit-was-paused)
+         (newly-paused agent-shell-queue--raw-edit-newly-paused)
          errors
          parsed)
     (condition-case err
@@ -5408,22 +5396,26 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
                   preserved)
           (setf (agent-shell-queue-store-items agent-shell-queue--store)
                 (seq-remove #'agent-shell-queue--bucket-empty-p result))))
-      (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) was-paused)
+      (seq-do #'agent-shell-queue--session-unpause-name newly-paused)
       (agent-shell-queue--save)
       (quit-window t)
       (agent-shell-queue--refresh-buffer)
       (message "agent-shell-queue: raw edit applied%s"
-               (if was-paused " (queue remains paused)" "")))))
+               (if newly-paused
+                   (format " (%d session(s) resumed)" (length newly-paused))
+                 "")))))
 
 (defun agent-shell-queue-raw-edit-cancel ()
-  "Cancel raw edit; restore the queue pause state from before editing."
+  "Cancel raw edit; resume exactly the sessions this raw edit newly paused."
   (interactive)
-  (let ((was-paused agent-shell-queue--raw-edit-was-paused))
+  (let ((newly-paused agent-shell-queue--raw-edit-newly-paused))
     (quit-window t)
-    (setf (agent-shell-queue-queue-paused agent-shell-queue--queue) was-paused)
+    (seq-do #'agent-shell-queue--session-unpause-name newly-paused)
     (agent-shell-queue--refresh-buffer)
     (message "agent-shell-queue: raw edit cancelled%s"
-             (if was-paused "" " (queue resumed)"))))
+             (if newly-paused
+                 (format " (%d session(s) resumed)" (length newly-paused))
+               ""))))
 
 ;;; Import
 
@@ -6055,16 +6047,6 @@ Strips the read-only header by looking for the separator line."
   (agent-shell-queue--save)
   (agent-shell-queue--refresh-buffer))
 
-(defun agent-shell-queue--interjection-clear-session-pause (buf-name)
-  "Remove BUF-NAME from session-paused and restore blocked.runner items to active."
-  (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
-        (seq-remove (lambda (n) (equal n buf-name))
-                    (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
-  (seq-do (lambda (it)
-            (when (eq (agent-shell-queue-item-status it) 'blocked.runner)
-              (setf (agent-shell-queue-item-status it) 'active)))
-          (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store)))))
-
 (defun agent-shell-queue-interjection-close ()
   "Close the interjection buffer with a choice of how to handle the interrupted task."
   (interactive)
@@ -6098,7 +6080,7 @@ Strips the read-only header by looking for the separator line."
        (message "agent-shell-queue: asking agent to resume previous work in %s…" buf-name))
       ("mark done and continue"
        (agent-shell-queue--interjection-mark-aborted item buf-name)
-       (agent-shell-queue--interjection-clear-session-pause buf-name)
+       (agent-shell-queue--session-unpause-name buf-name)
        (agent-shell-queue--save)
        (agent-shell-queue--refresh-buffer)
        (kill-buffer (current-buffer))
@@ -6111,7 +6093,7 @@ Strips the read-only header by looking for the separator line."
        (message "agent-shell-queue: item aborted, queue paused in %s" buf-name))
       ("clear context and continue"
        (agent-shell-queue--interjection-mark-aborted item buf-name)
-       (agent-shell-queue--interjection-clear-session-pause buf-name)
+       (agent-shell-queue--session-unpause-name buf-name)
        (agent-shell-queue--save)
        (agent-shell-queue--refresh-buffer)
        (kill-buffer (current-buffer))
