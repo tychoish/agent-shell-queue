@@ -458,28 +458,44 @@ nil BUF-OR-NIL (unassigned) always accepts any kind.  Returns t on success."
   reenqueued-from
   reenqueued-as)
 
+(defun agent-shell-queue--item-well-formed-p (item)
+  "Return non-nil when ITEM has the minimum shape the queue UI requires.
+Guards against a malformed persisted item (nil id/args/status) reaching
+`agent-shell-queue-buffer-refresh', which errors on `split-string' with a
+non-string ARGS."
+  (and (agent-shell-queue-item-id item)
+       (stringp (agent-shell-queue-item-args item))
+       (agent-shell-queue-item-status item)))
+
 (defun agent-shell-queue--migrate-item-if-stale (item)
   "Return ITEM or a current-layout copy with missing slots defaulted to nil.
 Compares the vector length of ITEM against a freshly constructed default
 instance; if shorter, copies the available slots into the new struct by index.
 New trailing slots are left at nil.  Handles future field additions without
-modification."
+modification.  Returns nil (logging via `message') when ITEM cannot be
+migrated to something matching `agent-shell-queue--item-well-formed-p' --
+e.g. a persisted item so truncated that no fields overlap the current layout."
   (let* ((current (agent-shell-queue-item--make))
          (old-len (length item))
-         (new-len (length current)))
-    (if (= old-len new-len)
-        item
-      (dotimes (i (1- (min old-len new-len)))
-        (aset current (1+ i) (aref item (1+ i))))
-      current)))
+         (new-len (length current))
+         (migrated (if (= old-len new-len)
+                       item
+                     (dotimes (i (1- (min old-len new-len)))
+                       (aset current (1+ i) (aref item (1+ i))))
+                     current)))
+    (if (agent-shell-queue--item-well-formed-p migrated)
+        migrated
+      (message "agent-shell-queue: dropping malformed item during migration: %S" migrated)
+      nil)))
 
 (defun agent-shell-queue--migrate-all-stale-items ()
   "Upgrade every in-memory item to the current struct layout.
 Replaces old-format items (missing the outcome slot) in the live store with
-freshly constructed equivalents.  Safe to call repeatedly; up-to-date items
-are returned unchanged by `agent-shell-queue--migrate-item-if-stale'."
+freshly constructed equivalents, dropping any that come out malformed.  Safe
+to call repeatedly; up-to-date items are returned unchanged by
+`agent-shell-queue--migrate-item-if-stale'."
   (seq-do (lambda (bucket)
-            (setcdr bucket (seq-map #'agent-shell-queue--migrate-item-if-stale (cdr bucket))))
+            (setcdr bucket (seq-keep #'agent-shell-queue--migrate-item-if-stale (cdr bucket))))
           (agent-shell-queue-store-items agent-shell-queue--store)))
 
 (defun agent-shell-queue--migrate-deferred-statuses ()
@@ -516,11 +532,22 @@ before calling the format's serialize helper.")
   (agent-shell-queue--make-store :items nil :format 'plist :file nil)
   "Live queue store.  Items are loaded from disk by --load, written by --save.")
 
+(defun agent-shell-queue--sanitize-bucket (pair)
+  "Return PAIR with any malformed items removed, logging drops."
+  (let* ((before (cdr pair))
+         (after (seq-filter #'agent-shell-queue--item-well-formed-p before))
+         (dropped (- (length before) (length after))))
+    (when (> dropped 0)
+      (message "agent-shell-queue: dropped %d malformed item%s from bucket %s"
+               dropped (if (= dropped 1) "" "s") (car pair)))
+    (cons (car pair) after)))
+
 (defun agent-shell-queue--restore-store-items (items)
-  "Set the live store's items to ITEMS.
+  "Set the live store's items to ITEMS, dropping malformed ones.
 Called by the persistence layer after deserializing from disk.  Defined here
 so that the setf on the store struct slot stays in the same file as the struct."
-  (setf (agent-shell-queue-store-items agent-shell-queue--store) items))
+  (setf (agent-shell-queue-store-items agent-shell-queue--store)
+        (seq-map #'agent-shell-queue--sanitize-bucket items)))
 
 (defun agent-shell-queue--normalize-running-item (item)
   "Reset ITEM's status from `running' to `active' for cross-session reload.
@@ -2516,7 +2543,8 @@ then places the unassigned bucket last."
   "Rebuild the tabulated list from current queue state."
   (interactive)
   (agent-shell-queue--ensure-loaded)
-  (let* ((ordered (agent-shell-queue--ordered-display-items))
+  (let* ((ordered (seq-map #'agent-shell-queue--sanitize-bucket
+                           (agent-shell-queue--ordered-display-items)))
          (show-buffer-p agent-shell-queue-show-buffer-column)
          (column-structure (list show-buffer-p
                                  agent-shell-queue-show-kind-column
