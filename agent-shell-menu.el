@@ -664,7 +664,16 @@ When CATEGORY is non-nil, only affect blocks matching that category."
                            (or (null category)
                                (equal category (agent-shell-menu--block-category id))))
                   (goto-char (map-elt block :start))
-                  (agent-shell-ui--toggle-fragment-at-point))))
+                  (agent-shell-ui--toggle-fragment-at-point)
+                  ;; If this is a group and we are collapsing/expanding, propagate one level deep
+                  (when (eq (map-elt state :kind) 'group)
+                    (seq-do (lambda (child)
+                              (when-let* ((child-state (get-text-property (map-elt child :start) 'agent-shell-ui-state))
+                                          (child-collapsed (map-elt child-state :collapsed))
+                                          ((not (eq child-collapsed (and target t)))))
+                                (goto-char (map-elt child :start))
+                                (agent-shell-ui--toggle-fragment-at-point)))
+                            (agent-shell-ui--group-children :group-qualified-id id))))))
             (agent-shell-menu--blocks-in-buffer))))
 
 ;;;###autoload

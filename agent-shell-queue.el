@@ -99,13 +99,33 @@ One of:
   "Idle delay in seconds for the backup auto-send timer.
 Primary draining happens via `shell-maker-finish-output' advice; this timer
 is only a safety net for buffers that become idle outside that path.")
+(defvar agent-shell-queue-background-prefix '((omp . "/background ") (t . "/background "))
+  "Alists of symbols mapping `<agent-shell-identifier>` to background command prefix string, or a function/value.")
 
-(defvar agent-shell-queue-background-prefix "/background "
-  "String prepended to prompts flagged for background sub-agent execution.")
+(defvar agent-shell-queue-clear-command '((omp . "/fresh") (t . "/clear"))
+  "Alists of symbols mapping `<agent-shell-identifier>` to clear command string, or a function/value.")
 
-(defvar agent-shell-queue-clear-command "/clear"
-  "Command string sent when a clear item is dequeued.")
+(defun agent-shell-queue--get-background-prefix (buf)
+  "Resolve the background prefix for BUF based on its agent-shell configuration."
+  (let* ((buffer (get-buffer buf))
+         (config (and buffer (fboundp 'agent-shell-get-config) (agent-shell-get-config buffer)))
+         (ident (and config (map-elt config :identifier)))
+         (val agent-shell-queue-background-prefix))
+    (cond
+     ((functionp val) (funcall val ident))
+     ((listp val) (or (cdr (assq ident val)) (cdr (assq t val)) "/background "))
+     (t val))))
 
+(defun agent-shell-queue--get-clear-command (buf)
+  "Resolve the clear command for BUF based on its agent-shell configuration."
+  (let* ((buffer (get-buffer buf))
+         (config (and buffer (fboundp 'agent-shell-get-config) (agent-shell-get-config buffer)))
+         (ident (and config (map-elt config :identifier)))
+         (val agent-shell-queue-clear-command))
+    (cond
+     ((functionp val) (funcall val ident))
+     ((listp val) (or (cdr (assq ident val)) (cdr (assq t val)) "/clear"))
+     (t val))))
 (defvar agent-shell-queue-done-log-file nil
   "File path for appending completed queue items as JSON lines.
 When nil (the default), completed items are not logged to disk.")
@@ -1466,8 +1486,8 @@ and dispatches the next item for BUF-NAME if the buffer is still live."
 (defun agent-shell-queue--default-executor (item args)
   "Default dispatch for ITEM: send ARGS to the item's target shell buffer.
 Fires an alert with the truncated ARGS text, then calls `agent-shell-insert'
-to submit the text.  Background items are prefixed with
-`agent-shell-queue-background-prefix'.  Records the buffer position after
+to submit the text. Background items are prefixed with
+resolved background prefix. Records the buffer position after
 insertion so response capture can find the reply."
   (let* ((pair (agent-shell-queue--item-by-id (agent-shell-queue-item-id item)))
          (buf-name (car pair))
@@ -1478,7 +1498,7 @@ insertion so response capture can find the reply."
            :severity 'low)
     (agent-shell-insert
      :text (if (agent-shell-queue-item-background item)
-               (concat agent-shell-queue-background-prefix args)
+               (concat (agent-shell-queue--get-background-prefix buf) args)
              args)
      :submit t :no-focus t :shell-buffer buf)
     ;; Record after insert so start-pos is past the submitted "Claude> [args]" line.
@@ -5114,8 +5134,6 @@ Works in both capture and edit buffers."
               (buf (get-buffer name)))
     (insert (with-current-buffer buf (buffer-string)))))
 
-;;; Entry points
-
 ;;;###autoload
 (defun agent-shell-queue-enqueue (prompt &optional buf background)
   "Queue PROMPT for BUF, optionally flagged for BACKGROUND sub-agent execution.
@@ -5135,7 +5153,7 @@ When called interactively, opens a capture buffer for composing the prompt."
           (agent-shell-queue-add prompt buf background)
         (agent-shell-insert
 	 :text (if background
-                   (concat agent-shell-queue-background-prefix prompt)
+                   (concat (agent-shell-queue--get-background-prefix buf) prompt)
                  prompt)
          :submit t
 	 :no-focus t)))))
@@ -5143,12 +5161,11 @@ When called interactively, opens a capture buffer for composing the prompt."
 ;;;###autoload
 (defun agent-shell-queue-enqueue-clear (&optional buf)
   "Enqueue a clear command for BUF.
-Uses `agent-shell-queue-clear-command' as the prompt."
+Uses the resolved clear command for BUF as the prompt."
   (interactive
    (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
              (agent-shell-queue--pick-buffer "Clear queue for: "))))
-  (agent-shell-queue-enqueue agent-shell-queue-clear-command buf))
-
+  (agent-shell-queue-enqueue (agent-shell-queue--get-clear-command buf) buf))
 ;;;###autoload
 (defun agent-shell-queue-capture-unassigned ()
   "Open a capture buffer to compose a prompt for the unassigned queue.

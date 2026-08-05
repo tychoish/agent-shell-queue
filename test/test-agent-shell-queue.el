@@ -4195,4 +4195,49 @@ leaving sessions that were already individually paused beforehand untouched."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(ert-deftest agent-shell-queue/get-background-prefix-resolves-properly ()
+  "Test background prefix resolution logic using various configurations."
+  (let ((buf (get-buffer-create " *asq-test-bg-buf*"))
+        (agent-shell-queue-background-prefix '((omp . "/bg-omp ") (t . "/bg-default "))))
+    (unwind-protect
+        (progn
+          ;; 1. Check with omp config matching
+          (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . omp)))))
+            (should (equal "/bg-omp " (agent-shell-queue--get-background-prefix buf))))
+          ;; 2. Check with fallback matching (t key)
+          (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . claude-code)))))
+            (should (equal "/bg-default " (agent-shell-queue--get-background-prefix buf))))
+          ;; 3. Check with string config override
+          (let ((agent-shell-queue-background-prefix "/custom-bg "))
+            (should (equal "/custom-bg " (agent-shell-queue--get-background-prefix buf))))
+          ;; 4. Check with function override
+          (let ((agent-shell-queue-background-prefix (lambda (ident) (if (eq ident 'omp) "/f-omp " "/f-def "))))
+            (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . omp)))))
+              (should (equal "/f-omp " (agent-shell-queue--get-background-prefix buf))))
+            (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . gemini-cli)))))
+              (should (equal "/f-def " (agent-shell-queue--get-background-prefix buf))))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-shell-queue/get-clear-command-resolves-properly ()
+  "Test clear command resolution logic using various configurations."
+  (let ((buf (get-buffer-create " *asq-test-clear-buf*"))
+        (agent-shell-queue-clear-command '((omp . "/fresh-omp") (t . "/clear-default"))))
+    (unwind-protect
+        (progn
+          ;; 1. Check with omp config matching
+          (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . omp)))))
+            (should (equal "/fresh-omp" (agent-shell-queue--get-clear-command buf))))
+          ;; 2. Check with fallback matching (t key)
+          (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . claude-code)))))
+            (should (equal "/clear-default" (agent-shell-queue--get-clear-command buf))))
+          ;; 3. Check with string config override
+          (let ((agent-shell-queue-clear-command "/custom-clear"))
+            (should (equal "/custom-clear" (agent-shell-queue--get-clear-command buf))))
+          ;; 4. Check with function override
+          (let ((agent-shell-queue-clear-command (lambda (ident) (if (eq ident 'omp) "/f-fresh" "/f-clear"))))
+            (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . omp)))))
+              (should (equal "/f-fresh" (agent-shell-queue--get-clear-command buf))))
+            (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . gemini-cli)))))
+              (should (equal "/f-clear" (agent-shell-queue--get-clear-command buf))))))
+      (kill-buffer buf))))
 ;;; test-agent-shell-queue.el ends here
