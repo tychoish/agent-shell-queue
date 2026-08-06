@@ -4240,4 +4240,69 @@ leaving sessions that were already individually paused beforehand untouched."
             (cl-letf (((symbol-function 'agent-shell-get-config) (lambda (_buf) '((:identifier . gemini-cli)))))
               (should (equal "/f-clear" (agent-shell-queue--get-clear-command buf))))))
       (kill-buffer buf))))
+(ert-deftest agent-shell-queue/pause-delay-and-alerts ()
+  "Test pause delays, start alerts, and pre-end alerts."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((alerts nil)
+         (agent-shell-queue-default-pause-delay 30)
+         (agent-shell-queue-alert-on-pause-start t)
+         (agent-shell-queue-alert-before-pause-end 10)
+         (agent-shell-queue--pause-timers nil))
+     (cl-letf (((symbol-function 'alert)
+                (lambda (msg &rest args)
+                  (push (cons msg args) alerts))))
+       ;; Start pause delay for 30s
+       (agent-shell-queue--start-pause-delay "buf1" 30 "Task pause" nil)
+       ;; 1. Check start alert was fired
+       (should (= 1 (length alerts)))
+       (should (string-match-p "Task pause started (30 s)" (caar alerts)))
+       (should (assoc "buf1" agent-shell-queue--pause-timers))
+       (agent-shell-queue--cancel-pause-timer "buf1")
+       (should-not (assoc "buf1" agent-shell-queue--pause-timers))))))
+
+(ert-deftest agent-shell-queue/item-delays-persistence ()
+  "Test delay-before and delay-after fields in item struct and persistence."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((item (agent-shell-queue-item--make
+                :id "d1"
+                :args "test delays"
+                :status 'active
+                :delay-before 5
+                :delay-after 10)))
+     (should (= 5 (agent-shell-queue-item-delay-before item)))
+     (should (= 10 (agent-shell-queue-item-delay-after item)))
+
+     ;; JSON round-trip
+     (let* ((json-obj (agent-shell-queue--item-to-json item))
+            (item-from-j (agent-shell-queue--item-from-json json-obj)))
+       (should (= 5 (agent-shell-queue-item-delay-before item-from-j)))
+       (should (= 10 (agent-shell-queue-item-delay-after item-from-j))))
+
+     ;; YAML round-trip
+     (let* ((yaml-obj (agent-shell-queue--item-to-yaml item))
+            (item-from-y (agent-shell-queue--item-from-yaml yaml-obj)))
+       (should (= 5 (agent-shell-queue-item-delay-before item-from-y)))
+       (should (= 10 (agent-shell-queue-item-delay-after item-from-y)))))))
+
+(ert-deftest agent-shell-queue/timed-pause-item ()
+  "Test inserting and dispatching a timed pause item."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((buf (get-buffer-create " *asq-test-pause-buf*"))
+         (alerts nil)
+         (agent-shell-queue-alert-on-pause-start t))
+     (unwind-protect
+         (cl-letf (((symbol-function 'alert)
+                    (lambda (msg &rest args)
+                      (push (cons msg args) alerts))))
+           (agent-shell-queue-insert-pause buf nil 15)
+           (let* ((items (cdr (assoc " *asq-test-pause-buf*" (agent-shell-queue-store-items agent-shell-queue--store))))
+                  (pause-item (car items)))
+             (should (eq 'pause (agent-shell-queue-item-kind pause-item)))
+             (should (= 15 (agent-shell-queue-item-delay-after pause-item)))
+             ;; Dispatch pause item
+             (agent-shell-queue--dispatch-pause-compact pause-item " *asq-test-pause-buf*")
+             ;; Start alert should fire
+             (should (string-match-p "Pause item started (15 s)" (caar alerts)))
+             (agent-shell-queue--cancel-pause-timer " *asq-test-pause-buf*")))
+       (kill-buffer buf)))))
 ;;; test-agent-shell-queue.el ends here

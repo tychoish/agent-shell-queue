@@ -187,7 +187,9 @@ executor as its registry name string or JSON null."
    :response (or (agent-shell-queue-item-response item) :null)
    :outcome (if-let* ((o (agent-shell-queue-item-outcome item))) (symbol-name o) :null)
    :directory (or (agent-shell-queue-item-directory item) :null)
-   :executor (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null)))
+   :executor (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null)
+   :delay_before (or (agent-shell-queue-item-delay-before item) :null)
+   :delay_after (or (agent-shell-queue-item-delay-after item) :null)))
 
 (defun agent-shell-queue--item-from-json (obj)
   "Reconstruct a queue item from JSON-parsed plist OBJ.
@@ -207,7 +209,11 @@ executor resolved from the registry (nil when absent or unknown)."
    :directory (let ((d (plist-get obj :directory))) (unless (eq d :null) d))
    :executor (let ((e (plist-get obj :executor)))
                (unless (or (null e) (eq e :null))
-                 (agent-shell-queue--executor-from-plist e)))))
+                 (agent-shell-queue--executor-from-plist e)))
+   :delay-before (let ((db (or (plist-get obj :delay_before) (plist-get obj :delay-before))))
+                   (unless (or (null db) (eq db :null)) db))
+   :delay-after (let ((da (or (plist-get obj :delay_after) (plist-get obj :delay-after))))
+                  (unless (or (null da) (eq da :null)) da))))
 
 (defun agent-shell-queue--serialize-json (items)
   "Serialize ITEMS to a JSON string."
@@ -249,7 +255,9 @@ Status is stored as a string; background as t or nil."
          (cons "response" (or (agent-shell-queue-item-response item) :null))
          (cons "outcome" (if-let* ((o (agent-shell-queue-item-outcome item))) (symbol-name o) :null))
          (cons "directory" (or (agent-shell-queue-item-directory item) :null))
-         (cons "executor" (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null)))
+         (cons "executor" (or (agent-shell-queue--executor-name (agent-shell-queue-item-executor item)) :null))
+         (cons "delay_before" (or (agent-shell-queue-item-delay-before item) :null))
+         (cons "delay_after" (or (agent-shell-queue-item-delay-after item) :null)))
    '(hash-table :test equal)))
 
 (defun agent-shell-queue--item-from-yaml (obj)
@@ -268,7 +276,11 @@ Status is stored as a string; background as t or nil."
    :directory (let ((d (map-elt obj "directory"))) (unless (eq d :null) d))
    :executor (let ((e (map-elt obj "executor")))
                (unless (or (null e) (eq e :null))
-                 (agent-shell-queue--executor-from-plist e)))))
+                 (agent-shell-queue--executor-from-plist e)))
+   :delay-before (let ((db (or (map-elt obj "delay_before") (map-elt obj "delay-before"))))
+                   (unless (or (null db) (eq db :null)) db))
+   :delay-after (let ((da (or (map-elt obj "delay_after") (map-elt obj "delay-after"))))
+                  (unless (or (null da) (eq da :null)) da))))
 
 (defun agent-shell-queue--serialize-yaml (items)
   "Serialize ITEMS to a YAML string via `yaml-encode'."

@@ -88,6 +88,28 @@ Defaults to the daemon name or system hostname.  Override in config:
 
 ;;; Configuration
 
+(defcustom agent-shell-queue-default-pause-delay 0
+  "Default pause duration in seconds after one task completes before the next task runs.
+Set to 0 or nil for no delay."
+  :type '(choice (const :tag "No delay" 0)
+                 (integer :tag "Seconds")
+                 (float :tag "Float seconds"))
+  :group 'agent-shell-queue)
+
+(defcustom agent-shell-queue-alert-on-pause-start nil
+  "When non-nil, send an alert notification when a task pause or delay starts.
+The notification message includes the duration of the pause."
+  :type 'boolean
+  :group 'agent-shell-queue)
+
+(defcustom agent-shell-queue-alert-before-pause-end nil
+  "Duration in seconds before a pause ends to send an alert notification.
+When non-nil and less than the total pause duration, an alert is sent when
+`(total-pause-duration - alert-before-pause-end)` seconds elapses."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Seconds")
+                 (float :tag "Float seconds"))
+  :group 'agent-shell-queue)
 (defvar agent-shell-queue-serialization-format 'plist
   "Format used to persist queue state to disk.
 One of:
@@ -476,7 +498,9 @@ nil BUF-OR-NIL (unassigned) always accepts any kind.  Returns t on success."
   ;; Re-enqueue tracking: reenqueued-from is the ID of the item this was
   ;; cloned from; reenqueued-as is a list of IDs created by re-enqueueing this.
   reenqueued-from
-  reenqueued-as)
+  reenqueued-as
+  (delay-before :alias :delay-before-dispatch)
+  (delay-after :alias :delay-after-complete))
 
 (defun agent-shell-queue--item-well-formed-p (item)
   "Return non-nil when ITEM has the minimum shape the queue UI requires.
@@ -598,6 +622,7 @@ Defined here so setf on item struct slots stays in the same file as the struct."
   "Add NAME to the session-paused list and mark its active items blocked.runner.
 Shared by `agent-shell-queue-session-pause' (single buffer), `agent-shell-queue-pause'
 \(batch, every known buffer), and `agent-shell-queue--on-interrupt'."
+  (agent-shell-queue--cancel-pause-timer name)
   (cl-pushnew name (agent-shell-queue-queue-session-paused agent-shell-queue--queue) :test #'equal)
   (seq-do (lambda (item)
             (when (eq (agent-shell-queue-item-status item) 'active)
@@ -938,15 +963,17 @@ the session queue is paused until the mode changes.")
     (seq-map #'string-trim-right))
    "\n"))
 
-(defun agent-shell-queue--make-item (prompt &optional background kind)
-  "Return a new active queue item for PROMPT."
+(defun agent-shell-queue--make-item (prompt &optional background kind delay-before delay-after)
+  "Return a new active queue item for PROMPT, optional BACKGROUND, KIND, and delays."
   (agent-shell-queue-item--make
    :id (agent-shell-queue--gen-id)
    :args (agent-shell-queue--clean-args prompt)
    :status 'active
    :kind (or kind 'prompt)
    :background background
-   :created (float-time)))
+   :created (float-time)
+   :delay-before delay-before
+   :delay-after delay-after))
 
 ;;; Local utilities
 
@@ -1663,6 +1690,67 @@ advances to the next field boundary before collecting."
                        (if truncated ", truncated" "")))
           (message "agent-shell-queue: no response captured for %s" id))))))
 
+(defvar agent-shell-queue--pause-timers nil
+  "Alist of (BUF-NAME . PLIST) for active pause/delay timers.")
+
+(defvar agent-shell-queue--pre-dispatch-waited-ids nil
+  "List of item IDs whose pre-dispatch delay has already completed.")
+
+(defun agent-shell-queue--format-duration (seconds)
+  "Format SECONDS as a human-readable string."
+  (if (integerp seconds)
+      (number-to-string seconds)
+    (format "%.1f" seconds)))
+
+(defun agent-shell-queue--cancel-pause-timer (buf-name)
+  "Cancel any active pause or delay timers for BUF-NAME."
+  (when-let* ((entry (assoc buf-name agent-shell-queue--pause-timers)))
+    (let ((plist (cdr entry)))
+      (when-let* ((t1 (plist-get plist :main-timer)))
+        (cancel-timer t1))
+      (when-let* ((t2 (plist-get plist :pre-end-timer)))
+        (cancel-timer t2)))
+    (setq agent-shell-queue--pause-timers
+          (seq-remove (lambda (elt) (equal (car elt) buf-name))
+                      agent-shell-queue--pause-timers))))
+
+(defun agent-shell-queue--start-pause-delay (buf-name duration reason on-complete-fn)
+  "Start a timed pause or delay of DURATION seconds for BUF-NAME with REASON.
+ON-COMPLETE-FN is called when the delay expires.
+Fires start alert if `agent-shell-queue-alert-on-pause-start' is non-nil.
+Fires pre-end alert if `agent-shell-queue-alert-before-pause-end' is set."
+  (agent-shell-queue--cancel-pause-timer buf-name)
+  (if (or (null duration) (<= duration 0))
+      (when on-complete-fn (funcall on-complete-fn))
+    (when agent-shell-queue-alert-on-pause-start
+      (alert (format "%s started (%s s)" (or reason "Pause") (agent-shell-queue--format-duration duration))
+             :title (format "Queue → %s" buf-name)
+             :category 'agent-shell-queue
+             :severity 'normal))
+    (let* ((alert-before agent-shell-queue-alert-before-pause-end)
+           (pre-end-timer
+            (when (and alert-before (numberp alert-before) (> alert-before 0) (< alert-before duration))
+              (let ((pre-end-delay (- duration alert-before)))
+                (run-with-timer pre-end-delay nil
+                                (lambda ()
+                                  (alert (format "%s ending in %s s"
+                                                 (or reason "Pause")
+                                                 (agent-shell-queue--format-duration alert-before))
+                                         :title (format "Queue → %s" buf-name)
+                                         :category 'agent-shell-queue
+                                         :severity 'normal))))))
+           (main-timer
+            (run-with-timer duration nil
+                            (lambda ()
+                              (agent-shell-queue--cancel-pause-timer buf-name)
+                              (when on-complete-fn
+                                (funcall on-complete-fn))))))
+      (push (cons buf-name (list :main-timer main-timer
+                                 :pre-end-timer pre-end-timer
+                                 :duration duration
+                                 :start-time (float-time)
+                                 :reason reason))
+            agent-shell-queue--pause-timers))))
 (defvar agent-shell-queue-item-done-hook nil
   "Hook run when a queue item transitions to done status.
 Each function is called with two arguments: BUF-NAME and ITEM.")
@@ -1680,8 +1768,9 @@ Each function is called with two arguments: BUF-NAME and ITEM.")
 Also handles `interjecting' items: captures the interjection response,
 stores it, and finalises the item.
 If any item is already aborted or incomplete, pauses the session queue.
-Only fires the empty-queue alert when at least one item was actually marked done."
-  (let (marked halted)
+Only fires the empty-queue alert when at least one item was actually marked done.
+Returns the list of items marked done."
+  (let (marked-items marked halted)
     (seq-do (lambda (item)
               (cond
                ((eq (agent-shell-queue-item-status item) 'running)
@@ -1689,6 +1778,7 @@ Only fires the empty-queue alert when at least one item was actually marked done
                   (agent-shell-queue--capture-response
                    (agent-shell-queue-item-id item) buf-name))
                 (agent-shell-queue--mark-item-done buf-name item 'success)
+                (push item marked-items)
                 (setq marked t))
                ((eq (agent-shell-queue-item-status item) 'interjecting)
                 (agent-shell-queue--capture-response
@@ -1702,6 +1792,7 @@ Only fires the empty-queue alert when at least one item was actually marked done
                 (setf (agent-shell-queue-queue-interjection-pending agent-shell-queue--queue) nil)
                 ;; Clear the session pause so the next item dispatches normally.
                 (agent-shell-queue--session-unpause-name buf-name)
+                (push item marked-items)
                 (setq marked t))
                ((memq (agent-shell-queue-item-status item) '(aborted incomplete))
                 (setq halted t))))
@@ -1711,8 +1802,8 @@ Only fires the empty-queue alert when at least one item was actually marked done
       (agent-shell-queue--save)
       (agent-shell-queue--refresh-buffer))
     (when marked
-      (agent-shell-queue--alert-if-empty))))
-
+      (agent-shell-queue--alert-if-empty))
+    (nreverse marked-items)))
 (defun agent-shell-queue--mark-running-incomplete (buf-name)
   "Mark any running items for BUF-NAME as incomplete and pause the session queue.
 Called when the shell buffer exits or is killed while a task was in flight.
@@ -1762,13 +1853,24 @@ The queue must be manually resumed via `agent-shell-queue-session-resume'."
 (defun agent-shell-queue--dispatch-if-ready (buf)
   "Send the next dispatchable item for BUF if all conditions are met."
   (when (and (buffer-live-p buf)
-             (not (member (buffer-name buf) (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
+             (not (member (buffer-name buf) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+             (not (assoc (buffer-name buf) agent-shell-queue--pause-timers)))
     (with-current-buffer buf
       (when-let* ((_ (not (shell-maker-busy)))
                   (buf-name (buffer-name))
                   (item (agent-shell-queue--next-dispatchable-item
                          (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))))
-        (agent-shell-queue-send-item (agent-shell-queue-item-id item))))))
+        (let ((delay-before (agent-shell-queue-item-delay-before item)))
+          (if (and delay-before (> delay-before 0)
+                   (not (member (agent-shell-queue-item-id item) agent-shell-queue--pre-dispatch-waited-ids)))
+              (progn
+                (push (agent-shell-queue-item-id item) agent-shell-queue--pre-dispatch-waited-ids)
+                (agent-shell-queue--start-pause-delay
+                 buf-name delay-before "Pre-dispatch delay"
+                 (lambda ()
+                   (when (buffer-live-p buf)
+                     (agent-shell-queue-send-item (agent-shell-queue-item-id item))))))
+            (agent-shell-queue-send-item (agent-shell-queue-item-id item))))))))
 
 (defun agent-shell-queue--send-next-for-buffer (buf)
   "Attempt to send the first active queue item for BUF.
@@ -1793,9 +1895,20 @@ Safe to call with a dead buffer — the subscription token is merely discarded."
 
 (defun agent-shell-queue--on-turn-complete (buf buf-name _event)
   "Handle a turn-complete event for BUF (named BUF-NAME)."
-  (agent-shell-queue--mark-running-done buf-name)
-  (agent-shell-queue--send-next-for-buffer buf))
-
+  (let* ((marked-items (agent-shell-queue--mark-running-done buf-name))
+         (last-item (car (last marked-items)))
+         (delay-after (if last-item
+                          (or (agent-shell-queue-item-delay-after last-item)
+                              agent-shell-queue-default-pause-delay
+                              0)
+                        (or agent-shell-queue-default-pause-delay 0))))
+    (if (and delay-after (> delay-after 0))
+        (agent-shell-queue--start-pause-delay
+         buf-name delay-after "Task pause"
+         (lambda ()
+           (when (buffer-live-p buf)
+             (agent-shell-queue--send-next-for-buffer buf))))
+      (agent-shell-queue--send-next-for-buffer buf))))
 (defun agent-shell-queue--on-clean-up (buf-name _event)
   "Handle a clean-up event for BUF-NAME (shell buffer killed).
 Running item → aborted with auto-resume task; active items → blocked.runner."
@@ -2150,6 +2263,9 @@ When non-nil, `<down>' and `<up>' move by item rather than by line.")
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-show-age-column)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-show-kind-column)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-multiline-format)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-default-pause-delay)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-on-pause-start)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-before-pause-end)
 
 (defun agent-shell-queue--scope-label (scope)
   "Return a short human-readable string for SCOPE."
@@ -2915,32 +3031,66 @@ for a live replacement."
     (agent-shell-queue-buffer-refresh)))
 
 ;;;###autoload
-(defun agent-shell-queue-insert-pause (&optional buf position)
+(defun agent-shell-queue-insert-pause (&optional buf position duration)
   "Insert a pause item into BUF's queue, optionally at 1-based POSITION.
-When called interactively, prompts for the target buffer."
+If DURATION is specified (number of seconds), the pause auto-resumes after DURATION seconds.
+When called interactively, prompts for target buffer (and duration with prefix arg)."
   (interactive
    (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
              (agent-shell-queue--pick-buffer "Insert pause for: "))
-         nil))
+         nil
+         (when current-prefix-arg
+           (read-number "Pause duration in seconds: "))))
   (when-let* ((_ buf)
-               (item (progn
-                       (agent-shell-queue--ensure-loaded)
-                       (agent-shell-queue-item--make
-                        :id (agent-shell-queue--gen-id)
-                        :args "[PAUSE — waiting for human]"
-                        :status 'active
-                        :kind 'pause
-                        :created (float-time))))
-               (id (agent-shell-queue-item-id item))
-               (buf-name (buffer-name buf)))
-      (agent-shell-queue--add-item-to-bucket buf-name item)
-      (when (and position (> position 0))
-        (dotimes (_ (max 0 (- (length (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
-                              position)))
-          (agent-shell-queue--move id -1)))
-      (agent-shell-queue--save)
-      (agent-shell-queue--refresh-buffer)
-      (message "Pause inserted into %s queue" buf-name)))
+              (item (progn
+                      (agent-shell-queue--ensure-loaded)
+                      (agent-shell-queue-item--make
+                       :id (agent-shell-queue--gen-id)
+                       :args (if duration
+                                 (format "[PAUSE — %s s]" (agent-shell-queue--format-duration duration))
+                               "[PAUSE — waiting for human]")
+                       :status 'active
+                       :kind 'pause
+                       :delay-after duration
+                       :created (float-time))))
+              (id (agent-shell-queue-item-id item))
+              (buf-name (buffer-name buf)))
+    (agent-shell-queue--add-item-to-bucket buf-name item)
+    (when (and position (> position 0))
+      (dotimes (_ (max 0 (- (length (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+                            position)))
+        (agent-shell-queue--move id -1)))
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)
+    (message "Pause%s inserted into %s queue"
+             (if duration (format " (%s s)" (agent-shell-queue--format-duration duration)) "")
+             buf-name)))
+
+(defun agent-shell-queue-set-item-delay-before (id delay)
+  "Set pre-dispatch DELAY (in seconds) for queue item ID."
+  (interactive
+   (let* ((item (agent-shell-queue-find-item "Set delay-before for item: "))
+          (id (agent-shell-queue-item-id item))
+          (cur (or (agent-shell-queue-item-delay-before item) 0))
+          (val (read-number (format "Delay before dispatch (seconds, current %s): " cur) cur)))
+     (list id (if (<= val 0) nil val))))
+  (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
+    (setf (agent-shell-queue-item-delay-before item) delay)
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)))
+
+(defun agent-shell-queue-set-item-delay-after (id delay)
+  "Set post-completion DELAY (in seconds) for queue item ID."
+  (interactive
+   (let* ((item (agent-shell-queue-find-item "Set delay-after for item: "))
+          (id (agent-shell-queue-item-id item))
+          (cur (or (agent-shell-queue-item-delay-after item) 0))
+          (val (read-number (format "Delay after complete (seconds, current %s): " cur) cur)))
+     (list id (if (<= val 0) nil val))))
+  (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
+    (setf (agent-shell-queue-item-delay-after item) delay)
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)))
 
 ;;;###autoload
 (defun agent-shell-queue-insert-clear-context (prompt &optional buf)
@@ -4829,18 +4979,24 @@ C-c C-c and C-c C-k are bound in the new mode's local map."
   (agent-shell-queue--complete-item item buf-name))
 
 (defun agent-shell-queue--dispatch-pause-compact (item buf-name)
-  "Dispatch a pause or compact ITEM: pause the queue and alert."
+  "Dispatch a pause or compact ITEM: pause the queue or delay and alert."
   (cl-pushnew (cons buf-name (agent-shell-queue-item-id item))
               agent-shell-queue--compact-running :test #'equal)
-  (agent-shell-queue--pause-and-save buf-name)
-  (alert (if (eq (agent-shell-queue-item-kind item) 'pause)
-             (format "Queue for %s paused — human action required" buf-name)
-           (format "Manual work required: %s" (agent-shell-queue-item-args item)))
-         :title (format "Queue → %s" buf-name)
-         :category 'agent-shell-queue
-         :severity 'high
-         :persistent t))
-
+  (let ((duration (or (agent-shell-queue-item-delay-after item)
+                      (agent-shell-queue-item-delay-before item))))
+    (if (and duration (> duration 0))
+        (agent-shell-queue--start-pause-delay
+         buf-name duration "Pause item"
+         (lambda ()
+           (agent-shell-queue-mark-done (agent-shell-queue-item-id item))))
+      (agent-shell-queue--pause-and-save buf-name)
+      (alert (if (eq (agent-shell-queue-item-kind item) 'pause)
+                 (format "Queue for %s paused — human action required" buf-name)
+               (format "Manual work required: %s" (agent-shell-queue-item-args item)))
+             :title (format "Queue → %s" buf-name)
+             :category 'agent-shell-queue
+             :severity 'high
+             :persistent t))))
 (defun agent-shell-queue--dispatch-wait (item _buf-name)
   "Dispatch a wait ITEM: arm a timer to fire at the target time."
   (let* ((id (agent-shell-queue-item-id item))
@@ -5135,10 +5291,11 @@ Works in both capture and edit buffers."
     (insert (with-current-buffer buf (buffer-string)))))
 
 ;;;###autoload
-(defun agent-shell-queue-enqueue (prompt &optional buf background)
+(defun agent-shell-queue-enqueue (prompt &optional buf background delay-before delay-after)
   "Queue PROMPT for BUF, optionally flagged for BACKGROUND sub-agent execution.
 Send immediately if BUF is idle, otherwise store in the queue.
-When called interactively, opens a capture buffer for composing the prompt."
+When called interactively, opens a capture buffer for composing the prompt.
+Optional DELAY-BEFORE and DELAY-AFTER specify per-task pre-dispatch and post-completion delays."
   (interactive
    (let ((target (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
                      (agent-shell-queue--pick-buffer "Enqueue to: "))))
@@ -5148,16 +5305,17 @@ When called interactively, opens a capture buffer for composing the prompt."
                         (or buf
                             (and (derived-mode-p 'agent-shell-mode) (current-buffer))
                             (agent-shell-queue--pick-buffer "Enqueue to: ")))))
-    (with-current-buffer buf
-      (if (shell-maker-busy)
-          (agent-shell-queue-add prompt buf background)
-        (agent-shell-insert
-	 :text (if background
-                   (concat (agent-shell-queue--get-background-prefix buf) prompt)
-                 prompt)
-         :submit t
-	 :no-focus t)))))
-
+    (let* ((buf-name (buffer-name buf))
+           (item (agent-shell-queue--make-item prompt background 'prompt delay-before delay-after)))
+      (with-current-buffer buf
+        (if (shell-maker-busy)
+            (agent-shell-queue-add prompt buf background)
+          (agent-shell-insert
+           :text (if background
+                     (concat (agent-shell-queue--get-background-prefix buf) prompt)
+                   prompt)
+           :submit t
+           :no-focus t))))))
 ;;;###autoload
 (defun agent-shell-queue-enqueue-clear (&optional buf)
   "Enqueue a clear command for BUF.
