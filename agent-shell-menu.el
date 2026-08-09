@@ -702,39 +702,42 @@ buffer-local variant that only changes the default for this session."
                 (when (map-elt state :collapsed) (cl-incf (cdr entry)))
                 (setf (map-elt by-cat cat) entry)))
             (agent-shell-menu--blocks-in-buffer))
-    (setf (map-elt table "+ expand all") "show every collapseable block")
-    (setf (map-elt table "+ collapse all") "hide every collapseable block")
+    (setf (map-elt table "+ expand all") "select to expand every collapseable block")
+    (setf (map-elt table "+ collapse all") "select to collapse every collapseable block")
     (setf (map-elt table "~ set all: collapse by default")
           (if (and (not (symbol-value 'agent-shell-thought-process-expand-by-default))
                    (not (symbol-value 'agent-shell-tool-use-expand-by-default))
                    (not (symbol-value 'agent-shell-user-message-expand-by-default)))
-              "already collapsed by default"
-            "set thinking, tool calls, and user messages to collapse by default"))
+              "currently all collapsed by default → no change"
+            "currently mixed/expanded → select to collapse all block types by default"))
     (setf (map-elt table "~ set all: expand by default")
           (if (and (symbol-value 'agent-shell-thought-process-expand-by-default)
                    (symbol-value 'agent-shell-tool-use-expand-by-default)
                    (symbol-value 'agent-shell-user-message-expand-by-default))
-              "already expanded by default"
-            "set thinking, tool calls, and user messages to expand by default"))
+              "currently all expanded by default → no change"
+            "currently mixed/collapsed → select to expand all block types by default"))
     (setf (map-elt table "* this session: expand by default")
           (if (and (local-variable-p 'agent-shell-thought-process-expand-by-default)
                    (local-variable-p 'agent-shell-tool-use-expand-by-default)
                    (local-variable-p 'agent-shell-user-message-expand-by-default))
-              "already set for this session only"
-            "expand everything now, and default new blocks to expanded in this buffer only"))
+              "currently buffer-local → already set for this session"
+            "currently global defaults → select to expand all now and default to expanded in this session only"))
     (seq-do (lambda (cat)
               (let* ((entry (map-elt by-cat cat))
                      (total (car entry))
                      (n-collapsed (cdr entry))
-                     (state-str (cond ((zerop n-collapsed) "all expanded")
-                                      ((= n-collapsed total) "all collapsed")
-                                      (t (format "%d/%d collapsed" n-collapsed total)))))
+                     (state-and-action
+                      (cond ((zerop n-collapsed) "currently all expanded → select to collapse")
+                            ((= n-collapsed total) "currently all collapsed → select to expand")
+                            (t (format "currently %d/%d collapsed → select to collapse all" n-collapsed total)))))
                 (setf (map-elt table cat) (format "%d block%s · %s"
-                                                  total (if (= total 1) "" "s") state-str))))
+                                                  total (if (= total 1) "" "s") state-and-action))))
             (sort (map-keys by-cat) #'string<))
     (seq-do (lambda (toggle)
               (setf (map-elt table (car toggle))
-                    (if (symbol-value (cdr toggle)) "expanded by default" "collapsed by default")))
+                    (if (symbol-value (cdr toggle))
+                        "currently expanded by default → select to collapse"
+                      "currently collapsed by default → select to expand")))
             toggles)
     (let ((choice (annotated-completing-read table
 					     :prompt "agent-shell collapse: "

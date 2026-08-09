@@ -658,4 +658,28 @@ with no intermediate name-to-id lookup."
       (setq map (keymap-parent map)))
     (should (eq map help-mode-map))))
 
+
+(ert-deftest agent-shell-menu/select-collapse-annotations-state-and-effect ()
+  "Annotations in agent-shell-menu-select-collapse explicitly show current state and effect."
+  (let ((buf (generate-new-buffer "*mock-agent-shell-collapse*"))
+        (agent-shell-thought-process-expand-by-default t)
+        (agent-shell-tool-use-expand-by-default nil)
+        (captured-table nil))
+    (unwind-protect
+        (with-current-buffer buf
+          (setq major-mode 'agent-shell-mode)
+          (cl-letf (((symbol-function 'annotated-completing-read)
+                     (lambda (table &rest _args)
+                       (setq captured-table table)
+                       "+ expand all")))
+            (agent-shell-menu-select-collapse)
+            (should (equal "currently expanded by default → select to collapse"
+                           (gethash "~ thinking: expand-by-default" captured-table)))
+            (should (equal "currently collapsed by default → select to expand"
+                           (gethash "~ tool call: expand-by-default" captured-table)))
+            (should (equal "select to expand every collapseable block"
+                           (gethash "+ expand all" captured-table)))
+            (should (equal "select to collapse every collapseable block"
+                           (gethash "+ collapse all" captured-table)))))
+      (kill-buffer buf))))
 (provide 'test-agent-shell-menu)
