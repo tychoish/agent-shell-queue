@@ -542,7 +542,7 @@ session cannot be resumed and must be re-dispatched."
            (let ((msg (error-message-string err)))
              (agent-shell-queue--log-write 'load msg)
              (message "agent-shell-queue: ignoring unreadable state: %s" msg)
-             (alert (format "Queue state could not be loaded from %s: %s"
+             (agent-shell-queue--alert (format "Queue state could not be loaded from %s: %s"
                             file msg)
                     :title "agent-shell-queue: load failed"
                     :severity 'high
@@ -563,7 +563,7 @@ session cannot be resumed and must be re-dispatched."
 Detects any mismatch between the persisted vector length and the current struct
 definition by comparing against a freshly-constructed instance.  This handles
 any past or future field addition without per-field migration logic.
-Preserves `session-paused' from the old value when readable."
+Preserves `session-paused' and `halted-sessions' from the old value when readable."
   (when (and (agent-shell-queue-queue-p agent-shell-queue--queue)
              (/= (length agent-shell-queue--queue)
                  (length (agent-shell-queue-queue--make))))
@@ -571,7 +571,10 @@ Preserves `session-paused' from the old value when readable."
           (agent-shell-queue-queue--make
            :session-paused (condition-case nil
                              (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
-                             (error nil))))))
+                             (error nil))
+           :halted-sessions (condition-case nil
+                              (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)
+                              (error nil))))))
 
 ;;; Backup restore
 

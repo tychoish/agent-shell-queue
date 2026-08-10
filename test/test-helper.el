@@ -10,6 +10,11 @@
        (test-dir (file-name-directory test-file))
        (root (file-name-directory (directory-file-name test-dir))))
   (add-to-list 'load-path root))
+;; Suppress system desktop notifications during test execution
+(require 'alert nil t)
+(when (boundp 'alert-default-style)
+  (setq alert-default-style 'ignore))
+
 
 (defun agent-shell-test/suffix-plist (suffix)
   "Extract the plist from a parsed transient suffix spec SUFFIX.

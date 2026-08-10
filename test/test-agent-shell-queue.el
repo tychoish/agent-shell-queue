@@ -4305,4 +4305,138 @@ leaving sessions that were already individually paused beforehand untouched."
              (should (string-match-p "Pause item started (15 s)" (caar alerts)))
              (agent-shell-queue--cancel-pause-timer " *asq-test-pause-buf*")))
        (kill-buffer buf)))))
+(ert-deftest agent-shell-queue/alert-delegates-and-intercepts-errors ()
+  "Test `agent-shell-queue--alert` delegates to `alert` and intercepts errors."
+  (let (captured-msg captured-args)
+    (cl-letf (((symbol-function 'alert)
+               (lambda (msg &rest args)
+                 (setq captured-msg msg
+                       captured-args args))))
+      (agent-shell-queue--alert "Test message" :title "Test title" :severity 'low)
+      (should (equal "Test message" captured-msg))
+      (should (equal '(:title "Test title" :severity low) captured-args))))
+  ;; Test error interception
+  (cl-letf (((symbol-function 'alert)
+             (lambda (&rest _)
+               (error "Simulated notification backend failure"))))
+    ;; Must not signal error
+    (should-not (condition-case err
+                    (progn
+                      (agent-shell-queue--alert "Failing alert")
+                      nil)
+                  (error t)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Directory Queues & Halted-on-Abort Tests
+
+(ert-deftest agent-shell-queue/dir-queue-bucket-helpers ()
+  "Test bucket helpers for dir:<path> directory queues."
+  (let ((dir "/tmp/test-project/"))
+    (should (agent-shell-queue--dir-bucket-p "dir:/tmp/test-project/"))
+    (should-not (agent-shell-queue--dir-bucket-p "*agent-shell*"))
+    (should (equal "/tmp/test-project/" (agent-shell-queue--dir-from-bucket "dir:/tmp/test-project/")))
+    (should (equal (concat "dir:" (file-name-as-directory (expand-file-name "/tmp/test-project")))
+                   (agent-shell-queue--bucket-for-dir "/tmp/test-project")))))
+
+(ert-deftest agent-shell-queue/dir-queue-add-directory ()
+  "Test adding an item to a directory queue."
+  (agent-shell-queue-test/isolate-no-sub
+   (let* ((item (agent-shell-queue-add-directory "Do work in dir" "/tmp/my-proj")))
+     (should item)
+     (should (equal (agent-shell-queue--canonicalize-dir "/tmp/my-proj")
+                    (agent-shell-queue-item-directory item)))
+     (let ((bucket (agent-shell-queue--bucket-for-dir "/tmp/my-proj")))
+       (should (assoc bucket (agent-shell-queue-store-items agent-shell-queue--store)))))))
+
+(ert-deftest agent-shell-queue/dir-queue-pick-shell-and-naming ()
+  "Test picking shell for directory queue creates a shell named with item-id."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((created-buf nil))
+     (cl-letf (((symbol-function 'agent-shell-new-shell)
+                (lambda ()
+                  (setq created-buf (get-buffer-create "*agent-shell: test-dir*"))
+                  (with-current-buffer created-buf
+                    (setq default-directory "/tmp/test-dir/"))
+                  created-buf)))
+       (let ((buf (agent-shell-queue--pick-shell-for-directory "/tmp/test-dir/" "q1234")))
+         (should buf)
+         (should (equal "*agent-shell: test-dir*-q1234" (buffer-name buf)))
+         (kill-buffer buf))))))
+
+(ert-deftest agent-shell-queue/halted-on-abort-state ()
+  "Test marking, checking, and clearing halted-on-abort status."
+  (agent-shell-queue-test/isolate-no-sub
+   (agent-shell-queue--mark-halted-on-abort "buf-a")
+   (should (agent-shell-queue--halted-on-abort-p "buf-a"))
+   (agent-shell-queue--clear-halted-on-abort "buf-a")
+   (should-not (agent-shell-queue--halted-on-abort-p "buf-a"))))
+
+(ert-deftest agent-shell-queue/on-interrupt-halts-dispatch ()
+  "Test that on-interrupt sets halted-on-abort and blocks auto-dispatch."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((buf (get-buffer-create "*asq-interrupt-buf*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf
+             (agent-shell-mode)
+             (setq default-directory "/tmp/asq-int/"))
+           (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                 (list (list (buffer-name buf)
+                             (agent-shell-queue-test/make-item "q-int" "prompt" 'active nil))))
+           (with-current-buffer buf
+             (agent-shell-queue--on-interrupt))
+           (should (agent-shell-queue--halted-on-abort-p (buffer-name buf)))
+           ;; dispatch-if-ready must refuse to send while halted
+           (cl-letf (((symbol-function 'agent-shell-queue-send-item)
+                      (lambda (_) (error "Should not dispatch while halted"))))
+             (should-not (agent-shell-queue--dispatch-if-ready buf))))
+       (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/recovery-criteria-verification ()
+  "Test the 3 recovery criteria (uninterrupted, no question, not in plan mode)."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((buf (get-buffer-create "*asq-recovery-buf*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf
+             (agent-shell-mode))
+           ;; Question detection
+           (should (agent-shell-queue--response-has-question-p "What next?"))
+           (should (agent-shell-queue--response-has-question-p "Shall I continue?\n"))
+           (should-not (agent-shell-queue--response-has-question-p "Done with task."))
+           ;; Clean item vs aborted item
+           (let ((clean-item (agent-shell-queue-test/make-item "q1" "p" 'done nil))
+                 (aborted-item (agent-shell-queue-test/make-item "q2" "p" 'done nil)))
+             (setf (agent-shell-queue-item-outcome aborted-item) 'aborted)
+             (should (agent-shell-queue--verify-recovery buf clean-item "Done successfully."))
+             (should-not (agent-shell-queue--verify-recovery buf aborted-item "Done successfully."))
+             (should-not (agent-shell-queue--verify-recovery buf clean-item "Should I proceed?"))))
+       (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/recovery-clears-halted-on-abort ()
+  "Test turn complete clears halted-on-abort when recovery criteria pass."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((buf (get-buffer-create "*asq-rec-complete-buf*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf
+             (agent-shell-mode))
+           (agent-shell-queue--mark-halted-on-abort (buffer-name buf))
+           (should (agent-shell-queue--halted-on-abort-p (buffer-name buf)))
+           (let ((item (agent-shell-queue-test/make-item "q-rec" "p" 'running nil)))
+             (setf (agent-shell-queue-item-response item) "All steps completed successfully.")
+             (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                   (list (list (buffer-name buf) item)))
+             (cl-letf (((symbol-function 'agent-shell-queue--send-next-for-buffer) #'ignore))
+               (agent-shell-queue--on-turn-complete buf (buffer-name buf) nil))
+             (should-not (agent-shell-queue--halted-on-abort-p (buffer-name buf)))))
+       (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/persistence-halted-sessions-and-dir-buckets ()
+  "Test queue struct migration preserves halted-sessions."
+  (agent-shell-queue-test/isolate-no-sub
+   (setf (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue) '("dir:/tmp/test/" "buf-halted"))
+   (should (member "dir:/tmp/test/" (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)))
+   (should (member "buf-halted" (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)))))
+
 ;;; test-agent-shell-queue.el ends here
