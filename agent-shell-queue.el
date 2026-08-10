@@ -85,6 +85,22 @@
   "Return the directory queue bucket string for DIR."
   (concat agent-shell-queue--dir-prefix (agent-shell-queue--canonicalize-dir dir)))
 
+(defun agent-shell-queue--pick-shell-for-directory (dir item-id)
+  "Create an `agent-shell' buffer for DIR associated with ITEM-ID.
+Creates a new shell in DIR via `agent-shell-new-shell' and appends `-ITEM-ID'
+to its buffer name."
+  (let* ((canon-dir (agent-shell-queue--canonicalize-dir dir))
+         (before-bufs (agent-shell-buffers))
+         (default-directory canon-dir)
+         (buf (agent-shell-new-shell)))
+    (unless (and (bufferp buf) (buffer-live-p buf))
+      (setq buf (seq-find (lambda (b) (not (memq b before-bufs))) (agent-shell-buffers))))
+    (when (and buf (buffer-live-p buf))
+      (with-current-buffer buf
+        (when item-id
+          (rename-buffer (concat (buffer-name buf) "-" item-id) t))))
+    buf))
+
 (declare-function shell-maker-busy "shell-maker")
 (declare-function markdown-mode "markdown-mode")
 (declare-function yaml-encode "yaml")
@@ -705,6 +721,23 @@ Shared by `agent-shell-queue-session-pause' (single buffer), `agent-shell-queue-
              (when (eq (agent-shell-queue-item-status item) 'blocked.runner)
                (setf (agent-shell-queue-item-status item) 'active)))
            (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store)))))
+;;;###autoload
+(defun agent-shell-queue-pause ()
+  "Pause dispatch for every known session (batch `agent-shell-queue-session-pause')."
+  (interactive)
+  (with-agent-shell-queue
+    (seq-do (lambda (bucket)
+              (agent-shell-queue--session-pause-name (car bucket)))
+            (agent-shell-queue-store-items agent-shell-queue--store))
+    (message "agent-shell-queue: all sessions PAUSED")))
+
+;;;###autoload
+(defun agent-shell-queue-resume ()
+  "Resume dispatch for every known session.
+Alias for `agent-shell-queue-unpause-all-sessions'."
+  (interactive)
+  (agent-shell-queue-unpause-all-sessions))
+
  (defun agent-shell-queue-unpause-all-sessions ()
    "Clear the per-session pause list and halted-on-abort list."
    (interactive)

@@ -266,8 +266,8 @@ POSITION is buffer position of the button's start."
 
 (defun agent-shell-menu--permission-action-at (position)
   "Return the RET command bound on the permission button at POSITION."
-  (when-let ((keymap (get-text-property position 'keymap)))
-    (lookup-key keymap (kbd "RET"))))
+  (when-let* ((map (get-text-property position 'keymap)))
+    (lookup-key map (kbd "RET"))))
 
 (defun agent-shell-menu--permission-button-action (pos)
   "Return an interactive command that activates the permission button at POS."
