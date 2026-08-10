@@ -4377,9 +4377,9 @@ leaving sessions that were already individually paused beforehand untouched."
    (let ((buf (get-buffer-create "*asq-interrupt-buf*")))
      (unwind-protect
          (progn
-           (with-current-buffer buf
-             (agent-shell-mode)
-             (setq default-directory "/tmp/asq-int/"))
+          (with-current-buffer buf
+            (setq major-mode 'agent-shell-mode)
+            (setq default-directory "/tmp/asq-int/"))
            (setf (agent-shell-queue-store-items agent-shell-queue--store)
                  (list (list (buffer-name buf)
                              (agent-shell-queue-test/make-item "q-int" "prompt" 'active nil))))
@@ -4398,8 +4398,8 @@ leaving sessions that were already individually paused beforehand untouched."
    (let ((buf (get-buffer-create "*asq-recovery-buf*")))
      (unwind-protect
          (progn
-           (with-current-buffer buf
-             (agent-shell-mode))
+          (with-current-buffer buf
+            (setq major-mode 'agent-shell-mode))
            ;; Question detection
            (should (agent-shell-queue--response-has-question-p "What next?"))
            (should (agent-shell-queue--response-has-question-p "Shall I continue?\n"))
@@ -4419,8 +4419,8 @@ leaving sessions that were already individually paused beforehand untouched."
    (let ((buf (get-buffer-create "*asq-rec-complete-buf*")))
      (unwind-protect
          (progn
-           (with-current-buffer buf
-             (agent-shell-mode))
+          (with-current-buffer buf
+            (setq major-mode 'agent-shell-mode))
            (agent-shell-queue--mark-halted-on-abort (buffer-name buf))
            (should (agent-shell-queue--halted-on-abort-p (buffer-name buf)))
            (let ((item (agent-shell-queue-test/make-item "q-rec" "p" 'running nil)))
