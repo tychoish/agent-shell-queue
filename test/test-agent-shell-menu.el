@@ -1,4 +1,4 @@
-;;; test-agent-shell-menu.el --- ERT tests for agent-shell-menu -*- lexical-binding: t -*-
+;;; test-agent-shell-menu.el --- ERT tests for agent-shell-menu -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Run inside a live Emacs session with full config loaded:
 ;;   M-x ert RET t RET

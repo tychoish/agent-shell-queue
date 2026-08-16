@@ -1,4 +1,4 @@
-;;; test-agent-shell-queue-types.el --- Tests for item-type registry -*- lexical-binding: t -*-
+;;; test-agent-shell-queue-types.el --- Tests for item-type registry -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Tests for the agent-shell-queue-item-type registry, buffer predicates,
 ;; validation, dispatch functions, and enqueue helpers added in the

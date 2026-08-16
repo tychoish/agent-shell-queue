@@ -1,4 +1,4 @@
-;;; test-agent-shell-queue-persistence.el --- Round-trip persistence tests -*- lexical-binding: t -*-
+;;; test-agent-shell-queue-persistence.el --- Round-trip persistence tests -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Tests that queue state survives save/load cycles as it would between
 ;; Emacs sessions.  Items are never auto-dispatched here — tests call

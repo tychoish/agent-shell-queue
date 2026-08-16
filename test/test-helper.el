@@ -1,4 +1,4 @@
-;;; test-helper.el --- ERT test infrastructure -*- lexical-binding: t; -*-
+;;; test-helper.el --- ERT test infrastructure -*- lexical-binding: t; ; no-byte-compile: t; -*-
 
 ;;; Commentary:
 ;; Adds the package root to load-path for batch test runs and defines

@@ -1,4 +1,4 @@
-;;; test-agent-shell-queue.el --- ERT tests for agent-shell-queue -*- lexical-binding: t -*-
+;;; test-agent-shell-queue.el --- ERT tests for agent-shell-queue -*- lexical-binding: t; no-byte-compile: t; -*-
 
 ;; Run inside a live Emacs session with the full config loaded:
 ;;   M-x ert RET t RET
