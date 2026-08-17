@@ -12,7 +12,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: silex/emacs:${{ matrix.emacs_version }}-ci-cask
+    container: silex/emacs:${{ matrix.emacs_version }}-ci
     timeout-minutes: 5
     permissions:
       contents: read
@@ -28,5 +28,4 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - run: cask install
-      - run: cask exec ert-runner test/test-*.el
+      - run: emacs --script run-tests.el

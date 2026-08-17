@@ -117,11 +117,11 @@ build the property drawer so org manages drawer formatting."
 
 (defun agent-shell-queue-org--section-of (hl)
   "Return the section element that is a direct child of HL, or nil."
-  (--first (eq (org-element-type it) 'section) (org-element-contents hl)))
+  (seq-find (lambda (el) (eq (org-element-type el) 'section)) (org-element-contents hl)))
 
 (defun agent-shell-queue-org--drawer-of (section)
   "Return the property-drawer element that is a direct child of SECTION, or nil."
-  (--first (eq (org-element-type it) 'property-drawer) (org-element-contents section)))
+  (seq-find (lambda (el) (eq (org-element-type el) 'property-drawer)) (org-element-contents section)))
 
 (defun agent-shell-queue-org--props-from-element (hl)
   "Return a string-keyed alist of property drawer entries from headline HL.
@@ -189,12 +189,12 @@ string-in-paragraph-contents issues during tree walking."
   (with-temp-buffer
     (insert str)
     (org-mode)
-    (let ((tree (org-element-parse-buffer)))
-      (-map (lambda (bucket-hl)
-              (cons (string-trim (org-element-property :raw-value bucket-hl))
-                    (-map #'agent-shell-queue-org--item-from-element
-                          (agent-shell-queue-org--headlines-of bucket-hl))))
-            (agent-shell-queue-org--headlines-of tree)))))
+    (thread-last (org-element-parse-buffer)
+		 (agent-shell-queue-org--headlines-of)
+		 (seq-map (lambda (bucket-hl)
+			    (cons (string-trim (org-element-property :raw-value bucket-hl))
+				  (mapcar #'agent-shell-queue-org--item-from-element
+					  (agent-shell-queue-org--headlines-of bucket-hl))))))))
 
 ;;; Registration
 
