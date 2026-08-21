@@ -23,6 +23,7 @@ Nothing auto-dispatches here since no idle timer or turn-complete
 subscription runs; tests call `agent-shell-queue-send-item' explicitly."
   (declare (indent 0))
   `(let* ((tmp (make-temp-file "asq-persist-" nil ".el"))
+          (agent-shell-queue-serialization-format 'plist)
           (agent-shell-queue--store
            (agent-shell-queue--make-store :items nil :format 'plist :file tmp))
           (agent-shell-queue-state-file-function (lambda () tmp))
@@ -504,6 +505,62 @@ When MTIME is non-nil, set the file modification time to that value."
         ;; --save writes a new backup then prunes — count should stay at 2.
         (agent-shell-queue--save)
         (should (= 2 (agent-shell-queue-test/backup-count dir ".el")))))))
+
+(ert-deftest agent-shell-queue/persist-format-migration-plist-to-json ()
+  "Migrating state persistence format from plist to json preserves all item fields."
+  (agent-shell-queue-test/with-persist-file
+    (let* ((item1 (agent-shell-queue-test/persist-item "q01" "first task" nil 'active))
+           (item2 (agent-shell-queue-test/persist-item "q02" "second task" nil 'done))
+           (_ (setf (agent-shell-queue-item-response item2) "result output"))
+           (_ (setf (agent-shell-queue-item-outcome item2) 'success))
+           (_ (setf (agent-shell-queue-item-background item1) t)))
+      (setf (agent-shell-queue-store-items agent-shell-queue--store)
+            (list (list "*test-buf*" item1 item2)))
+      (setq agent-shell-queue-serialization-format 'plist)
+      (agent-shell-queue--save)
+      ;; Switch serialization format to json and save as JSON
+      (setq agent-shell-queue-serialization-format 'json)
+      (agent-shell-queue--save)
+      ;; Reload from JSON state file
+      (setf (agent-shell-queue-store-items agent-shell-queue--store) nil)
+      (agent-shell-queue--load)
+      (let* ((loaded-items (seq-mapcat #'cdr (agent-shell-queue-store-items agent-shell-queue--store)))
+             (l1 (seq-find (lambda (it) (equal (agent-shell-queue-item-id it) "q01")) loaded-items))
+             (l2 (seq-find (lambda (it) (equal (agent-shell-queue-item-id it) "q02")) loaded-items)))
+        (should l1)
+        (should (equal "first task" (agent-shell-queue-item-args l1)))
+        (should (eq t (agent-shell-queue-item-background l1)))
+        (should l2)
+        (should (equal "second task" (agent-shell-queue-item-args l2)))
+        (should (equal "result output" (agent-shell-queue-item-response l2)))
+        (should (eq 'success (agent-shell-queue-item-outcome l2)))))))
+
+(ert-deftest agent-shell-queue/persist-safe-save-backup-and-restore ()
+  "Safe-save writes backup files that can be loaded to restore queue state."
+  (agent-shell-queue-test/with-persist-file
+    (agent-shell-queue-test/with-backup-dir
+      (let ((agent-shell-queue-safe-save t)
+            (agent-shell-queue-safe-save-directory dir)
+            (agent-shell-queue-safe-save-format 'plist)
+            (agent-shell-queue-safe-save-max-files 5))
+        (setf (agent-shell-queue-store-items agent-shell-queue--store)
+              (list (list "*test-buf*"
+                          (agent-shell-queue-test/persist-item "q-backup" "backup prompt" nil 'active))))
+        (agent-shell-queue--save)
+        ;; Backup file was created in dir
+        (let ((backups (directory-files dir t "\\`agent-shell-queue-archive-.*\\.el\\'")))
+          (should (= 1 (length backups)))
+          ;; Verify backup content can be deserialized
+          (let* ((backup-content (with-temp-buffer
+                                   (insert-file-contents (car backups))
+                                   (buffer-string)))
+                 (deserialized (agent-shell-queue-deserialize
+                                (agent-shell-queue--current-store)
+                                backup-content)))
+            (should (assoc "*test-buf*" deserialized))
+            (let ((item (car (cdr (assoc "*test-buf*" deserialized)))))
+              (should (equal "q-backup" (agent-shell-queue-item-id item)))
+              (should (equal "backup prompt" (agent-shell-queue-item-args item))))))))))
 
 (provide 'test-agent-shell-queue-persistence)
 ;;; test-agent-shell-queue-persistence.el ends here

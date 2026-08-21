@@ -473,7 +473,7 @@
                       (lambda (_ b bg kind)
                         (setq created-kind kind)))
                      ((symbol-function 'agent-shell-queue--make-item)
-                      (lambda (args bg kind)
+                      (lambda (args bg kind &rest _)
                         (setq created-kind kind)
                         (agent-shell-queue-item--make
                          :id "q-cc-1" :args args :status 'active

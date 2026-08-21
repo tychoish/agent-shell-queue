@@ -1,5 +1,4 @@
 #!/usr/bin/env -S emacs --script
-
 ;;; run-tests --- Run the agent-shell-queue ERT test suite -*- lexical-binding: t; -*-
 
 ;;; Commentary:

@@ -5,7 +5,7 @@
 ;; Keywords: tools, agent-shell
 ;; Version: 0.1.0
 ;; URL: https://github.com/tychoish/agent-shell-queue
-;; Package-Requires: ((emacs "29.1") (transient "0.4") (agent-shell "0.1") (annotated-completing-read "0.1"))
+;; Package-Requires: ((emacs "29.1") (transient "0.4") (agent-shell "0.1") (annotated-completing-read "0.1") (agent-shell-queue "0.1.0"))
 
 ;; This file is not part of GNU Emacs
 
@@ -180,7 +180,8 @@ and time since last activity — a superset of what
 
 ;;;###autoload
 (defun agent-shell-menu--switch-buffer ()
-  "Switch to an agent-shell buffer with icon, status, title, cwd, and age annotations.
+  "Switch to an agent-shell buffer with annotations.
+Annotations include icon, status, title, cwd, and age.
 Installed as `:override' advice on `agent-shell-switch-buffer' so the
 enhanced picker is used under the original, upstream-compatible name
 instead of introducing a second public entry point.  Respects
@@ -199,12 +200,12 @@ instead of introducing a second public entry point.  Respects
 
 ;;;###autoload
 (defun agent-shell-menu-select-session-mode (&optional on-success)
-  "Select a session mode via `annotated-completing-read', annotating the current one.
-Like `agent-shell-set-session-mode' but annotates each candidate with its
-description (the same text shown at the start of an agent-shell session)
-and marks the active mode as \"[current]\", instead of requiring the user to
-already know the candidate list.  Unlike `agent-shell-cycle-session-mode'
-this prompts instead of blindly advancing to the next mode.
+  "Select a session mode via `annotated-completing-read'.
+Annotates each candidate with its description (the same text shown at
+the start of an agent-shell session) and marks the active mode as
+\"[current]\", instead of requiring the user to already know the
+candidate list.  Unlike `agent-shell-cycle-session-mode' this prompts
+instead of blindly advancing to the next mode.
 
 Optionally, get notified of completion with ON-SUCCESS function."
   (interactive)
@@ -330,7 +331,7 @@ Works from both agent-shell buffers and viewport buffers."
   (derived-mode-p 'agent-shell-mode))
 
 (defun agent-shell-menu--session-permission-button-action (shell-buf pos)
-  "Return an interactive command that activates the permission button at POS in SHELL-BUF."
+  "Return command activating permission button at POS in SHELL-BUF."
   (lambda ()
     (interactive)
     (with-current-buffer shell-buf
@@ -365,7 +366,8 @@ Keys are assigned as 1, 2, 3… in button order."
 
 (defun agent-shell-menu--action-entry-command (entry)
   "Return the command for ENTRY.
-ENTRY cdr may be a plain COMMAND symbol, a function, or a (COMMAND . PREDICATE) cons."
+ENTRY cdr may be a plain COMMAND symbol, a function, or a
+(COMMAND . PREDICATE) cons."
   (let ((val (cdr entry)))
     (if (and (consp val) (not (functionp val))) (car val) val)))
 
@@ -379,7 +381,8 @@ cdr are visible only when (funcall PRED) returns non-nil."
 ;;;###autoload
 (defun agent-shell-menu-select-action ()
   "Pick a common agent-shell action and run it via `call-interactively'.
-When a permission request is pending, permission responses are spliced into the menu."
+When a permission request is pending, permission responses are spliced
+into the menu."
   (interactive)
   (let* ((perm-entries (when (and (derived-mode-p 'agent-shell-mode)
 				  (agent-shell--permission-pending-p))

@@ -821,6 +821,40 @@ which populates item.response from the shell buffer content."
       (unwind-protect
           (should (agent-shell-queue-item-background item))
         (kill-buffer buf)))))
+(ert-deftest agent-shell-queue/add-delays-propagated ()
+  "agent-shell-queue-add preserves delay-before and delay-after on the created item."
+  (agent-shell-queue-test/isolate-no-sub
+    (let* ((buf (get-buffer-create " *asq-test-buf*"))
+           (item (agent-shell-queue-add "hello" buf nil 5.0 10.0)))
+      (unwind-protect
+          (progn
+            (should (= 5.0 (agent-shell-queue-item-delay-before item)))
+            (should (= 10.0 (agent-shell-queue-item-delay-after item))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/enqueue-with-delay-before-queues-when-idle ()
+  "agent-shell-queue-enqueue adds to queue instead of sending immediately when delay-before > 0."
+  (agent-shell-queue-test/isolate-no-sub
+    (let* ((buf (get-buffer-create " *asq-test-buf*"))
+           (inserted nil))
+      (with-current-buffer buf
+        (setq major-mode 'agent-shell-mode))
+      (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
+                ((symbol-function 'agent-shell-insert) (lambda (&rest _) (setq inserted t))))
+        (unwind-protect
+            (progn
+              (agent-shell-queue-enqueue "delayed prompt" buf nil 3.0 2.0)
+              ;; Because delay-before is set, it was queued, not inserted immediately
+              (should-not inserted)
+              (let ((items (cdr (assoc (buffer-name buf)
+                                       (agent-shell-queue-store-items agent-shell-queue--store)))))
+                (should (= 1 (length items)))
+                (let ((item (car items)))
+                  (should (equal "delayed prompt" (agent-shell-queue-item-args item)))
+                  (should (= 3.0 (agent-shell-queue-item-delay-before item)))
+                  (should (= 2.0 (agent-shell-queue-item-delay-after item))))))
+          (kill-buffer buf))))))
+
 
 (ert-deftest agent-shell-queue/add-multiple-buffers ()
   (agent-shell-queue-test/isolate-no-sub
@@ -4438,5 +4472,52 @@ leaving sessions that were already individually paused beforehand untouched."
    (setf (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue) '("dir:/tmp/test/" "buf-halted"))
    (should (member "dir:/tmp/test/" (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)))
    (should (member "buf-halted" (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)))))
+
+(ert-deftest agent-shell-queue/recovery-plan-mode-blocks-recovery ()
+  "Recovery check fails when session is in a blocked mode (e.g. plan or dontAsk)."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((buf (get-buffer-create "*asq-mode-block-buf*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf
+             (setq major-mode 'agent-shell-mode)
+             (setq-local agent-shell--state '((:session (:mode-id . "plan")))))
+           (let ((clean-item (agent-shell-queue-test/make-item "q-plan" "prompt" 'done nil)))
+             (should-not (agent-shell-queue--verify-recovery buf clean-item "All done.")))
+           (with-current-buffer buf
+             (setq-local agent-shell--state '((:session (:mode-id . "dontAsk")))))
+           (let ((clean-item (agent-shell-queue-test/make-item "q-dontask" "prompt" 'done nil)))
+             (should-not (agent-shell-queue--verify-recovery buf clean-item "All done.")))
+           (with-current-buffer buf
+             (setq-local agent-shell--state '((:session (:mode-id . "default")))))
+           (let ((clean-item (agent-shell-queue-test/make-item "q-default" "prompt" 'done nil)))
+             (should (agent-shell-queue--verify-recovery buf clean-item "All done."))))
+       (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/dir-queue-execution-spawns-new-shell ()
+  "Dispatching a directory queue item spawns a new shell buffer and marks item running."
+  (agent-shell-queue-test/isolate-no-sub
+   (let* ((spawned-buf nil)
+          (dispatched-text nil)
+          (item (agent-shell-queue-add-directory "Dir work prompt" "/tmp/my-dir-queue/")))
+     (cl-letf (((symbol-function 'agent-shell-new-shell)
+                (lambda ()
+                  (setq spawned-buf (get-buffer-create "*agent-shell: my-dir-queue*"))
+                  (with-current-buffer spawned-buf
+                    (setq default-directory "/tmp/my-dir-queue/"))
+                  spawned-buf))
+               ((symbol-function 'agent-shell-insert)
+                (lambda (&rest args)
+                  (setq dispatched-text (plist-get args :text)))))
+       (unwind-protect
+           (progn
+             (agent-shell-queue-send-item (agent-shell-queue-item-id item))
+             (should (eq (agent-shell-queue-item-status item) 'running))
+             (should (equal "Dir work prompt" dispatched-text))
+             (should spawned-buf)
+             (should (string-match-p (regexp-quote (agent-shell-queue-item-id item))
+                                     (buffer-name spawned-buf))))
+         (when (and spawned-buf (buffer-live-p spawned-buf))
+           (kill-buffer spawned-buf)))))))
 
 ;;; test-agent-shell-queue.el ends here

@@ -1,5 +1,14 @@
 ;;; agent-shell-queue-persistence.el --- File-based persistence for agent-shell-queue -*- lexical-binding: t; -*-
 
+;; Author: tycho garen
+;; Maintainer: tychoish
+;; Keywords: tools, agent-shell
+;; Version: 0.1.0
+;; URL: https://github.com/tychoish/agent-shell-queue
+;; Package-Requires: ((emacs "29.1"))
+
+;; This file is not part of GNU Emacs
+
 ;;; Commentary:
 ;; Serialization (plist/JSON/YAML), save/load, archive, done-log, and write
 ;; logging for agent-shell-queue.  Loaded by agent-shell-queue.el at the end
@@ -73,7 +82,7 @@ Each entry is a plist: :time :trigger :file :items :buckets :format :error.")
   :group 'agent-shell-queue)
 
 (defcustom agent-shell-queue-write-log-enabled nil
-  "When non-nil, append each persistence event to *agent-shell-queue-log* and emit a message."
+  "When non-nil, log persistence events to *agent-shell-queue-log* buffer."
   :type 'boolean
   :group 'agent-shell-queue)
 
@@ -388,8 +397,9 @@ a subdirectory of `temporary-file-directory' named emacs-<instance>."
        (temporary-file-directory))))
 
 (defun agent-shell-queue--safe-save-prune (dir ext)
-  "Delete the oldest backup in DIR with extension EXT, if the count exceeds the limit.
-Only removes one file per call.  No-op when `agent-shell-queue-safe-save-max-files' is nil."
+  "Delete oldest backup in DIR with extension EXT when count exceeds limit.
+Only removes one file per call.  No-op when
+`agent-shell-queue-safe-save-max-files' is nil."
   (when agent-shell-queue-safe-save-max-files
     (let* ((files (seq-filter
                    (lambda (f)
@@ -475,9 +485,9 @@ No-op when `agent-shell-queue-done-log-file' is nil."
       (error (message "agent-shell-queue: done-log write failed: %s" err)))))
 
 (defun agent-shell-queue--write-archive (buf-name item)
-  "Append a JSONL record for ITEM in BUF-NAME to `agent-shell-queue-archive-file'.
-The record includes the target buffer's directory, instance name, whether the
-item was dispatched, ISO-8601 archive timestamp, and runtime (dispatched→completed)."
+  "Append a JSONL record for ITEM in BUF-NAME to archive file.
+Record includes target buffer directory, instance name, dispatched status,
+ISO-8601 archive timestamp, and runtime (dispatched→completed)."
   (when-let* ((file (agent-shell-queue--archive-file)))
     (condition-case err
         (let* ((path (when-let* ((buf (get-buffer buf-name))
@@ -560,10 +570,10 @@ session cannot be resumed and must be re-dispatched."
 
 (defun agent-shell-queue--migrate-queue-struct ()
   "Replace `agent-shell-queue--queue' if its struct layout is stale.
-Detects any mismatch between the persisted vector length and the current struct
-definition by comparing against a freshly-constructed instance.  This handles
-any past or future field addition without per-field migration logic.
-Preserves `session-paused' and `halted-sessions' from the old value when readable."
+Detects mismatch between persisted vector length and current struct
+definition by comparing against a freshly-constructed instance.  This
+handles past or future field additions without per-field migration logic.
+Preserves `session-paused' and `halted-sessions' from old value when readable."
   (when (and (agent-shell-queue-queue-p agent-shell-queue--queue)
              (/= (length agent-shell-queue--queue)
                  (length (agent-shell-queue-queue--make))))
