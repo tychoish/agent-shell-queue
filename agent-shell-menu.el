@@ -39,94 +39,14 @@
 
 (declare-function agent-shell-viewport--shell-buffer "agent-shell-viewport")
 (declare-function agent-shell-ui--toggle-fragment-at-point "agent-shell-ui")
-
-(declare-function agent-review "agent-review")
-(declare-function agent-review-send-to-agent-shell "agent-review")
-
-(defvar agent-shell-menu-action-alist
-  '(;; Shell interaction — only relevant when a session is reachable
-    ("submit" . (shell-maker-submit . agent-shell-menu--in-session-p))
-    ("interrupt" . (agent-shell-interrupt . agent-shell-menu--in-session-p))
-    ("compose in viewport" . (agent-shell-prompt-compose . agent-shell-menu--in-session-p))
-    ;; Navigation
-    ("jump to end (prompt)" . (end-of-buffer . agent-shell-menu--in-session-p))
-    ("goto last interaction" . (agent-shell-menu--goto-last-interaction . agent-shell-menu--in-session-p))
-    ("next item" . (agent-shell-next-item . agent-shell-menu--in-session-p))
-    ("previous item" . (agent-shell-previous-item . agent-shell-menu--in-session-p))
-    ("other buffer (viewport)" . (agent-shell-other-buffer . agent-shell-menu--in-session-p))
-    ;; Permissions — only when a permission is pending
-    ("jump to permission row" . (agent-shell-jump-to-latest-permission-button-row . agent-shell-menu--session-permission-pending-p))
-    ("next permission button" . (agent-shell-next-permission-button . agent-shell-menu--session-permission-pending-p))
-    ("previous permission button" . (agent-shell-previous-permission-button . agent-shell-menu--session-permission-pending-p))
-    ;; Session switching — always available
-    ("switch agent-shell" . agent-shell-switch-buffer)
-    ;; Send content — needs a session target
-    ("send region" . (agent-shell-send-region . agent-shell-menu--in-session-p))
-    ("send file" . (agent-shell-send-file . agent-shell-menu--in-session-p))
-    ("send file (pick)" . (agent-shell-menu-send-file . agent-shell-menu--in-session-p))
-    ("send buffer" . (agent-shell-menu-send-buffer . agent-shell-menu--in-session-p))
-    ("yank (DWIM)" . (agent-shell-yank-dwim . agent-shell-menu--in-session-p))
-    ;; Session settings — need a session
-    ("cycle session mode" . (agent-shell-cycle-session-mode . agent-shell-menu--in-session-p))
-    ("set session mode" . (agent-shell-menu-select-session-mode . agent-shell-menu--in-session-p))
-    ("set session model" . (agent-shell-set-session-model . agent-shell-menu--in-session-p))
-    ("copy session id" . (agent-shell-copy-session-id . agent-shell-menu--in-session-p))
-    ("open transcript" . (agent-shell-open-transcript . agent-shell-menu--in-session-p))
-    ("session info" . (agent-shell-menu-session-info . agent-shell-menu--in-session-p))
-    ("collapse menu" . (agent-shell-menu-select-collapse . agent-shell-menu--in-session-p))
-    ;; Queue actions
-    ("interject" . (agent-shell-queue-interject . agent-shell-queue-interject-available-p))
-    ("queue request" . agent-shell-queue-enqueue)
-    ("queue capture" . agent-shell-queue-capture)
-    ("capture unassigned" . agent-shell-queue-capture-unassigned)
-    ("capture from region" . agent-shell-queue-capture-from-region)
-    ("capture from clipboard" . agent-shell-queue-capture-from-clipboard)
-    ("capture from context" . agent-shell-queue-capture-from-context)
-    ("queue clear" . agent-shell-queue-enqueue-clear)
-    ("queue review" . agent-shell-queue-buffer-open)
-    ("set input mode" . (agent-shell-queue-toggle-input-mode . agent-shell-menu--in-shell-p))
-    ("set input mode default" . agent-shell-queue-set-input-mode-default)
-    ("reset all sessions to default" . agent-shell-queue-reset-all-input-modes)
-    ("review changes" . (agent-review . agent-shell-menu--agent-review-available-p))
-    ("send review issues to shell" . (agent-review-send-to-agent-shell . agent-shell-menu--agent-review-available-p)))
-  "Alist mapping label strings to commands for `agent-shell-menu-select-action'.
-Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)).
-When a PREDICATE is supplied it is called with no arguments; the entry is
-omitted from the menu when the predicate returns nil.")
-
-;;; Key binding
-
-(defmacro agent-shell-menu-mode-key (key fn)
-  "Define `agent-shell-menu-output-key-KEY' and bind it in `agent-shell-mode-map'.
-In the output area, or while the shell is busy, calls FN interactively.
-Self-inserts KEY only when at the idle prompt, unless queue-only mode is active
-(in which case routes to `agent-shell-queue-ready-capture' instead).
-Also binds FN directly in `agent-shell-viewport-view-mode-map'."
-  (let* ((key-str (if (stringp key) key (symbol-name key)))
-         (name (intern (concat "agent-shell-menu-output-key-" key-str)))
-         (char (pcase key-str
-                 ("TAB" ?\t)
-                 ((pred (lambda (s) (= 1 (length s)))) (aref key-str 0)))))
-    `(progn
-       (defun ,name ()
-         ,(format "In output or busy: `%s'. Self-insert at idle prompt." fn)
-         (interactive)
-         (if (and (not (shell-maker-busy)) (shell-maker-point-at-last-prompt-p))
-             ,(if char
-                  `(if (bound-and-true-p agent-shell-queue-only-mode)
-                       (agent-shell-queue-ready-capture)
-                     (self-insert-command 1 ,char))
-                '(ignore))
-           (call-interactively #',fn)))
-       (define-key agent-shell-mode-map (kbd ,key-str) #',name)
-       (with-eval-after-load 'agent-shell-viewport
-         (define-key agent-shell-viewport-view-mode-map (kbd ,key-str) #',fn)))))
-
-;;; Buffer/session management
-
 (declare-function agent-shell--config-icon "agent-shell")
 (declare-function agent-shell-viewport--buffer "agent-shell-viewport")
 (declare-function agent-shell-switch-buffer "agent-shell")
+(declare-function agent-review "agent-review")
+(declare-function agent-review-send-to-agent-shell "agent-review")
+(declare-function shell-maker-process "shell-maker")
+
+;;; Session and Project Switching
 
 (defun agent-shell-menu--buffer-annotation (buf)
   "Build an annotation string describing the agent-shell BUF.
@@ -196,8 +116,6 @@ instead of introducing a second public entry point.  Respects
 
 (advice-add 'agent-shell-switch-buffer :override #'agent-shell-menu--switch-buffer)
 
-;;; Session mode selection
-
 ;;;###autoload
 (defun agent-shell-menu-select-session-mode (&optional on-success)
   "Select a session mode via `annotated-completing-read'.
@@ -247,7 +165,131 @@ Optionally, get notified of completion with ON-SUCCESS function."
        :mode-id selected-mode-id
        :on-success on-success))))
 
-;;; Permission resolution
+;;;###autoload
+(defun agent-shell-menu-project-buffers ()
+  "Return live agent-shell buffers sharing the current buffer's project directory."
+  (let ((dir default-directory)
+	(cb (current-buffer)))
+    (thread-last
+      (agent-shell-buffers)
+      (seq-filter (lambda (buf) (not (eq buf cb))))
+      (seq-filter (lambda (buf) (with-current-buffer buf
+				  (or (equal default-directory dir)
+				      (string-prefix-p default-directory dir))))))))
+
+;;;###autoload
+(defun agent-shell-menu-switch-project-session ()
+  "Switch to another agent-shell session in the same project directory."
+  (interactive)
+  (let ((bufs (or (agent-shell-menu-project-buffers)
+                  (user-error "No other agent-shell sessions for this project"))))
+    (switch-to-buffer
+     (get-buffer
+      (annotated-completing-read
+       (seq-map (lambda (buf) (cons (buffer-name buf) (agent-shell-menu--buffer-annotation buf)))
+                bufs)
+       :prompt "project session =>"
+       :category 'agent-shell-buffer
+       :require-match t
+       :history 'agent-shell-menu-switch-project-session)))))
+
+;;; Actions and Commands
+
+(defvar agent-shell-menu-action-alist
+  '(;; Shell interaction — only relevant when a session is reachable
+    ("submit" . (shell-maker-submit . agent-shell-menu--in-session-p))
+    ("interrupt" . (agent-shell-interrupt . agent-shell-menu--in-session-p))
+    ("compose in viewport" . (agent-shell-prompt-compose . agent-shell-menu--in-session-p))
+    ;; Navigation
+    ("jump to end (prompt)" . (end-of-buffer . agent-shell-menu--in-session-p))
+    ("goto last interaction" . (agent-shell-menu--goto-last-interaction . agent-shell-menu--in-session-p))
+    ("next item" . (agent-shell-next-item . agent-shell-menu--in-session-p))
+    ("previous item" . (agent-shell-previous-item . agent-shell-menu--in-session-p))
+    ("other buffer (viewport)" . (agent-shell-other-buffer . agent-shell-menu--in-session-p))
+    ;; Permissions — only when a permission is pending
+    ("jump to permission row" . (agent-shell-jump-to-latest-permission-button-row . agent-shell-menu--session-permission-pending-p))
+    ("next permission button" . (agent-shell-next-permission-button . agent-shell-menu--session-permission-pending-p))
+    ("previous permission button" . (agent-shell-previous-permission-button . agent-shell-menu--session-permission-pending-p))
+    ;; Session switching — always available
+    ("switch agent-shell" . agent-shell-switch-buffer)
+    ;; Send content — needs a session target
+    ("send region" . (agent-shell-send-region . agent-shell-menu--in-session-p))
+    ("send file" . (agent-shell-send-file . agent-shell-menu--in-session-p))
+    ("send file (pick)" . (agent-shell-menu-send-file . agent-shell-menu--in-session-p))
+    ("send buffer" . (agent-shell-menu-send-buffer . agent-shell-menu--in-session-p))
+    ("yank (DWIM)" . (agent-shell-yank-dwim . agent-shell-menu--in-session-p))
+    ;; Session settings — need a session
+    ("cycle session mode" . (agent-shell-cycle-session-mode . agent-shell-menu--in-session-p))
+    ("set session mode" . (agent-shell-menu-select-session-mode . agent-shell-menu--in-session-p))
+    ("set session model" . (agent-shell-set-session-model . agent-shell-menu--in-session-p))
+    ("copy session id" . (agent-shell-copy-session-id . agent-shell-menu--in-session-p))
+    ("open transcript" . (agent-shell-open-transcript . agent-shell-menu--in-session-p))
+    ("session info" . (agent-shell-menu-session-info . agent-shell-menu--in-session-p))
+    ("collapse menu" . (agent-shell-menu-select-collapse . agent-shell-menu--in-session-p))
+    ;; Queue actions
+    ("interject" . (agent-shell-queue-interject . agent-shell-queue-interject-available-p))
+    ("queue request" . agent-shell-queue-enqueue)
+    ("queue capture" . agent-shell-queue-capture)
+    ("capture unassigned" . agent-shell-queue-capture-unassigned)
+    ("capture from region" . agent-shell-queue-capture-from-region)
+    ("capture from clipboard" . agent-shell-queue-capture-from-clipboard)
+    ("capture from context" . agent-shell-queue-capture-from-context)
+    ("queue clear" . agent-shell-queue-enqueue-clear)
+    ("queue review" . agent-shell-queue-buffer-open)
+    ("set input mode" . (agent-shell-queue-toggle-input-mode . agent-shell-menu--in-shell-p))
+    ("set input mode default" . agent-shell-queue-set-input-mode-default)
+    ("reset all sessions to default" . agent-shell-queue-reset-all-input-modes)
+    ("review changes" . (agent-review . agent-shell-menu--agent-review-available-p))
+    ("send review issues to shell" . (agent-review-send-to-agent-shell . agent-shell-menu--agent-review-available-p)))
+  "Alist mapping label strings to commands for `agent-shell-menu-select-action'.
+Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)).
+When a PREDICATE is supplied it is called with no arguments; the entry is
+omitted from the menu when the predicate returns nil.")
+
+(defun agent-shell-menu--action-entry-command (entry)
+  "Return the command for ENTRY.
+ENTRY cdr may be a plain COMMAND symbol, a function, or a
+(COMMAND . PREDICATE) cons."
+  (let ((val (cdr entry)))
+    (if (and (consp val) (not (functionp val))) (car val) val)))
+
+(defun agent-shell-menu--action-entry-visible-p (entry)
+  "Return non-nil if ENTRY should appear in the action menu.
+Entries with no predicate are always visible; entries with a (CMD . PRED)
+cdr are visible only when (funcall PRED) returns non-nil."
+  (let ((val (cdr entry)))
+    (if (and (consp val) (not (functionp val))) (funcall (cdr val)) t)))
+
+;;;###autoload
+(defun agent-shell-menu-select-action ()
+  "Pick a common agent-shell action and run it via `call-interactively'.
+When a permission request is pending, permission responses are spliced
+into the menu."
+  (interactive)
+  (let* ((perm-entries (when (and (derived-mode-p 'agent-shell-mode)
+				  (agent-shell--permission-pending-p))
+			 (seq-map (lambda (b)
+				    (cons (format "permission: %s" (car b))
+					  (agent-shell-menu--permission-button-action (cdr b))))
+				  (agent-shell-menu--permission-buttons))))
+	 (cmd-entries (thread-last
+			agent-shell-menu-action-alist
+			(seq-filter #'agent-shell-menu--action-entry-visible-p)
+			(seq-filter (lambda (e) (commandp (agent-shell-menu--action-entry-command e))))
+			(seq-map (lambda (e) (cons (car e) (agent-shell-menu--action-entry-command e))))))
+	 (all-entries (append perm-entries cmd-entries))
+	 (display-table (seq-map (lambda (entry)
+				   (cons (car entry)
+					 (or (car (split-string (or (documentation (cdr entry)) "") "\n")) "")))
+				 all-entries))
+	 (label (annotated-completing-read display-table
+		 :prompt "agent-shell action =>"
+		 :category 'agent-shell-action
+		 :require-match t
+		 :history 'agent-shell-menu-select-action))
+	 (cmd (cdr (assoc label all-entries))))
+    (when (commandp cmd)
+      (call-interactively cmd))))
 
 (defun agent-shell-menu--permission-buttons ()
   "Return a list of (LABEL . POSITION) for each pending permission button.
@@ -308,137 +350,32 @@ POSITION is buffer position of the button's start."
       (goto-char pos)
       (call-interactively cmd))))
 
-;;; Transient permission group helpers
-
-(defun agent-shell-menu--session-shell-buffer ()
-  "Return the agent-shell buffer for the current window context.
-Works from both agent-shell buffers and viewport buffers."
-  (cond
-   ((derived-mode-p 'agent-shell-mode) (current-buffer))
-   ((agent-shell-viewport--shell-buffer))))
-
-(defun agent-shell-menu--session-permission-pending-p ()
-  "Return non-nil when a permission is pending in the relevant shell buffer."
-  (when-let* ((shell (agent-shell-menu--session-shell-buffer)))
-    (agent-shell--permission-pending-p :shell-buffer shell)))
-
-(defun agent-shell-menu--in-session-p ()
-  "Return non-nil when the current context has an associated agent-shell session."
-  (not (null (agent-shell-menu--session-shell-buffer))))
-
-(defun agent-shell-menu--in-shell-p ()
-  "Return non-nil when currently in an agent-shell buffer (not a viewport)."
-  (derived-mode-p 'agent-shell-mode))
-
-(defun agent-shell-menu--session-permission-button-action (shell-buf pos)
-  "Return command activating permission button at POS in SHELL-BUF."
-  (lambda ()
-    (interactive)
-    (with-current-buffer shell-buf
-      (when-let* ((cmd (agent-shell-menu--permission-action-at pos))
-                  ((functionp cmd))
-                  ((commandp cmd)))
-        (save-excursion
-          (goto-char pos)
-          (call-interactively cmd))))))
-
-(defun agent-shell-menu--permission-suffixes-for (prefix)
-  "Return transient suffixes for each pending permission button under PREFIX.
-Keys are assigned as 1, 2, 3… in button order."
-  (when-let* ((shell (agent-shell-menu--session-shell-buffer))
-              (buttons (with-current-buffer shell
-                         (agent-shell-menu--permission-buttons))))
-    (seq-map-indexed
-     (lambda (btn i)
-       (transient-parse-suffix
-        prefix
-        (list (number-to-string (1+ i))
-              (format "Permission: %s" (car btn))
-              (agent-shell-menu--session-permission-button-action shell (cdr btn)))))
-     buttons)))
-
-(defun agent-shell-menu--permission-suffixes (_group)
-  "Return transient suffixes for each pending permission button.
-Keys are assigned as 1, 2, 3… in button order."
-  (agent-shell-menu--permission-suffixes-for 'agent-shell-menu-dispatch))
-
-;;; Action menu
-
-(defun agent-shell-menu--action-entry-command (entry)
-  "Return the command for ENTRY.
-ENTRY cdr may be a plain COMMAND symbol, a function, or a
-(COMMAND . PREDICATE) cons."
-  (let ((val (cdr entry)))
-    (if (and (consp val) (not (functionp val))) (car val) val)))
-
-(defun agent-shell-menu--action-entry-visible-p (entry)
-  "Return non-nil if ENTRY should appear in the action menu.
-Entries with no predicate are always visible; entries with a (CMD . PRED)
-cdr are visible only when (funcall PRED) returns non-nil."
-  (let ((val (cdr entry)))
-    (if (and (consp val) (not (functionp val))) (funcall (cdr val)) t)))
-
 ;;;###autoload
-(defun agent-shell-menu-select-action ()
-  "Pick a common agent-shell action and run it via `call-interactively'.
-When a permission request is pending, permission responses are spliced
-into the menu."
+(defun agent-shell-menu-select-command ()
+  "Insert one of the agent's advertised `/' commands at the prompt."
   (interactive)
-  (let* ((perm-entries (when (and (derived-mode-p 'agent-shell-mode)
-				  (agent-shell--permission-pending-p))
-			 (seq-map (lambda (b)
-				    (cons (format "permission: %s" (car b))
-					  (agent-shell-menu--permission-button-action (cdr b))))
-				  (agent-shell-menu--permission-buttons))))
-	 (cmd-entries (thread-last
-			agent-shell-menu-action-alist
-			(seq-filter #'agent-shell-menu--action-entry-visible-p)
-			(seq-filter (lambda (e) (commandp (agent-shell-menu--action-entry-command e))))
-			(seq-map (lambda (e) (cons (car e) (agent-shell-menu--action-entry-command e))))))
-	 (all-entries (append perm-entries cmd-entries))
-	 (display-table (seq-map (lambda (entry)
-				   (cons (car entry)
-					 (or (car (split-string (or (documentation (cdr entry)) "") "\n")) "")))
-				 all-entries))
-	 (label (annotated-completing-read display-table
-		 :prompt "agent-shell action =>"
-		 :category 'agent-shell-action
-		 :require-match t
-		 :history 'agent-shell-menu-select-action))
-	 (cmd (cdr (assoc label all-entries))))
-    (when (commandp cmd)
-      (call-interactively cmd))))
+  (let* ((shell (or (cond
+		     ((derived-mode-p 'agent-shell-mode) (current-buffer))
+		     ((agent-shell-viewport--shell-buffer)))
+		    (user-error "not in an agent-shell or viewport buffer")))
+	 (commands (with-current-buffer shell
+		     (map-elt agent-shell--state :available-commands))))
+    (unless commands
+      (user-error "no agent slash-commands advertised in %s" (buffer-name shell)))
+    (agent-shell-insert :text (concat "/" (annotated-completing-read
+					   (seq-map (lambda (c)
+						     (cons (map-elt c 'name)
+							        (replace-regexp-in-string "[\n\r]+" " "
+							    (or (map-elt c 'description) ""))))
+						   commands)
+					   :prompt "agent /command => "
+					   :category 'agent-shell-slash-command
+					   :require-match t
+					   :history 'agent-shell-menu-select-command) " ")
+			:shell-buffer shell
+			:submit nil)))
 
-;;; Project session switching
-
-;;;###autoload
-(defun agent-shell-menu-project-buffers ()
-  "Return live agent-shell buffers sharing the current buffer's project directory."
-  (let ((dir default-directory)
-	(cb (current-buffer)))
-    (thread-last
-      (agent-shell-buffers)
-      (seq-filter (lambda (buf) (not (eq buf cb))))
-      (seq-filter (lambda (buf) (with-current-buffer buf
-				  (or (equal default-directory dir)
-				      (string-prefix-p default-directory dir))))))))
-;;;###autoload
-(defun agent-shell-menu-switch-project-session ()
-  "Switch to another agent-shell session in the same project directory."
-  (interactive)
-  (let ((bufs (or (agent-shell-menu-project-buffers)
-                  (user-error "No other agent-shell sessions for this project"))))
-    (switch-to-buffer
-     (get-buffer
-      (annotated-completing-read
-       (seq-map (lambda (buf) (cons (buffer-name buf) (agent-shell-menu--buffer-annotation buf)))
-                bufs)
-       :prompt "project session =>"
-       :category 'agent-shell-buffer
-       :require-match t
-       :history 'agent-shell-menu-switch-project-session)))))
-
-;;; Send content to agent shell
+;;; Content Insertion
 
 ;;;###autoload
 (defun agent-shell-menu-send-file ()
@@ -471,162 +408,7 @@ File-visiting buffers are sent as @file references; others as raw text."
           (agent-shell-insert :text (agent-shell--get-files-context :files (list file)))
         (agent-shell-insert :text (with-current-buffer buf (buffer-string)))))))
 
-;;; Transient menus
-
-(defun agent-shell-menu-new-shell-in-dir (dir)
-  "Start a new agent-shell session in DIR."
-  (interactive "DNew shell in directory: ")
-  (agent-shell--new-shell :location dir))
-
-(defun agent-shell-menu--goto-last-interaction ()
-  "Move to the last agent-shell interaction."
-  (interactive)
-  (agent-shell-goto-last-interaction))
-
-(defun agent-shell-menu--agent-review-available-p ()
-  "Return non-nil when `agent-review' is loaded."
-  (featurep 'agent-review))
-
-(defun agent-shell-menu--interjection-p ()
-  "Return non-nil when in an active interjection buffer."
-  (derived-mode-p 'agent-shell-queue-interjection-mode))
-
-;;;###autoload
-(transient-define-prefix agent-shell-menu-dispatch ()
-  "agent-shell operations — navigate, act, send, queue, and session management."
-  [:description "Permissions"
-   :class transient-column
-   :if agent-shell-menu--session-permission-pending-p
-   :setup-children agent-shell-menu--permission-suffixes]
-  ;; Session management (always), act/write/settings/fork (session-conditional)
-  [["Sessions"
-    ("sn" "New shell" agent-shell-new-shell)
-    ("st" "New temp shell" agent-shell-new-temp-shell)
-    ("sh" "Hydrate (resume)" agent-shell-resume-session)
-    ("sd" "New in directory" agent-shell-menu-new-shell-in-dir)
-    ("ss" "Switch session" agent-shell-switch-buffer)
-    ("rr" "Review changes" agent-review
-     :if agent-shell-menu--agent-review-available-p)
-    ("rs" "Send issues to review agent" agent-review-send-to-agent-shell
-     :if agent-shell-menu--agent-review-available-p)]
-   ["Actions" :if agent-shell-menu--in-session-p
-    ("aa" "Action menu" agent-shell-menu-select-action)
-    ("ai" "Interrupt" agent-shell-interrupt)
-    ("ar" "Resolve permission" agent-shell-menu-resolve-permission)
-    ("ac" "Command menu" agent-shell-menu-select-command)
-    ("ax" "Collapse menu" agent-shell-menu-select-collapse)
-    ("ij" "Interject" agent-shell-queue-interject
-     :inapt-if-not agent-shell-queue-interject-available-p)
-    ("is" "Send interjection" agent-shell-queue-interjection-send
-     :if agent-shell-menu--interjection-p)
-    ("ic" "Close/Abort interjection" agent-shell-queue-interjection-close
-     :if agent-shell-menu--interjection-p)]
-   ["Settings" :if agent-shell-menu--in-session-p
-    ("mm" "Set mode" agent-shell-menu-select-session-mode)
-    ("mv" "Set model" agent-shell-set-session-model)
-    ("mc" "Cycle mode" agent-shell-cycle-session-mode)
-    ("mi" "Copy session ID" agent-shell-copy-session-id)
-    ("mt" "Open transcript" agent-shell-open-transcript)]
-   ["Fork" :if agent-shell-menu--in-session-p
-    ("ff" "Fork session" agent-shell-fork)
-    ("fo" "Other (project)" agent-shell-menu-switch-project-session)
-    ("fq" "Fork queue" agent-shell-queue-fork-session)
-    ("fb" "Insert fork before" agent-shell-queue-insert-fork-before)
-    ("fa" "Insert fork after" agent-shell-queue-insert-fork-after)
-    ("fr" "Release pending fork" agent-shell-queue-release-pending-fork)]]
-  ;; Queue row: global queue ops, intercept config, and capture
-  [["Send"
-    ("wb" "Send buffer" agent-shell-menu-send-buffer)
-    ("wt" "Send file to…" agent-shell-send-file-to)
-    ("wo" "Send other file" agent-shell-send-other-file)
-    ("wr" "Send region to…" agent-shell-send-region-to)
-    ("wc" "Send screenshot to…" agent-shell-send-screenshot-to)
-    ("wi" "Send clipboard image to…" agent-shell-send-clipboard-image-to)
-    ("ws" "Send dwim" agent-shell-send-dwim)]
-   ["Queue"
-    ("qq" "Open queue" agent-shell-queue-buffer-open)
-    ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
-    ("qe" "Enqueue" agent-shell-queue-enqueue)
-    ("qd" "Edit task" agent-shell-queue-edit-task)
-    ("qp" "Suspend all dispatch" agent-shell-queue-pause)
-    ("qr" "Resume all dispatch" agent-shell-queue-resume)
-    ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
-   ["Capture"
-    ("cw" "Compose (write)" agent-shell-queue-capture)
-    ("cu" "Unassigned" agent-shell-queue-capture-unassigned)
-    ("cr" "From region" agent-shell-queue-capture-from-region)
-    ("cy" "From clipboard" agent-shell-queue-capture-from-clipboard)
-    ("cc" "From context" agent-shell-queue-capture-from-context)]
-  ;; Per-session queue controls
-   ["Session Queue" :if agent-shell-menu--in-session-p
-    ("qsp" "Suspend this session" agent-shell-queue-session-pause
-     :inapt-if agent-shell-queue-session-paused-p)
-    ("qsr" "Resume this session" agent-shell-queue-session-resume
-     :inapt-if-not agent-shell-queue-session-paused-p)
-    ("qim" agent-shell-queue-toggle-input-mode
-     :description (lambda ()
-                    (format "Input mode: [%s]" (agent-shell-queue-input-mode-value))))
-    ("qix" "Reset all to default" agent-shell-queue-reset-all-input-modes)
-    ("qid" agent-shell-queue-set-input-mode-default
-     :description (lambda ()
-                    (format "Default: [%s]" agent-shell-queue-input-mode-default))
-     :if agent-shell-menu--in-shell-p)]
-   ])
-
-;;; Capture menu — bound to "e" in agent-shell-mode-map
-
-;;;###autoload
-(transient-define-prefix agent-shell-queue-capture-menu ()
-  "Enqueue and capture operations for the current agent-shell session.
-Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
-  [["Capture"
-    ("c"  "Compose prompt"      agent-shell-queue-capture)
-    ("u"  "Unassigned"          agent-shell-queue-capture-unassigned)
-    ("r"  "From region"         agent-shell-queue-capture-from-region)
-    ("y"  "From clipboard"      agent-shell-queue-capture-from-clipboard)
-    ("x"  "From context"        agent-shell-queue-capture-from-context)]
-   ["Enqueue"
-    ("ee" "Enqueue prompt"      agent-shell-queue-enqueue)
-    ("el" "Emacs Lisp form"     agent-shell-queue-enqueue-emacs)
-    ("ec" "Emacs command"       agent-shell-queue-enqueue-emacs-command)
-    ("es" "Shell (eshell)"      agent-shell-queue-enqueue-shell-eshell)
-    ("et" "Shell (eat)"         agent-shell-queue-enqueue-shell-eat)]
-   ["Insert"
-    ("p"  "Pause checkpoint"    agent-shell-queue-insert-pause)
-    ("d"  "Context drop"        agent-shell-queue-insert-clear-context)
-    ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
-    ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
-
-(agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
-
-;;; Command menu
-
-;;;###autoload
-(defun agent-shell-menu-select-command ()
-  "Insert one of the agent's advertised `/' commands at the prompt."
-  (interactive)
-  (let* ((shell (or (cond
-		     ((derived-mode-p 'agent-shell-mode) (current-buffer))
-		     ((agent-shell-viewport--shell-buffer)))
-		    (user-error "not in an agent-shell or viewport buffer")))
-	 (commands (with-current-buffer shell
-		     (map-elt agent-shell--state :available-commands))))
-    (unless commands
-      (user-error "no agent slash-commands advertised in %s" (buffer-name shell)))
-    (agent-shell-insert :text (concat "/" (annotated-completing-read
-					   (seq-map (lambda (c)
-						     (cons (map-elt c 'name)
-							        (replace-regexp-in-string "[\n\r]+" " "
-							    (or (map-elt c 'description) ""))))
-						   commands)
-					   :prompt "agent /command => "
-					   :category 'agent-shell-slash-command
-					   :require-match t
-					   :history 'agent-shell-menu-select-command) " ")
-			:shell-buffer shell
-			:submit nil)))
-
-;;; Collapse menu
+;;; Output and Collapse Control
 
 (defun agent-shell-menu--blocks-in-buffer ()
   "Return one entry per distinct fragment block in the buffer.
@@ -783,9 +565,7 @@ buffer-local variant that only changes the default for this session."
 	  (agent-shell-menu--set-collapse (< (cdr entry) (car entry))
 				     :category choice)))))))
 
-;;; Session info buffer
-
-(declare-function shell-maker-process "shell-maker")
+;;; Session Diagnostics
 
 (defun agent-shell-menu--count-fragments (buf)
   "Return the number of distinct UI fragments (blocks) in BUF."
@@ -900,7 +680,211 @@ the underlying shell process uptime for the current agent-shell buffer."
                                       (agent-shell-menu-session-info))))
           (use-local-map m))))))
 
-;;; Wire menu key into queue mode map
+;;; Transient Prefix Menus
+
+(defmacro agent-shell-menu-mode-key (key fn)
+  "Define `agent-shell-menu-output-key-KEY' and bind it in `agent-shell-mode-map'.
+In the output area, or while the shell is busy, calls FN interactively.
+Self-inserts KEY only when at the idle prompt, unless queue-only mode is active
+(in which case routes to `agent-shell-queue-ready-capture' instead).
+Also binds FN directly in `agent-shell-viewport-view-mode-map'."
+  (let* ((key-str (if (stringp key) key (symbol-name key)))
+         (name (intern (concat "agent-shell-menu-output-key-" key-str)))
+         (char (pcase key-str
+                 ("TAB" ?\t)
+                 ((pred (lambda (s) (= 1 (length s)))) (aref key-str 0)))))
+    `(progn
+       (defun ,name ()
+         ,(format "In output or busy: `%s'. Self-insert at idle prompt." fn)
+         (interactive)
+         (if (and (not (shell-maker-busy)) (shell-maker-point-at-last-prompt-p))
+             ,(if char
+                  `(if (bound-and-true-p agent-shell-queue-only-mode)
+                       (agent-shell-queue-ready-capture)
+                     (self-insert-command 1 ,char))
+                '(ignore))
+           (call-interactively #',fn)))
+       (define-key agent-shell-mode-map (kbd ,key-str) #',name)
+       (with-eval-after-load 'agent-shell-viewport
+         (define-key agent-shell-viewport-view-mode-map (kbd ,key-str) #',fn)))))
+
+(defun agent-shell-menu-new-shell-in-dir (dir)
+  "Start a new agent-shell session in DIR."
+  (interactive "DNew shell in directory: ")
+  (agent-shell--new-shell :location dir))
+
+(defun agent-shell-menu--goto-last-interaction ()
+  "Move to the last agent-shell interaction."
+  (interactive)
+  (agent-shell-goto-last-interaction))
+
+(defun agent-shell-menu--agent-review-available-p ()
+  "Return non-nil when `agent-review' is loaded."
+  (featurep 'agent-review))
+
+(defun agent-shell-menu--interjection-p ()
+  "Return non-nil when in an active interjection buffer."
+  (derived-mode-p 'agent-shell-queue-interjection-mode))
+
+(defun agent-shell-menu--session-shell-buffer ()
+  "Return the agent-shell buffer for the current window context.
+Works from both agent-shell buffers and viewport buffers."
+  (cond
+   ((derived-mode-p 'agent-shell-mode) (current-buffer))
+   ((agent-shell-viewport--shell-buffer))))
+
+(defun agent-shell-menu--session-permission-pending-p ()
+  "Return non-nil when a permission is pending in the relevant shell buffer."
+  (when-let* ((shell (agent-shell-menu--session-shell-buffer)))
+    (agent-shell--permission-pending-p :shell-buffer shell)))
+
+(defun agent-shell-menu--in-session-p ()
+  "Return non-nil when the current context has an associated agent-shell session."
+  (not (null (agent-shell-menu--session-shell-buffer))))
+
+(defun agent-shell-menu--in-shell-p ()
+  "Return non-nil when currently in an agent-shell buffer (not a viewport)."
+  (derived-mode-p 'agent-shell-mode))
+
+(defun agent-shell-menu--session-permission-button-action (shell-buf pos)
+  "Return command activating permission button at POS in SHELL-BUF."
+  (lambda ()
+    (interactive)
+    (with-current-buffer shell-buf
+      (when-let* ((cmd (agent-shell-menu--permission-action-at pos))
+                  ((functionp cmd))
+                  ((commandp cmd)))
+        (save-excursion
+          (goto-char pos)
+          (call-interactively cmd))))))
+
+(defun agent-shell-menu--permission-suffixes-for (prefix)
+  "Return transient suffixes for each pending permission button under PREFIX.
+Keys are assigned as 1, 2, 3… in button order."
+  (when-let* ((shell (agent-shell-menu--session-shell-buffer))
+              (buttons (with-current-buffer shell
+                         (agent-shell-menu--permission-buttons))))
+    (seq-map-indexed
+     (lambda (btn i)
+       (transient-parse-suffix
+        prefix
+        (list (number-to-string (1+ i))
+              (format "Permission: %s" (car btn))
+              (agent-shell-menu--session-permission-button-action shell (cdr btn)))))
+     buttons)))
+
+(defun agent-shell-menu--permission-suffixes (_group)
+  "Return transient suffixes for each pending permission button.
+Keys are assigned as 1, 2, 3… in button order."
+  (agent-shell-menu--permission-suffixes-for 'agent-shell-menu-dispatch))
+
+;;;###autoload
+(transient-define-prefix agent-shell-menu-dispatch ()
+  "agent-shell operations — navigate, act, send, queue, and session management."
+  [:description "Permissions"
+   :class transient-column
+   :if agent-shell-menu--session-permission-pending-p
+   :setup-children agent-shell-menu--permission-suffixes]
+  ;; Session management (always), act/write/settings/fork (session-conditional)
+  [["Sessions"
+    ("sn" "New shell" agent-shell-new-shell)
+    ("st" "New temp shell" agent-shell-new-temp-shell)
+    ("sh" "Hydrate (resume)" agent-shell-resume-session)
+    ("sd" "New in directory" agent-shell-menu-new-shell-in-dir)
+    ("ss" "Switch session" agent-shell-switch-buffer)
+    ("rr" "Review changes" agent-review
+     :if agent-shell-menu--agent-review-available-p)
+    ("rs" "Send issues to review agent" agent-review-send-to-agent-shell
+     :if agent-shell-menu--agent-review-available-p)]
+   ["Actions" :if agent-shell-menu--in-session-p
+    ("aa" "Action menu" agent-shell-menu-select-action)
+    ("ai" "Interrupt" agent-shell-interrupt)
+    ("ar" "Resolve permission" agent-shell-menu-resolve-permission)
+    ("ac" "Command menu" agent-shell-menu-select-command)
+    ("ax" "Collapse menu" agent-shell-menu-select-collapse)
+    ("ij" "Interject" agent-shell-queue-interject
+     :inapt-if-not agent-shell-queue-interject-available-p)
+    ("is" "Send interjection" agent-shell-queue-interjection-send
+     :if agent-shell-menu--interjection-p)
+    ("ic" "Close/Abort interjection" agent-shell-queue-interjection-close
+     :if agent-shell-menu--interjection-p)]
+   ["Settings" :if agent-shell-menu--in-session-p
+    ("mm" "Set mode" agent-shell-menu-select-session-mode)
+    ("mv" "Set model" agent-shell-set-session-model)
+    ("mc" "Cycle mode" agent-shell-cycle-session-mode)
+    ("mi" "Copy session ID" agent-shell-copy-session-id)
+    ("mt" "Open transcript" agent-shell-open-transcript)]
+   ["Fork" :if agent-shell-menu--in-session-p
+    ("ff" "Fork session" agent-shell-fork)
+    ("fo" "Other (project)" agent-shell-menu-switch-project-session)
+    ("fq" "Fork queue" agent-shell-queue-fork-session)
+    ("fb" "Insert fork before" agent-shell-queue-insert-fork-before)
+    ("fa" "Insert fork after" agent-shell-queue-insert-fork-after)
+    ("fr" "Release pending fork" agent-shell-queue-release-pending-fork)]]
+  ;; Queue row: global queue ops, intercept config, and capture
+  [["Send"
+    ("wb" "Send buffer" agent-shell-menu-send-buffer)
+    ("wt" "Send file to…" agent-shell-send-file-to)
+    ("wo" "Send other file" agent-shell-send-other-file)
+    ("wr" "Send region to…" agent-shell-send-region-to)
+    ("wc" "Send screenshot to…" agent-shell-send-screenshot-to)
+    ("wi" "Send clipboard image to…" agent-shell-send-clipboard-image-to)
+    ("ws" "Send dwim" agent-shell-send-dwim)]
+   ["Queue"
+    ("qq" "Open queue" agent-shell-queue-buffer-open)
+    ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
+    ("qe" "Enqueue" agent-shell-queue-enqueue)
+    ("qd" "Edit task" agent-shell-queue-edit-task)
+    ("qp" "Suspend all dispatch" agent-shell-queue-pause)
+    ("qr" "Resume all dispatch" agent-shell-queue-resume)
+    ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
+   ["Capture"
+    ("cw" "Compose (write)" agent-shell-queue-capture)
+    ("cu" "Unassigned" agent-shell-queue-capture-unassigned)
+    ("cr" "From region" agent-shell-queue-capture-from-region)
+    ("cy" "From clipboard" agent-shell-queue-capture-from-clipboard)
+    ("cc" "From context" agent-shell-queue-capture-from-context)]
+  ;; Per-session queue controls
+   ["Session Queue" :if agent-shell-menu--in-session-p
+    ("qsp" "Suspend this session" agent-shell-queue-session-pause
+     :inapt-if agent-shell-queue-session-paused-p)
+    ("qsr" "Resume this session" agent-shell-queue-session-resume
+     :inapt-if-not agent-shell-queue-session-paused-p)
+    ("qim" agent-shell-queue-toggle-input-mode
+     :description (lambda ()
+                    (format "Input mode: [%s]" (agent-shell-queue-input-mode-value))))
+    ("qix" "Reset all to default" agent-shell-queue-reset-all-input-modes)
+    ("qid" agent-shell-queue-set-input-mode-default
+     :description (lambda ()
+                    (format "Default: [%s]" agent-shell-queue-input-mode-default))
+     :if agent-shell-menu--in-shell-p)]
+   ])
+
+;;;###autoload
+(transient-define-prefix agent-shell-queue-capture-menu ()
+  "Enqueue and capture operations for the current agent-shell session.
+Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
+  [["Capture"
+    ("c"  "Compose prompt"      agent-shell-queue-capture)
+    ("u"  "Unassigned"          agent-shell-queue-capture-unassigned)
+    ("r"  "From region"         agent-shell-queue-capture-from-region)
+    ("y"  "From clipboard"      agent-shell-queue-capture-from-clipboard)
+    ("x"  "From context"        agent-shell-queue-capture-from-context)]
+   ["Enqueue"
+    ("ee" "Enqueue prompt"      agent-shell-queue-enqueue)
+    ("el" "Emacs Lisp form"     agent-shell-queue-enqueue-emacs)
+    ("ec" "Emacs command"       agent-shell-queue-enqueue-emacs-command)
+    ("es" "Shell (eshell)"      agent-shell-queue-enqueue-shell-eshell)
+    ("et" "Shell (eat)"         agent-shell-queue-enqueue-shell-eat)]
+   ["Insert"
+    ("p"  "Pause checkpoint"    agent-shell-queue-insert-pause)
+    ("d"  "Context drop"        agent-shell-queue-insert-clear-context)
+    ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
+    ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
+
+(agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
+
+;; Wire menu key into queue mode map
 
 (define-key agent-shell-queue-mode-map (kbd "M") #'agent-shell-menu-dispatch)
 

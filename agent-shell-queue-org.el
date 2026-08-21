@@ -32,7 +32,7 @@
 (require 'org)
 (require 'org-element)
 
-;;; Status / keyword mapping
+;; Status / keyword mapping
 
 (defconst agent-shell-queue-org--status-keyword
   '((active  . "TODO")
@@ -49,7 +49,7 @@
   (seq-map (lambda (it) (cons (cdr it) (car it))) agent-shell-queue-org--status-keyword)
   "Reverse alist: org TODO keyword strings to queue status symbols.")
 
-;;; Shared helpers
+;; Shared helpers
 
 (defun agent-shell-queue-org--heading-title (prompt)
   "Return a short heading label from the first line of PROMPT."
@@ -72,7 +72,7 @@
        (not (string-empty-p (string-trim str)))
        (string-to-number str)))
 
-;;; Serialization — org-insert based
+;; Serialization — org-insert based
 
 (defun agent-shell-queue-org--insert-item (item)
   "Append a level-2 org subtree for ITEM at end of the current org buffer.
@@ -115,7 +115,7 @@ build the property drawer so org manages drawer formatting."
         (agent-shell-queue-org--insert-item item)))
     (buffer-string)))
 
-;;; Deserialization — org-element based
+;; Deserialization — org-element based
 
 (defun agent-shell-queue-org--section-of (hl)
   "Return the section element that is a direct child of HL, or nil."
@@ -198,7 +198,7 @@ string-in-paragraph-contents issues during tree walking."
 				  (mapcar #'agent-shell-queue-org--item-from-element
 					  (agent-shell-queue-org--headlines-of bucket-hl))))))))
 
-;;; Registration
+;; Registration
 
 (cl-defmethod agent-shell-queue--serialize-items ((_format (eql org)) items)
   (let ((agent-shell-queue--items items))
@@ -210,7 +210,7 @@ string-in-paragraph-contents issues during tree walking."
 (cl-defmethod agent-shell-queue-format-file-extension ((_format (eql org)))
   ".org")
 
-;;; Org heading → queue capture
+;;; Org Mode Integration
 
 ;;;###autoload
 (defun agent-shell-queue-org-refile-from-heading (&optional remove-original)

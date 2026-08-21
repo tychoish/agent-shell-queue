@@ -30,7 +30,7 @@
 (require 'agent-shell-queue)
 
 
-;;; Variables
+;;; SQLite Storage Backend
 
 (defvar agent-shell-queue-db-file nil
   "Path to the SQLite database file used by the queue DB backend.
@@ -50,7 +50,7 @@ to store the database at a custom location.")
 (defvar agent-shell-queue-db--saved-load-function nil
   "Saved value of `agent-shell-queue-load-function' before DB enable.")
 
-;;; Schema
+;; Schema
 
 (defconst agent-shell-queue-db--create-items
   "CREATE TABLE IF NOT EXISTS items (
@@ -87,7 +87,7 @@ to store the database at a custom location.")
    ORDER BY bucket, position"
   "SELECT to reconstruct the full items alist on load.")
 
-;;; Connection management
+;; Connection management
 
 (defun agent-shell-queue-db--default-file ()
   "Return the default SQLite database file path."
@@ -126,7 +126,7 @@ to store the database at a custom location.")
     (sqlite-close agent-shell-queue-db--connection))
   (setq agent-shell-queue-db--connection nil))
 
-;;; Save
+;; Save
 
 (defun agent-shell-queue-db--save ()
   "Persist all queue items to SQLite.
@@ -167,7 +167,7 @@ Called as `agent-shell-queue-save-function' when the DB backend is active."
           (time-add (current-time)
                     (seconds-to-time agent-shell-queue-auto-flush-interval)))))
 
-;;; Load
+;; Load
 
 (defun agent-shell-queue-db--load ()
   "Populate `agent-shell-queue--items' from the SQLite database.
@@ -198,7 +198,7 @@ Called as `agent-shell-queue-load-function' when the DB backend is active."
             (sqlite-select conn agent-shell-queue-db--select-items))
     (setq agent-shell-queue--items result)))
 
-;;; Enable / disable
+;; Enable / disable
 
 ;;;###autoload
 (defun agent-shell-queue-db-enable (&optional db-file)
@@ -243,7 +243,7 @@ Closes the database connection."
   (agent-shell-queue-db--close)
   (message "agent-shell-queue: SQLite backend disabled"))
 
-;;; Show state
+;; Show state
 
 ;;;###autoload
 (defun agent-shell-queue-db-show-state ()
@@ -293,7 +293,7 @@ Shows per-bucket item counts and a tabular dump of all persisted rows."
       (read-only-mode 1))
     (pop-to-buffer buf)))
 
-;;; Export
+;; Export
 
 ;;;###autoload
 (defun agent-shell-queue-db-export ()
@@ -305,7 +305,7 @@ Loads current state from the DB then delegates to `agent-shell-queue-export'."
   (agent-shell-queue--ensure-loaded)
   (agent-shell-queue-export))
 
-;;; Import
+;; Import
 
 ;;;###autoload
 (defun agent-shell-queue-db-import (&optional source)
@@ -318,7 +318,7 @@ After importing, the DB is flushed immediately."
   (agent-shell-queue-db--save)
   (message "agent-shell-queue-db: import complete and flushed to database"))
 
-;;; Done-log hook (optional: record completed items in a separate DB table)
+;; Done-log hook (optional: record completed items in a separate DB table)
 
 (defconst agent-shell-queue-db--create-done
   "CREATE TABLE IF NOT EXISTS done_items (
