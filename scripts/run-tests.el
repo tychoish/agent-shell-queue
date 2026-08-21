@@ -10,8 +10,8 @@
 ;; repeat invocations do not pay the network cost again.
 ;;
 ;; Usage:
-;;   ./run-tests
-;;   emacs --script run-tests
+;;   ./scripts/run-tests.el
+;;   emacs --script scripts/run-tests.el
 
 ;;; Code:
 
@@ -20,7 +20,7 @@
 (require 'package)
 
 (defconst asq-test-runner--root
-  (file-name-directory (or load-file-name buffer-file-name))
+  (expand-file-name ".." (file-name-directory (or load-file-name buffer-file-name)))
   "Directory this script lives in -- the agent-shell-queue package root.")
 
 (defconst asq-test-runner--deps-dir
@@ -58,6 +58,7 @@
                           t "\\`test-.*\\.el\\'"))
 
 (message "Running test suite...")
-(ert-run-tests-batch-and-exit "^agent-shell")
+(ert-run-tests-batch "^agent-shell")
 
+(provide 'run-tests)
 ;;; run-tests ends here
