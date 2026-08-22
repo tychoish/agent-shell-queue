@@ -6393,7 +6393,7 @@ Defaults to the daemon name or system hostname.  Override in config:
   (setq agent-shell-queue-instance-name \"<name>\")
   (setq agent-shell-queue-instance-name \\='get-instance-name")
 
-(defcustom agent-shell-queue-default-pause-delay 0
+(defcustom agent-shell-queue-default-pause-delay 30.0
   "Default pause duration in seconds between tasks.
 Set to 0 or nil for no delay."
   :type '(choice (const :tag "No delay" 0)
@@ -6416,12 +6416,13 @@ When non-nil and less than the total pause duration, an alert is sent when
                  (float :tag "Float seconds"))
   :group 'agent-shell-queue)
 
-(defvar agent-shell-queue-serialization-format 'plist
+(defvar agent-shell-queue-serialization-format 'org
   "Format used to persist queue state to disk.
 One of:
   `plist' — s-expression with keyword-keyed plists (default; no extra deps)
   `json'  — JSON via built-in `json-serialize'/`json-parse-string' (Emacs 27+)
-  `yaml'  — YAML via `yaml-encode'/`yaml-parse-string' from the `yaml' package")
+  `yaml'  — YAML via `yaml-encode'/`yaml-parse-string' from the `yaml' package
+  `org'   — Org-mode file backend via `agent-shell-queue-org'")
 
 (defvar agent-shell-queue-idle-delay 60.0
   "Idle delay in seconds for the backup auto-send timer.
