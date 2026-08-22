@@ -1020,7 +1020,7 @@ Cancelling (C-g) defaults to \"queue as blocked\"."
             nil)
         t))))
 
-;;; Execution Control and Flow Modifiers
+;;; Execution Control
 
 ;;;###autoload
 (defun agent-shell-queue-pause ()
@@ -2577,146 +2577,8 @@ is shown.
 
 Use `agent-shell-queue-set-scope' (N) to narrow and
 `agent-shell-queue-scope-global' (W) to widen back to global.")
-;;; Display and Column Options
 
-(defvar agent-shell-queue-show-buffer-column t
-  "Show the Buffer column in the queue buffer.
-Toggle with `agent-shell-queue-toggle-buffer-column' (db in the menu).")
 
-(defvar agent-shell-queue-show-ordinal-column t
-  "Show the ordinal (#) column in the queue buffer.")
-
-(defvar agent-shell-queue-show-age-column t
-  "Show the Age column in the queue buffer.")
-
-(defvar agent-shell-queue-show-kind-column t
-  "Show the Kind column in the queue buffer.")
-
-(defvar agent-shell-queue-multiline-format nil
-  "Display prompt on a second line with a separator between items.
-When non-nil, `<down>' and `<up>' move by item rather than by line.")
-
-(defun agent-shell-queue-toggle-buffer-column ()
-  "Toggle visibility of the Buffer column in the queue buffer."
-  (interactive)
-  (setq agent-shell-queue-show-buffer-column (not agent-shell-queue-show-buffer-column))
-  (agent-shell-queue-buffer-refresh)
-  (message "Queue buffer column: %s"
-	   (if agent-shell-queue-show-buffer-column
-	       "on"
-	     "off")))
-
-(defun agent-shell-queue-toggle-ordinal-column ()
-  "Toggle visibility of the ordinal (#) column in the queue buffer."
-  (interactive)
-  (setq agent-shell-queue-show-ordinal-column (not agent-shell-queue-show-ordinal-column))
-  (agent-shell-queue-buffer-refresh)
-  (message "Queue ordinal column: %s"
-	   (if agent-shell-queue-show-ordinal-column
-	       "on"
-	     "off")))
-
-(defun agent-shell-queue-toggle-age-column ()
-  "Toggle visibility of the Age column in the queue buffer."
-  (interactive)
-  (setq agent-shell-queue-show-age-column (not agent-shell-queue-show-age-column))
-  (agent-shell-queue-buffer-refresh)
-  (message "Queue age column: %s"
-           (if agent-shell-queue-show-age-column
-	       "on"
-	     "off")))
-
-(defun agent-shell-queue-toggle-kind-column ()
-  "Toggle visibility of the Kind column in the queue buffer."
-  (interactive)
-  (setq agent-shell-queue-show-kind-column (not agent-shell-queue-show-kind-column))
-  (agent-shell-queue-buffer-refresh)
-  (message "Queue kind column: %s"
-           (if agent-shell-queue-show-kind-column "on" "off")))
-
-(defun agent-shell-queue-toggle-multiline-format ()
-  "Toggle multi-line display format for the queue buffer."
-  (interactive)
-  (setq agent-shell-queue-multiline-format
-        (not agent-shell-queue-multiline-format))
-  (agent-shell-queue-buffer-refresh)
-  (message "Queue multi-line format: %s"
-           (if agent-shell-queue-multiline-format "on" "off")))
-
-;;;###autoload
-(defun agent-shell-queue-select-columns ()
-  "Pick column display options via `annotated-completing-read'.
-Offers bulk presets, per-column visibility toggles, and multi-line switch.
-Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
-  (interactive)
-  (unless (derived-mode-p 'agent-shell-queue-mode)
-    (user-error "Not in an agent-shell queue buffer"))
-  (let* ((columns `(("Buffer column" . agent-shell-queue-show-buffer-column)
-                    ("Ordinal # column" . agent-shell-queue-show-ordinal-column)
-                    ("Age column" . agent-shell-queue-show-age-column)
-                    ("Kind column" . agent-shell-queue-show-kind-column)))
-         (table (map-into
-                 (append
-                  (list (cons "+ show all columns"
-                              (if (and agent-shell-queue-show-buffer-column
-                                       agent-shell-queue-show-ordinal-column
-                                       agent-shell-queue-show-age-column
-                                       agent-shell-queue-show-kind-column)
-                                  "already showing all columns"
-                                "enable Buffer, Ordinal, Age, and Kind columns"))
-                        (cons "+ minimal: status and prompt only"
-                              (if (not (or agent-shell-queue-show-buffer-column
-                                           agent-shell-queue-show-ordinal-column
-                                           agent-shell-queue-show-age-column
-                                           agent-shell-queue-show-kind-column))
-                                  "already minimal"
-                                "hide Buffer, Ordinal, Age, and Kind columns")))
-                  (seq-map (lambda (it)
-                             (cons (car it)
-                                   (if (symbol-value (cdr it))
-                                       "visible · click to hide"
-                                     "hidden · click to show")))
-                           columns)
-                  (list (cons "Multi-line format"
-                              (if agent-shell-queue-multiline-format
-                                  "on · prompt on second line · click to disable"
-                                "off · single-line · click to enable"))))
-                 '(hash-table :test equal))))
-    (when-let* ((choice (annotated-completing-read
-                        table
-                        :prompt "queue columns: "
-                        :category 'agent-shell-queue-column
-                        :require-match t
-                        :history 'agent-shell-queue-select-columns)))
-      (cond
-       ((equal choice "+ show all columns")
-        (setq agent-shell-queue-show-buffer-column t
-              agent-shell-queue-show-ordinal-column t
-              agent-shell-queue-show-age-column t
-              agent-shell-queue-show-kind-column t))
-       ((equal choice "+ minimal: status and prompt only")
-        (setq agent-shell-queue-show-buffer-column nil
-              agent-shell-queue-show-ordinal-column nil
-              agent-shell-queue-show-age-column nil
-              agent-shell-queue-show-kind-column nil))
-       ((equal choice "Multi-line format")
-        (setq agent-shell-queue-multiline-format (not agent-shell-queue-multiline-format)))
-       (t
-        (when-let* ((var (cdr (assoc choice columns))))
-          (set var (not (symbol-value var))))))
-      (agent-shell-queue-buffer-refresh))))
-
-;; Persist display preferences and queue state across sessions.
-(defvar savehist-additional-variables nil)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue--queue)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-buffer-column)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-ordinal-column)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-age-column)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-kind-column)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-multiline-format)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-default-pause-delay)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-on-pause-start)
-(add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-before-pause-end)
 
 ;;; Queue Buffer and Navigation
 
@@ -2827,7 +2689,6 @@ Directories are derived from live shell buffers and directory queue buckets."
   (setq-local agent-shell-queue--display-scope nil)
   (agent-shell-queue-buffer-refresh)
   (force-mode-line-update))
-
 
 (defvar agent-shell-queue-mode-map
   (let ((m (make-sparse-keymap)))
@@ -3422,170 +3283,146 @@ for a live replacement."
     (agent-shell-queue-reenqueue id)
     (agent-shell-queue-buffer-refresh)))
 
+(defvar agent-shell-queue-show-buffer-column t
+  "Show the Buffer column in the queue buffer.
+Toggle with `agent-shell-queue-toggle-buffer-column' (db in the menu).")
+
+(defvar agent-shell-queue-show-ordinal-column t
+  "Show the ordinal (#) column in the queue buffer.")
+
+(defvar agent-shell-queue-show-age-column t
+  "Show the Age column in the queue buffer.")
+
+(defvar agent-shell-queue-show-kind-column t
+  "Show the Kind column in the queue buffer.")
+
+(defvar agent-shell-queue-multiline-format nil
+  "Display prompt on a second line with a separator between items.
+When non-nil, `<down>' and `<up>' move by item rather than by line.")
+
+(defun agent-shell-queue-toggle-buffer-column ()
+  "Toggle visibility of the Buffer column in the queue buffer."
+  (interactive)
+  (setq agent-shell-queue-show-buffer-column (not agent-shell-queue-show-buffer-column))
+  (agent-shell-queue-buffer-refresh)
+  (message "Queue buffer column: %s"
+	   (if agent-shell-queue-show-buffer-column
+	       "on"
+	     "off")))
+
+(defun agent-shell-queue-toggle-ordinal-column ()
+  "Toggle visibility of the ordinal (#) column in the queue buffer."
+  (interactive)
+  (setq agent-shell-queue-show-ordinal-column (not agent-shell-queue-show-ordinal-column))
+  (agent-shell-queue-buffer-refresh)
+  (message "Queue ordinal column: %s"
+	   (if agent-shell-queue-show-ordinal-column
+	       "on"
+	     "off")))
+
+(defun agent-shell-queue-toggle-age-column ()
+  "Toggle visibility of the Age column in the queue buffer."
+  (interactive)
+  (setq agent-shell-queue-show-age-column (not agent-shell-queue-show-age-column))
+  (agent-shell-queue-buffer-refresh)
+  (message "Queue age column: %s"
+           (if agent-shell-queue-show-age-column
+	       "on"
+	     "off")))
+
+(defun agent-shell-queue-toggle-kind-column ()
+  "Toggle visibility of the Kind column in the queue buffer."
+  (interactive)
+  (setq agent-shell-queue-show-kind-column (not agent-shell-queue-show-kind-column))
+  (agent-shell-queue-buffer-refresh)
+  (message "Queue kind column: %s"
+           (if agent-shell-queue-show-kind-column "on" "off")))
+
+(defun agent-shell-queue-toggle-multiline-format ()
+  "Toggle multi-line display format for the queue buffer."
+  (interactive)
+  (setq agent-shell-queue-multiline-format
+        (not agent-shell-queue-multiline-format))
+  (agent-shell-queue-buffer-refresh)
+  (message "Queue multi-line format: %s"
+           (if agent-shell-queue-multiline-format "on" "off")))
+
+;;;###autoload
+(defun agent-shell-queue-select-columns ()
+  "Pick column display options via `annotated-completing-read'.
+Offers bulk presets, per-column visibility toggles, and multi-line switch.
+Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-queue-mode)
+    (user-error "Not in an agent-shell queue buffer"))
+  (let* ((columns `(("Buffer column" . agent-shell-queue-show-buffer-column)
+                    ("Ordinal # column" . agent-shell-queue-show-ordinal-column)
+                    ("Age column" . agent-shell-queue-show-age-column)
+                    ("Kind column" . agent-shell-queue-show-kind-column)))
+         (table (map-into
+                 (append
+                  (list (cons "+ show all columns"
+                              (if (and agent-shell-queue-show-buffer-column
+                                       agent-shell-queue-show-ordinal-column
+                                       agent-shell-queue-show-age-column
+                                       agent-shell-queue-show-kind-column)
+                                  "already showing all columns"
+                                "enable Buffer, Ordinal, Age, and Kind columns"))
+                        (cons "+ minimal: status and prompt only"
+                              (if (not (or agent-shell-queue-show-buffer-column
+                                           agent-shell-queue-show-ordinal-column
+                                           agent-shell-queue-show-age-column
+                                           agent-shell-queue-show-kind-column))
+                                  "already minimal"
+                                "hide Buffer, Ordinal, Age, and Kind columns")))
+                  (seq-map (lambda (it)
+                             (cons (car it)
+                                   (if (symbol-value (cdr it))
+                                       "visible · click to hide"
+                                     "hidden · click to show")))
+                           columns)
+                  (list (cons "Multi-line format"
+                              (if agent-shell-queue-multiline-format
+                                  "on · prompt on second line · click to disable"
+                                "off · single-line · click to enable"))))
+                 '(hash-table :test equal))))
+    (when-let* ((choice (annotated-completing-read
+                        table
+                        :prompt "queue columns: "
+                        :category 'agent-shell-queue-column
+                        :require-match t
+                        :history 'agent-shell-queue-select-columns)))
+      (cond
+       ((equal choice "+ show all columns")
+        (setq agent-shell-queue-show-buffer-column t
+              agent-shell-queue-show-ordinal-column t
+              agent-shell-queue-show-age-column t
+              agent-shell-queue-show-kind-column t))
+       ((equal choice "+ minimal: status and prompt only")
+        (setq agent-shell-queue-show-buffer-column nil
+              agent-shell-queue-show-ordinal-column nil
+              agent-shell-queue-show-age-column nil
+              agent-shell-queue-show-kind-column nil))
+       ((equal choice "Multi-line format")
+        (setq agent-shell-queue-multiline-format (not agent-shell-queue-multiline-format)))
+       (t
+        (when-let* ((var (cdr (assoc choice columns))))
+          (set var (not (symbol-value var))))))
+      (agent-shell-queue-buffer-refresh))))
+
+;; Persist display preferences and queue state across sessions.
+(defvar savehist-additional-variables nil)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue--queue)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-buffer-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-ordinal-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-age-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-show-kind-column)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-multiline-format)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-default-pause-delay)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-on-pause-start)
+(add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-before-pause-end)
+
 ;;; Queue Flow Modifiers and Wait Items
-
-;;;###autoload
-(defun agent-shell-queue-insert-pause (&optional buf position duration)
-  "Insert a pause item into BUF's queue, optionally at 1-based POSITION.
-If DURATION is specified (seconds), pause auto-resumes after DURATION.
-When called interactively, prompts for target buffer (and duration with
-prefix arg)."
-  (interactive
-   (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
-             (agent-shell-queue--pick-buffer "Insert pause for: "))
-         nil
-         (when current-prefix-arg
-           (read-number "Pause duration in seconds: "))))
-  (when-let* ((_ buf)
-              (item (progn
-                      (agent-shell-queue--ensure-loaded)
-                      (agent-shell-queue-item--make
-                       :id (agent-shell-queue--gen-id)
-                       :args (if duration
-                                 (format "[PAUSE — %s s]" (agent-shell-queue--format-duration duration))
-                               "[PAUSE — waiting for human]")
-                       :status 'active
-                       :kind 'pause
-                       :delay-after duration
-                       :created (float-time))))
-              (id (agent-shell-queue-item-id item))
-              (buf-name (buffer-name buf)))
-    (agent-shell-queue--add-item-to-bucket buf-name item)
-    (when (and position (> position 0))
-      (dotimes (_ (max 0 (- (length (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
-                            position)))
-        (agent-shell-queue--move id -1)))
-    (agent-shell-queue--save)
-    (agent-shell-queue--refresh-buffer)
-    (message "Pause%s inserted into %s queue"
-             (if duration (format " (%s s)" (agent-shell-queue--format-duration duration)) "")
-             buf-name)))
-
-(defun agent-shell-queue-set-item-delay-before (id delay)
-  "Set pre-dispatch DELAY (in seconds) for queue item ID."
-  (interactive
-   (let* ((item (agent-shell-queue-find-item "Set delay-before for item: "))
-          (id (agent-shell-queue-item-id item))
-          (cur (or (agent-shell-queue-item-delay-before item) 0))
-          (val (read-number (format "Delay before dispatch (seconds, current %s): " cur) cur)))
-     (list id (if (<= val 0) nil val))))
-  (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
-    (setf (agent-shell-queue-item-delay-before item) delay)
-    (agent-shell-queue--save)
-    (agent-shell-queue--refresh-buffer)))
-
-(defun agent-shell-queue-set-item-delay-after (id delay)
-  "Set post-completion DELAY (in seconds) for queue item ID."
-  (interactive
-   (let* ((item (agent-shell-queue-find-item "Set delay-after for item: "))
-          (id (agent-shell-queue-item-id item))
-          (cur (or (agent-shell-queue-item-delay-after item) 0))
-          (val (read-number (format "Delay after complete (seconds, current %s): " cur) cur)))
-     (list id (if (<= val 0) nil val))))
-  (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
-    (setf (agent-shell-queue-item-delay-after item) delay)
-    (agent-shell-queue--save)
-    (agent-shell-queue--refresh-buffer)))
-
-;;;###autoload
-(defun agent-shell-queue-insert-clear-context (prompt &optional buf)
-  "Insert a context-drop item with PROMPT into BUF's queue.
-When called interactively, prompts for target buffer and context text."
-  (interactive
-   (let* ((buf (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
-                   (agent-shell-queue--pick-buffer "Context drop for: ")))
-          (prompt (read-string "Context: ")))
-     (list prompt buf)))
-  (when (and prompt buf (not (string-empty-p prompt)))
-    (agent-shell-queue--ensure-loaded)
-    (let ((buf-name (buffer-name buf)))
-      (agent-shell-queue--add-item-to-bucket buf-name (agent-shell-queue--make-item prompt nil 'context))
-      (agent-shell-queue--ensure-subscription buf)
-      (agent-shell-queue--save)
-      (agent-shell-queue--refresh-buffer)
-      (message "Context drop inserted into %s queue" buf-name))))
-
-;;;###autoload
-(defun agent-shell-queue-insert-wait (buf)
-  "Insert a wait-until item into BUF's queue.
-Prompts for a target date/time; uses `org-read-date' when available,
-otherwise reads a string parseable by `date-to-time' (e.g. \"2026-05-16 14:30\").
-When dispatched the item blocks the queue until the target time is reached,
-then marks itself done and advances to the next item automatically."
-  (interactive
-   (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
-             (agent-shell-queue--pick-buffer "Wait in queue for: "))))
-  (when buf
-    (agent-shell-queue--ensure-loaded)
-    (let* ((target (if (fboundp 'org-read-date)
-                       (org-read-date t t nil "Wait until: ")
-                     (date-to-time
-                      (read-from-minibuffer "Wait until (YYYY-MM-DD HH:MM): "))))
-           (display (format-time-string "%Y-%m-%d %H:%M:%S" target))
-           (item (agent-shell-queue--make-item display nil 'wait))
-           (buf-name (buffer-name buf)))
-      (agent-shell-queue--add-item-to-bucket buf-name item)
-      (agent-shell-queue--ensure-subscription buf)
-      (agent-shell-queue--save)
-      (agent-shell-queue--refresh-buffer)
-      (message "Wait until %s inserted into %s queue" display buf-name))))
-
-(defun agent-shell-queue-insert-compact (prompt &optional buf)
-  "Insert a compact (non-LLM manual) item with PROMPT into BUF's queue.
-When dispatched the item pauses the queue and alerts; use
-`agent-shell-queue-mark-done' to complete it and advance the queue."
-  (interactive
-   (let ((buf (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
-                  (agent-shell-queue--pick-buffer "Compact item for: "))))
-     (list (read-string "Manual task: ") buf)))
-  (when (and prompt buf (not (string-empty-p prompt)))
-    (agent-shell-queue--ensure-loaded)
-    (let ((buf-name (buffer-name buf)))
-      (agent-shell-queue--add-item-to-bucket buf-name (agent-shell-queue--make-item prompt nil 'compact))
-      (agent-shell-queue--ensure-subscription buf)
-      (agent-shell-queue--save)
-      (agent-shell-queue--refresh-buffer)
-      (message "Compact item inserted into %s queue" buf-name))))
-
-(defun agent-shell-queue-mark-done (id)
-  "Mark item ID as done without dispatching it through the LLM.
-If the item is a compact item that paused a session, the session is resumed
-and the queue advances to the next item."
-  (when-let* ((pair (agent-shell-queue--item-by-id id))
-              (item (cdr pair))
-              (buf-name (car pair)))
-
-    (when (eq (agent-shell-queue-item-status item) 'done)
-      (user-error "Item %s is already done" id))
-
-    (agent-shell-queue--assert-not-running item)
-    (agent-shell-queue--mark-item-done buf-name item 'manual)
-
-    (when (member (cons buf-name id) agent-shell-queue--compact-running)
-      (setq agent-shell-queue--compact-running
-            (seq-remove (lambda (it) (equal it (cons buf-name id))) agent-shell-queue--compact-running))
-      (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
-            (seq-remove (lambda (it) (equal it buf-name))
-                        (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
-
-    (agent-shell-queue--save)
-    (agent-shell-queue--refresh-buffer)
-
-    (when-let* ((buf (get-buffer buf-name)))
-      (agent-shell-queue--send-next-for-buffer buf))))
-
-(defun agent-shell-queue-buffer-mark-done ()
-  "Mark the item at point as done."
-  (interactive)
-  (when-let* ((id (tabulated-list-get-id)))
-    (agent-shell-queue-mark-done id)))
-
-(defun agent-shell-queue-item-view-mark-done ()
-  "Mark the displayed item as done."
-  (interactive)
-  (when-let* ((id agent-shell-queue--item-view-id))
-    (agent-shell-queue-mark-done id)
-    (agent-shell-queue-item-view-refresh)))
 
 ;; Item view
 
@@ -4877,8 +4714,6 @@ offered as a target so items can be deferred for later assignment."
                   "Target (or unassigned): ")))
         (agent-shell-queue--invoke-input-for-type type buf)))))
 
-;;; Prompt Editing and Direct State Modification
-
 (defun agent-shell-queue--yaml-str (s)
   "Format string S as a quoted YAML scalar, escaping special characters."
   (concat "\""
@@ -5447,9 +5282,7 @@ For items whose ID exists, prompts to keep, replace, or assign new ID."
     (let ((skip-note (if (> skipped 0) (format " (%d skipped)" skipped) "")))
       (message "agent-shell-queue: imported %d item(s)%s" added skip-note))))
 
-
-
-;;; Session Forking and Worktrees
+;;; Session Management
 
 (defface agent-shell-queue-pending-fork-face
   '((t :foreground "mediumpurple3" :slant italic))
@@ -5757,6 +5590,169 @@ OPTS is the fork options plist (see `agent-shell-queue-fork-session')."
              (or item-id "end") buf-name)
     fork-item))
 
+;;;###autoload
+(defun agent-shell-queue-insert-pause (&optional buf position duration)
+  "Insert a pause item into BUF's queue, optionally at 1-based POSITION.
+If DURATION is specified (seconds), pause auto-resumes after DURATION.
+When called interactively, prompts for target buffer (and duration with
+prefix arg)."
+  (interactive
+   (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
+             (agent-shell-queue--pick-buffer "Insert pause for: "))
+         nil
+         (when current-prefix-arg
+           (read-number "Pause duration in seconds: "))))
+  (when-let* ((_ buf)
+              (item (progn
+                      (agent-shell-queue--ensure-loaded)
+                      (agent-shell-queue-item--make
+                       :id (agent-shell-queue--gen-id)
+                       :args (if duration
+                                 (format "[PAUSE — %s s]" (agent-shell-queue--format-duration duration))
+                               "[PAUSE — waiting for human]")
+                       :status 'active
+                       :kind 'pause
+                       :delay-after duration
+                       :created (float-time))))
+              (id (agent-shell-queue-item-id item))
+              (buf-name (buffer-name buf)))
+    (agent-shell-queue--add-item-to-bucket buf-name item)
+    (when (and position (> position 0))
+      (dotimes (_ (max 0 (- (length (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))
+                            position)))
+        (agent-shell-queue--move id -1)))
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)
+    (message "Pause%s inserted into %s queue"
+             (if duration (format " (%s s)" (agent-shell-queue--format-duration duration)) "")
+             buf-name)))
+
+(defun agent-shell-queue-set-item-delay-before (id delay)
+  "Set pre-dispatch DELAY (in seconds) for queue item ID."
+  (interactive
+   (let* ((item (agent-shell-queue-find-item "Set delay-before for item: "))
+          (id (agent-shell-queue-item-id item))
+          (cur (or (agent-shell-queue-item-delay-before item) 0))
+          (val (read-number (format "Delay before dispatch (seconds, current %s): " cur) cur)))
+     (list id (if (<= val 0) nil val))))
+  (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
+    (setf (agent-shell-queue-item-delay-before item) delay)
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)))
+
+(defun agent-shell-queue-set-item-delay-after (id delay)
+  "Set post-completion DELAY (in seconds) for queue item ID."
+  (interactive
+   (let* ((item (agent-shell-queue-find-item "Set delay-after for item: "))
+          (id (agent-shell-queue-item-id item))
+          (cur (or (agent-shell-queue-item-delay-after item) 0))
+          (val (read-number (format "Delay after complete (seconds, current %s): " cur) cur)))
+     (list id (if (<= val 0) nil val))))
+  (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
+    (setf (agent-shell-queue-item-delay-after item) delay)
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)))
+
+;;;###autoload
+(defun agent-shell-queue-insert-clear-context (prompt &optional buf)
+  "Insert a context-drop item with PROMPT into BUF's queue.
+When called interactively, prompts for target buffer and context text."
+  (interactive
+   (let* ((buf (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
+                   (agent-shell-queue--pick-buffer "Context drop for: ")))
+          (prompt (read-string "Context: ")))
+     (list prompt buf)))
+  (when (and prompt buf (not (string-empty-p prompt)))
+    (agent-shell-queue--ensure-loaded)
+    (let ((buf-name (buffer-name buf)))
+      (agent-shell-queue--add-item-to-bucket buf-name (agent-shell-queue--make-item prompt nil 'context))
+      (agent-shell-queue--ensure-subscription buf)
+      (agent-shell-queue--save)
+      (agent-shell-queue--refresh-buffer)
+      (message "Context drop inserted into %s queue" buf-name))))
+
+;;;###autoload
+(defun agent-shell-queue-insert-wait (buf)
+  "Insert a wait-until item into BUF's queue.
+Prompts for a target date/time; uses `org-read-date' when available,
+otherwise reads a string parseable by `date-to-time' (e.g. \"2026-05-16 14:30\").
+When dispatched the item blocks the queue until the target time is reached,
+then marks itself done and advances to the next item automatically."
+  (interactive
+   (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
+             (agent-shell-queue--pick-buffer "Wait in queue for: "))))
+  (when buf
+    (agent-shell-queue--ensure-loaded)
+    (let* ((target (if (fboundp 'org-read-date)
+                       (org-read-date t t nil "Wait until: ")
+                     (date-to-time
+                      (read-from-minibuffer "Wait until (YYYY-MM-DD HH:MM): "))))
+           (display (format-time-string "%Y-%m-%d %H:%M:%S" target))
+           (item (agent-shell-queue--make-item display nil 'wait))
+           (buf-name (buffer-name buf)))
+      (agent-shell-queue--add-item-to-bucket buf-name item)
+      (agent-shell-queue--ensure-subscription buf)
+      (agent-shell-queue--save)
+      (agent-shell-queue--refresh-buffer)
+      (message "Wait until %s inserted into %s queue" display buf-name))))
+
+(defun agent-shell-queue-insert-compact (prompt &optional buf)
+  "Insert a compact (non-LLM manual) item with PROMPT into BUF's queue.
+When dispatched the item pauses the queue and alerts; use
+`agent-shell-queue-mark-done' to complete it and advance the queue."
+  (interactive
+   (let ((buf (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
+                  (agent-shell-queue--pick-buffer "Compact item for: "))))
+     (list (read-string "Manual task: ") buf)))
+  (when (and prompt buf (not (string-empty-p prompt)))
+    (agent-shell-queue--ensure-loaded)
+    (let ((buf-name (buffer-name buf)))
+      (agent-shell-queue--add-item-to-bucket buf-name (agent-shell-queue--make-item prompt nil 'compact))
+      (agent-shell-queue--ensure-subscription buf)
+      (agent-shell-queue--save)
+      (agent-shell-queue--refresh-buffer)
+      (message "Compact item inserted into %s queue" buf-name))))
+
+(defun agent-shell-queue-mark-done (id)
+  "Mark item ID as done without dispatching it through the LLM.
+If the item is a compact item that paused a session, the session is resumed
+and the queue advances to the next item."
+  (when-let* ((pair (agent-shell-queue--item-by-id id))
+              (item (cdr pair))
+              (buf-name (car pair)))
+
+    (when (eq (agent-shell-queue-item-status item) 'done)
+      (user-error "Item %s is already done" id))
+
+    (agent-shell-queue--assert-not-running item)
+    (agent-shell-queue--mark-item-done buf-name item 'manual)
+
+    (when (member (cons buf-name id) agent-shell-queue--compact-running)
+      (setq agent-shell-queue--compact-running
+            (seq-remove (lambda (it) (equal it (cons buf-name id))) agent-shell-queue--compact-running))
+      (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+            (seq-remove (lambda (it) (equal it buf-name))
+                        (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
+
+    (agent-shell-queue--save)
+    (agent-shell-queue--refresh-buffer)
+
+    (when-let* ((buf (get-buffer buf-name)))
+      (agent-shell-queue--send-next-for-buffer buf))))
+
+(defun agent-shell-queue-buffer-mark-done ()
+  "Mark the item at point as done."
+  (interactive)
+  (when-let* ((id (tabulated-list-get-id)))
+    (agent-shell-queue-mark-done id)))
+
+(defun agent-shell-queue-item-view-mark-done ()
+  "Mark the displayed item as done."
+  (interactive)
+  (when-let* ((id agent-shell-queue--item-view-id))
+    (agent-shell-queue-mark-done id)
+    (agent-shell-queue-item-view-refresh)))
+
 (defun agent-shell-queue--fork-build-opts ()
   "Build fork options plist interactively using annotated-completing-read.
 Prompts for fork mode, worktree settings, and capture-pending flag.
@@ -5890,8 +5886,6 @@ of that buffer instead of being sent to an agent-shell via `agent-shell-insert'.
 
 (advice-add 'agent-shell-send-file-to :around
             #'agent-shell-queue--ad:agent-shell-send-file-to)
-
-;;; Task Interjection
 
 (defvar agent-shell-queue-interjection-continuation-suffix
   "\n\nAfter addressing the above, please resume your previous task where you left off."
@@ -6383,7 +6377,7 @@ access to all registered item kinds rather than prompt-only capture."
        :subscription agent-shell-queue--ready-sub-submit)
       (setq agent-shell-queue--ready-sub-submit nil))))
 
-;;; General Configuration
+;;; Configuration
 
 (defun agent-shell-queue--default-instance-name ()
   "Return a string identifying the current Emacs instance."

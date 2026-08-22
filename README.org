@@ -23,7 +23,7 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
   - [[#manual][Manual]]
 - [[#user-guides][User Guides]]
   - [[#prompt-composition-and-enqueueing][Prompt Composition and Enqueueing]]
-  - [[#execution-control-and-flow-modifiers][Execution Control and Flow Modifiers]]
+  - [[#execution-control][Execution Control]]
   - [[#task-interjection-and-queue-inspection][Task Interjection and Queue Inspection]]
   - [[#parallel-workflows-and-session-forking][Parallel Workflows and Session Forking]]
   - [[#persistence-storage-backends-and-backups][Persistence, Storage Backends and Backups]]
@@ -37,16 +37,12 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
     - [[#session-diagnostics][Session Diagnostics]]
   - [[#agent-shell-queue][agent-shell-queue]]
     - [[#prompt-composition-and-enqueueing][Prompt Composition and Enqueueing]]
-    - [[#execution-control-and-flow-modifiers][Execution Control and Flow Modifiers]]
-    - [[#display-and-column-options][Display and Column Options]]
+    - [[#execution-control][Execution Control]]
     - [[#queue-buffer-and-navigation][Queue Buffer and Navigation]]
-    - [[#queue-flow-modifiers-and-wait-items][Queue Flow Modifiers and Wait Items]]
     - [[#item-view-and-raw-inspection][Item View and Raw Inspection]]
-    - [[#prompt-editing-and-direct-state-modification][Prompt Editing and Direct State Modification]]
-    - [[#session-forking-and-worktrees][Session Forking and Worktrees]]
-    - [[#task-interjection][Task Interjection]]
+    - [[#session-management][Session Management]]
     - [[#input-routing-and-queue-only-mode][Input Routing and Queue-Only Mode]]
-    - [[#general-configuration][General Configuration]]
+    - [[#configuration][Configuration]]
   - [[#agent-shell-queue-persistence][agent-shell-queue-persistence]]
     - [[#sqlite-storage-backend][SQLite Storage Backend]]
     - [[#persistence-diagnostics-and-backup-restore][Persistence Diagnostics and Backup Restore]]
@@ -99,11 +95,16 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 
 * User Guides
 ** Prompt Composition and Enqueueing
-- *Targeted and Unassigned Capture*: Compose prompts destined for a specific agent shell or park them in the =(unassigned)= queue to assign later.
-- *Context and Region Seeding*: Capture prompts seeded from the active region, kill-ring, clipboard, or thing-at-point.
-- *Org-Mode Heading Refile*: Ingest task trees directly from Org files into the prompt queue.
-- *Directory-Scoped Queues*: Queue items for directories without an active shell; shells spawn automatically upon dispatch.
-- *Alternative Execution Kinds*: Queue Emacs Lisp forms, interactive commands, eshell, or eat terminal commands.
+- *Targeted and Unassigned Capture*: Compose prompts destined for a specific
+  agent shell or park them in the =(unassigned)= queue to assign later.
+- *Context and Region Seeding*: Capture prompts seeded from the active region,
+  kill-ring, clipboard, or thing-at-point.
+- *Org-Mode Heading Refile*: Ingest task trees directly from Org files into the
+  prompt queue.
+- *Directory-Scoped Queues*: Queue items for directories without an active
+  shell; shells spawn automatically upon dispatch.
+- *Alternative Execution Kinds*: Queue Emacs Lisp forms, interactive commands,
+  eshell, or eat terminal commands.
 
 *Key Functions*:
 - ~agent-shell-queue-enqueue~: Queue a prompt for an active or specified shell buffer.
@@ -114,23 +115,25 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 - ~agent-shell-queue-add-directory~ / ~agent-shell-queue-enqueue-directory~: Target directory queues.
 
 #+BEGIN_SRC emacs-lisp
-;; Programmatic enqueue with pre/post dispatch delays
-(agent-shell-queue-enqueue "Refactor auth middleware and add test cases"
-                           (get-buffer "*agent-shell: backend*")
-                           nil  ; background flag
-                           5.0  ; delay 5s before sending
-                           2.0) ; delay 2s after turn completes
+  ;; Programmatic enqueue with pre/post dispatch delays
+  (agent-shell-queue-enqueue "Refactor auth middleware and add test
+  cases" (get-buffer "*agent-shell: backend*") nil ; background flag 5.0
+  ; delay 5s before sending 2.0) ; delay 2s after turn completes
 
-;; Directory queue: creates shell on dispatch automatically
-(agent-shell-queue-add-directory "Run project linting and format checks"
-                                 "~/src/project-b/")
+  ;; Directory queue: creates shell on dispatch automatically
+  (agent-shell-queue-add-directory "Run project linting and format
+  checks" "~/src/project-b/")
 #+END_SRC
 
-** Execution Control and Flow Modifiers
-- *Global and Per-Session Pausing*: Suspend dispatch globally or for an individual session; active tasks finish while queued tasks hold.
-- *Flow Modifiers and Checkpoints*: Insert pause checkpoints, context wipes, or wait-until timers anywhere in the queue order.
-- *Automated Recovery*: Recover stuck ACP/shell-maker processes by interrupting and auto-resuming once idle.
-- *Pre and Post Turn Delays*: Regulate rate limits with configurable pauses between consecutive turns.
+** Execution Control
+- *Global and Per-Session Pausing*: Suspend dispatch globally or for an
+  individual session; active tasks finish while queued tasks hold.
+- *Flow Modifiers and Checkpoints*: Insert pause checkpoints, context wipes, or
+  wait-until timers anywhere in the queue order.
+- *Automated Recovery*: Recover stuck ACP/shell-maker processes by interrupting
+  and auto-resuming once idle.
+- *Pre and Post Turn Delays*: Regulate rate limits with configurable pauses
+  between consecutive turns.
 
 *Key Functions*:
 - ~agent-shell-queue-pause~ / ~agent-shell-queue-resume~: Toggle queue dispatch globally.
@@ -141,11 +144,11 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 - ~agent-shell-queue-recover-stuck-shell~: Interrupt a wedged shell and resume when idle.
 
 #+BEGIN_SRC emacs-lisp
-;; Insert a 30-second pause checkpoint into the active shell queue
-(agent-shell-queue-insert-pause (current-buffer) nil 30.0)
+  ;; Insert a 30-second pause checkpoint into the active shell queue
+  (agent-shell-queue-insert-pause (current-buffer) nil 30.0)
 
-;; Insert a scheduled wait timer
-(agent-shell-queue-insert-wait (current-buffer))
+  ;; Insert a scheduled wait timer (agent-shell-queue-insert-wait
+  (current-buffer))
 #+END_SRC
 
 ** Task Interjection and Queue Inspection
@@ -162,16 +165,13 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 - ~agent-shell-queue-buffer-inspect-item~: Inspect serialized item representation.
 
 #+BEGIN_SRC emacs-lisp
-;; Interject the current running agent task
-(agent-shell-queue-interject)
+  ;; Interject the current running agent task
+  (agent-shell-queue-interject)
 
-;; Keybindings in *agent-shell-queue* buffer:
-;; RET   - View item details
-;; e/C-e - Enqueue dispatch / Edit task prompt
-;; p/r   - Pause / Resume item
-;; M-up  - Move item earlier in queue
-;; M-down- Move item later in queue
-;; C-d x - Raw YAML queue editor
+  ;; Keybindings in *agent-shell-queue* buffer: RET - View item details
+  ;; e/C-e - Enqueue dispatch / Edit task prompt p/r - Pause / Resume
+  ;; item M-up - Move item earlier in queue M-down- Move item later in
+  ;; queue C-d x - Raw YAML queue editor
 #+END_SRC
 
 ** Parallel Workflows and Session Forking
@@ -186,12 +186,9 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 - ~agent-shell-queue-release-pending-fork~: Release frozen fork items back to active dispatch.
 
 #+BEGIN_SRC emacs-lisp
-;; Fork items starting at item "q0abcd" into a git worktree session
-(agent-shell-queue-fork-session (current-buffer)
-                                "q0abcd"
-                                '(:fork-mode fork
-                                  :use-worktree t
-                                  :worktree-branch "feature/experimental-branch"))
+  ;; Fork items starting at item "q0abcd" into a git worktree session
+  (agent-shell-queue-fork-session (current-buffer) "q0abcd" '(:fork-mode
+  fork :use-worktree t :worktree-branch "feature/experimental-branch"))
 #+END_SRC
 
 ** Persistence, Storage Backends and Backups
@@ -206,14 +203,12 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 - ~agent-shell-queue-export~ / ~agent-shell-queue-import~: Export/import queue state to/from YAML.
 
 #+BEGIN_SRC emacs-lisp
-;; Enable safe-save backups in init.el
-(setq agent-shell-queue-safe-save t
-      agent-shell-queue-safe-save-format 'yaml
-      agent-shell-queue-safe-save-max-files 50)
+  ;; Enable safe-save backups in init.el (setq
+  agent-shell-queue-safe-save t agent-shell-queue-safe-save-format 'yaml
+  agent-shell-queue-safe-save-max-files 50)
 
-;; Enable SQLite storage backend
-(require 'agent-shell-queue-db)
-(agent-shell-queue-db-enable)
+  ;; Enable SQLite storage backend (require 'agent-shell-queue-db)
+  (agent-shell-queue-db-enable)
 #+END_SRC
 
 ** Interactive Menus and Input Routing
@@ -229,11 +224,12 @@ git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-sh
 - ~agent-shell-menu-select-action~ / ~agent-shell-menu-resolve-permission~: Interactive ACR action pickers.
 
 #+BEGIN_SRC emacs-lisp
-;; Bind transient dispatch menu to M in queue mode and global map
-(define-key agent-shell-queue-mode-map (kbd "M") #'agent-shell-menu-dispatch)
+  ;; Bind transient dispatch menu to M in queue mode and global map
+  (define-key agent-shell-queue-mode-map (kbd "M")
+  #'agent-shell-menu-dispatch)
 
-;; Configure queue-intercept as default across all new agent sessions
-(setq agent-shell-queue-input-mode-default 'queue-intercept)
+  ;; Configure queue-intercept as default across all new agent sessions
+  (setq agent-shell-queue-input-mode-default 'queue-intercept)
 #+END_SRC
 
 * API Reference
@@ -374,7 +370,7 @@ Open a shell capture buffer to compose a command for eshell BUF. The capture buf
 
 Open a shell capture buffer to compose a command for eat BUF. The capture buffer is in ‘sh-mode’.  Confirm with C-c C-c. BUF may be nil to enqueue to the unassigned bucket.
 
-*** Execution Control and Flow Modifiers
+*** Execution Control
 
 **** agent-shell-queue-pause :command:
 
@@ -408,7 +404,27 @@ Session mode IDs that block queue dispatch. When a target shell is in one of the
 
 Hook run when a queue item transitions to done status. Each function is called with two arguments: BUF-NAME and ITEM.
 
-*** Display and Column Options
+*** Queue Buffer and Navigation
+
+**** agent-shell-queue-buffer-open :command:
+
+Open (or refresh) the *agent-shell-queue* buffer.
+
+**** agent-shell-queue-buffer-switch :command:
+
+Switch to the *agent-shell-queue* buffer in the current window.
+
+**** agent-shell-queue-set-scope :command:
+
+Narrow the queue buffer view: choose global, a directory, or a specific buffer.
+
+**** agent-shell-queue-scope-global :command:
+
+Reset the queue buffer to the global scope (show all items).
+
+**** agent-shell-queue-mode-map :variable:
+
+Keymap for ‘agent-shell-queue-mode’.
 
 **** agent-shell-queue-show-buffer-column :variable:
 
@@ -434,42 +450,6 @@ Display prompt on a second line with a separator between items. When non-nil, �
 
 Pick column display options via ‘annotated-completing-read’. Offers bulk presets, per-column visibility toggles, and multi-line switch. Changes take effect immediately via ‘agent-shell-queue-buffer-refresh’.
 
-*** Queue Buffer and Navigation
-
-**** agent-shell-queue-buffer-open :command:
-
-Open (or refresh) the *agent-shell-queue* buffer.
-
-**** agent-shell-queue-buffer-switch :command:
-
-Switch to the *agent-shell-queue* buffer in the current window.
-
-**** agent-shell-queue-set-scope :command:
-
-Narrow the queue buffer view: choose global, a directory, or a specific buffer.
-
-**** agent-shell-queue-scope-global :command:
-
-Reset the queue buffer to the global scope (show all items).
-
-**** agent-shell-queue-mode-map :variable:
-
-Keymap for ‘agent-shell-queue-mode’.
-
-*** Queue Flow Modifiers and Wait Items
-
-**** agent-shell-queue-insert-pause :command:
-
-Insert a pause item into BUF’s queue, optionally at 1-based POSITION. If DURATION is specified (seconds), pause auto-resumes after DURATION. When called interactively, prompts for target buffer (and duration with prefix arg).
-
-**** agent-shell-queue-insert-clear-context :command:
-
-Insert a context-drop item with PROMPT into BUF’s queue. When called interactively, prompts for target buffer and context text.
-
-**** agent-shell-queue-insert-wait :command:
-
-Insert a wait-until item into BUF’s queue. Prompts for a target date/time; uses ‘org-read-date’ when available, otherwise reads a string parseable by ‘date-to-time’ (e.g. "2026-05-16 14:30"). When dispatched the item blocks the queue until the target time is reached, then marks itself done and advances to the next item automatically.
-
 *** Item View and Raw Inspection
 
 **** agent-shell-queue-item-view-mode-map :variable:
@@ -487,8 +467,6 @@ Open a read-only raw-serialization view of the queue item at point. Prompts for 
 **** agent-shell-queue-item-view-inspect :command:
 
 Open a raw-serialization view of the item shown in this buffer. Prompts for the serialization format (p=plist j=json y=yaml in the buffer).
-
-*** Prompt Editing and Direct State Modification
 
 **** agent-shell-queue-export :command:
 
@@ -514,7 +492,7 @@ Open the queue for direct YAML editing. Every session not already paused is paus
 
 Import queue items from YAML. With no prefix arg reads from clipboard; with prefix arg prompts for file. For items whose ID exists, prompts to keep, replace, or assign new ID.
 
-*** Session Forking and Worktrees
+*** Session Management
 
 **** agent-shell-queue-fork-default-mode :variable:
 
@@ -540,6 +518,18 @@ Insert a fork task into BUF’s queue immediately before ITEM-ID. When ITEM-ID i
 
 Insert a fork task into BUF’s queue immediately after ITEM-ID. When ITEM-ID is nil, appends to the end of the queue. When the fork task is dispatched, it forks the queue starting at the next item after the fork task (determined dynamically at dispatch time). OPTS is the fork options plist (see ‘agent-shell-queue-fork-session’).
 
+**** agent-shell-queue-insert-pause :command:
+
+Insert a pause item into BUF’s queue, optionally at 1-based POSITION. If DURATION is specified (seconds), pause auto-resumes after DURATION. When called interactively, prompts for target buffer (and duration with prefix arg).
+
+**** agent-shell-queue-insert-clear-context :command:
+
+Insert a context-drop item with PROMPT into BUF’s queue. When called interactively, prompts for target buffer and context text.
+
+**** agent-shell-queue-insert-wait :command:
+
+Insert a wait-until item into BUF’s queue. Prompts for a target date/time; uses ‘org-read-date’ when available, otherwise reads a string parseable by ‘date-to-time’ (e.g. "2026-05-16 14:30"). When dispatched the item blocks the queue until the target time is reached, then marks itself done and advances to the next item automatically.
+
 **** agent-shell-queue-buffer-fork :command:
 
 Fork the queue starting at the item at point into a new session. Prompts interactively for fork options; uses annotated-completing-read when called outside the queue buffer to build options without task-at-point context.
@@ -551,8 +541,6 @@ Insert a fork queue item before the item at point. Prompts for fork options inte
 **** agent-shell-queue-buffer-insert-fork-after :command:
 
 Insert a fork queue item after the item at point. Prompts for fork options interactively.
-
-*** Task Interjection
 
 **** agent-shell-queue-interjection-continuation-suffix :variable:
 
@@ -618,7 +606,7 @@ RET		agent-shell-queue-ready-capture SPC		agent-shell-queue-ready-capture
 
 <remap> <self-insert-command>	agent-shell-queue-ready-capture
 
-*** General Configuration
+*** Configuration
 
 **** agent-shell-queue-instance-name :variable:
 
@@ -805,6 +793,10 @@ Restore queue items from a versioned backup via annotated-completing-read. Lists
 *** agent-shell-queue-org-refile-from-heading :command:
 
 Capture the current org heading’s subtree text into the agent-shell-queue. Opens a queue capture buffer pre-seeded with the heading content. With prefix arg REMOVE-ORIGINAL, delete the original subtree immediately after opening the capture buffer.
+
+
+
+
 
 * License
 
