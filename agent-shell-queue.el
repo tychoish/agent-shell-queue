@@ -39,6 +39,7 @@
 (require 'transient)
 (require 'alert)
 
+(require 'agent-shell-queue-org)
 (require 'agent-shell-queue-persistence)
 
 (defface agent-shell-queue-blocked-face
@@ -635,7 +636,7 @@ Optional DELAY-BEFORE and DELAY-AFTER specify per-task delays in seconds."
     (let ((use-blocked (agent-shell-queue--capture-plan-mode-choice buf)))
       (agent-shell-queue--close-capture-window)
       (unless (string-empty-p prompt)
-        (message "agent-shell: %s" (truncate-string-to-width prompt 200 nil nil "…"))
+        (message "agent-shell: %s" prompt)
         (cond
          (after-id
           (when-let* ((pair (agent-shell-queue--item-by-id after-id))
@@ -1573,8 +1574,7 @@ Always logs the removed item's prompt to *Messages*."
   (when-let* ((found (agent-shell-queue--item-by-id id)))
     (message "agent-shell-queue: removed %s [%s]: %s"
              id (car found)
-             (truncate-string-to-width
-              (agent-shell-queue-item-args (cdr found)) 120 nil nil "...")))
+             (agent-shell-queue-item-args (cdr found))))
   (let ((before-names (seq-map #'car (agent-shell-queue-store-items agent-shell-queue--store))))
     (seq-do (lambda (it)
               (setcdr it (seq-remove (lambda (item) (agent-shell-queue--item-id-matches-p id item)) (cdr it))))

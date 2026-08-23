@@ -1730,7 +1730,9 @@ is void: https://... when the command was invoked on an aborted item."
 (ert-deftest agent-shell-queue/load-restores-multiple-items ()
   "Loading persisted state restores all items across buckets."
   (let* ((tmp (make-temp-file "asq-multi"))
+         (agent-shell-queue-serialization-format 'plist)
          (agent-shell-queue-state-file-function (lambda () tmp))
+         (agent-shell-queue--loaded t)
          (agent-shell-queue--store
           (agent-shell-queue--make-store :items nil :format 'plist :file nil)))
     (unwind-protect

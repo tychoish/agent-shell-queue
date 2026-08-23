@@ -28,7 +28,8 @@
 ;;; Code:
 
 (require 'seq)
-(require 'agent-shell-queue)
+(require 'agent-shell-queue-persistence)
+(require 'org-macs)
 (require 'org)
 (require 'org-element)
 
@@ -74,46 +75,54 @@
 
 ;; Serialization — org-insert based
 
-(defun agent-shell-queue-org--insert-item (item)
-  "Append a level-2 org subtree for ITEM at end of the current org buffer.
-The buffer must already be in `org-mode'.  Uses `org-set-property' to
-build the property drawer so org manages drawer formatting."
+(defun agent-shell-queue-org--item-to-ast (item)
+  "Convert queue ITEM to an `org-element' headline AST node."
   (let* ((status (agent-shell-queue-item-status item))
          (keyword (or (cdr (assq status agent-shell-queue-org--status-keyword)) "TODO"))
-         (title (agent-shell-queue-org--heading-title
-                 (agent-shell-queue-item-args item)))
-         (prompt (or (agent-shell-queue-item-args item) "")))
-    (goto-char (point-max))
-    (insert (format "** %s %s\n" keyword title))
-    (org-set-property "QUEUE-ID"   (agent-shell-queue-item-id item))
-    (org-set-property "STATUS"     (symbol-name status))
-    (org-set-property "KIND"       (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
-    (org-set-property "BACKGROUND" (if (agent-shell-queue-item-background item) "t" "nil"))
-    (org-set-property "CREATED"    (agent-shell-queue-org--ts
-                                    (agent-shell-queue-item-created item)))
-    (org-set-property "DISPATCHED" (agent-shell-queue-org--ts
-                                    (agent-shell-queue-item-dispatched item)))
-    (org-set-property "COMPLETED"  (agent-shell-queue-org--ts
-                                    (agent-shell-queue-item-completed item)))
-    (goto-char (point-max))
-    (insert "\n")
-    (dolist (line (split-string prompt "\n"))
-      (insert "   " line "\n"))
-    (insert "\n")))
+         (title (agent-shell-queue-org--heading-title (agent-shell-queue-item-args item)))
+         (prompt (or (agent-shell-queue-item-args item) ""))
+         (props (list (cons "QUEUE-ID"   (agent-shell-queue-item-id item))
+                      (cons "STATUS"     (symbol-name status))
+                      (cons "KIND"       (symbol-name (or (agent-shell-queue-item-kind item) 'prompt)))
+                      (cons "BACKGROUND" (if (agent-shell-queue-item-background item) "t" "nil"))
+                      (cons "CREATED"    (agent-shell-queue-org--ts (agent-shell-queue-item-created item)))
+                      (cons "DISPATCHED" (agent-shell-queue-org--ts (agent-shell-queue-item-dispatched item)))
+                      (cons "COMPLETED"  (agent-shell-queue-org--ts (agent-shell-queue-item-completed item)))))
+         (node-props (mapcar (lambda (p)
+                               (org-element-create 'node-property
+                                                  (list :key (car p) :value (cdr p))))
+                             props))
+         (drawer (apply #'org-element-create 'property-drawer nil node-props))
+         (body-lines (mapconcat (lambda (line) (concat "   " line))
+                                (split-string prompt "\n")
+                                "\n"))
+         (section (org-element-create 'section nil drawer (concat "\n" body-lines "\n\n"))))
+    (org-element-create 'headline
+                        (list :level 2 :title title :todo-keyword keyword)
+                        section)))
+
+(defun agent-shell-queue-org--insert-item (item)
+  "Append a level-2 org subtree for ITEM at end of the current org buffer.
+Constructs the subtree using `org-element-create' and `org-element-interpret-data'."
+  (goto-char (point-max))
+  (insert (org-element-interpret-data (agent-shell-queue-org--item-to-ast item))))
 
 (defun agent-shell-queue-org--serialize ()
-  "Serialize `agent-shell-queue--items' to an org-mode string."
-  (with-temp-buffer
-    (org-mode)
-    (insert "#+TITLE: Agent Shell Queue\n")
-    (insert "#+STARTUP: overview\n")
-    (insert "#+TODO: TODO DOING WAIT HOLD DRAFT | DONE ABORTED\n\n")
-    (dolist (pair agent-shell-queue--items)
-      (goto-char (point-max))
-      (insert (format "* %s\n\n" (car pair)))
-      (dolist (item (cdr pair))
-        (agent-shell-queue-org--insert-item item)))
-    (buffer-string)))
+  "Serialize `agent-shell-queue--items' to an org-mode string using `org-element' AST."
+  (let* ((keywords (list (org-element-create 'keyword '(:key "TITLE" :value "Agent Shell Queue"))
+                         (org-element-create 'keyword '(:key "STARTUP" :value "overview"))
+                         (org-element-create 'keyword '(:key "TODO" :value "TODO DOING WAIT HOLD DRAFT | DONE ABORTED"))))
+         (bucket-hls (mapcar
+                      (lambda (pair)
+                        (let* ((bucket-name (car pair))
+                               (item-hls (mapcar #'agent-shell-queue-org--item-to-ast (cdr pair))))
+                          (apply #'org-element-create 'headline
+                                 (list :level 1 :title bucket-name)
+                                 nil
+                                 item-hls)))
+                      agent-shell-queue--items))
+         (doc (apply #'org-element-create 'org-data nil (append keywords bucket-hls))))
+    (org-element-interpret-data doc)))
 
 ;; Deserialization — org-element based
 
