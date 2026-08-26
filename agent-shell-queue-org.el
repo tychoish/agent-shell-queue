@@ -23,7 +23,7 @@
 ;;   (setq agent-shell-queue-serialization-format 'org)
 ;; Set the state file path to a .org path for clarity:
 ;;   (setq agent-shell-queue-state-file-function
-;;         (lambda () (sprite-state-path "agent-shell-queue.org")))
+;;         (lambda () (expand-file-name "agent-shell-queue.org" user-emacs-directory)))
 
 ;;; Code:
 

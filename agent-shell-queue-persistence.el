@@ -437,7 +437,8 @@ overwriting existing state with an empty queue."
   (if agent-shell-queue-save-function
       (progn
         (agent-shell-queue--log-write 'save-backend)
-        (funcall agent-shell-queue-save-function))
+        (let ((agent-shell-queue--items (agent-shell-queue-store-items (agent-shell-queue--current-store))))
+          (funcall agent-shell-queue-save-function)))
     (let* ((base-store (agent-shell-queue--current-store))
            (store (agent-shell-queue--make-store
                    :items (agent-shell-queue-store-items base-store)

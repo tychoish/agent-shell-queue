@@ -4521,5 +4521,28 @@ leaving sessions that were already individually paused beforehand untouched."
                                      (buffer-name spawned-buf))))
          (when (and spawned-buf (buffer-live-p spawned-buf))
            (kill-buffer spawned-buf)))))))
+(ert-deftest agent-shell-queue/dir-bucket-helpers ()
+  "Test directory bucket canonicalization, predicates, and extraction."
+  (let* ((raw-dir "/tmp/test-dir")
+         (canon (agent-shell-queue--canonicalize-dir raw-dir))
+         (bucket (agent-shell-queue--bucket-for-dir raw-dir)))
+    (should (string-suffix-p "/" canon))
+    (should (string-prefix-p "dir:" bucket))
+    (should (agent-shell-queue--dir-bucket-p bucket))
+    (should-not (agent-shell-queue--dir-bucket-p "*agent-shell*"))
+    (should-not (agent-shell-queue--dir-bucket-p nil))
+    (should (equal canon (agent-shell-queue--dir-from-bucket bucket)))
+    (should-not (agent-shell-queue--dir-from-bucket "*agent-shell*"))))
+
+(ert-deftest agent-shell-queue/gen-id-format-and-uniqueness ()
+  "Test that `agent-shell-queue--gen-id' produces unique 6-char IDs matching q[0-9][a-z0-9]{4}."
+  (let ((ids nil))
+    (dotimes (_ 50)
+      (let ((id (agent-shell-queue--gen-id)))
+        (should (stringp id))
+        (should (= 6 (length id)))
+        (should (string-match-p "\\`q[0-9][a-z0-9]\\{4\\}\\'" id))
+        (should-not (member id ids))
+        (push id ids)))))
 
 ;;; test-agent-shell-queue.el ends here

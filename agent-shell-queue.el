@@ -34,10 +34,12 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'sprite-future nil t)
 (require 'agent-shell)
 (require 'annotated-completing-read)
 (require 'transient)
 (require 'alert)
+(require 'savehist)
 
 (require 'agent-shell-queue-org)
 (require 'agent-shell-queue-persistence)
@@ -128,8 +130,7 @@ the save and refresh are skipped."
        (agent-shell-queue--refresh-buffer))))
 
 (defmacro agent-shell-queue--defstruct (type-name &rest field-specs)
-  "Define a cl-defstruct TYPE-NAME with FIELD-SPECS and serializers.
-Each spec in FIELD-SPECS is either a plain symbol or (SYMBOL &rest OPTIONS).
+  "Define a `cl-defstruct' TYPE-NAME with FIELD-SPECS and serializers.
 Supported options:
   :no-serialize t      — skip this field in to-plist and from-plist
   :alias KEYWORD       — also try KEYWORD when reading from plist
@@ -214,7 +215,7 @@ Returns EXECUTOR."
   (let ((name-str (cond
 		   ((symbolp name) (symbol-name name))
 		   ((stringp name) name)
-		   (t (user-error "impossible type for %s" name)))))
+		   (t (user-error "Impossible type for %s" name)))))
     (setq agent-shell-queue--executors
           (cons (agent-shell-queue-executor--make
                  :name name-str
@@ -270,9 +271,8 @@ Built-in registrations are added at the end of this file.")
 
 
 (cl-defun agent-shell-queue-register-item-type (&key kind label buffer-pred dispatch-fn input-spec)
-  "Register an item type in `agent-shell-queue--item-types'.
-KIND is a symbol; re-registering an existing KIND replaces the entry.
-See `agent-shell-queue-item-type' for field documentation."
+  "Register item type with KIND, LABEL, BUFFER-PRED, DISPATCH-FN, and INPUT-SPEC.
+KIND is a symbol; re-registering an existing KIND replaces the entry."
   (setq agent-shell-queue--item-types
         (cons (agent-shell-queue-item-type--make
                :kind kind :label label :buffer-pred buffer-pred
@@ -308,7 +308,7 @@ nil BUF-OR-NIL (unassigned) always accepts any kind.  Returns t on success."
   t)
 
 (defun agent-shell-queue--kind-needs-session-p (kind)
-  "Return non-nil when KIND requires agent-shell session-mode compatibility."
+  "Return non-nil when KIND requires `agent-shell' session-mode compatibility."
   (when-let* ((type (agent-shell-queue--type-for-kind kind)))
     (eq (agent-shell-queue-item-type-buffer-pred type)
         #'agent-shell-queue--agent-shell-buffer-p)))
@@ -544,12 +544,12 @@ Shared by `agent-shell-queue-unpause-all-sessions' and
   "Keymap for `agent-shell-queue-capture-mode'.")
 
 (define-derived-mode agent-shell-queue-capture-mode markdown-mode "Queue-Capture"
-  "Mode for composing a queued agent-shell prompt.
+  "Mode for composing a queued `agent-shell' prompt.
 \\{agent-shell-queue-capture-mode-map}"
   (setq-local electric-indent-inhibit t))
 
 (defvar-local agent-shell-queue--capture-target nil
-  "Target agent-shell buffer for this capture session.")
+  "Target `agent-shell' buffer for this capture session.")
 
 (defvar-local agent-shell-queue--capture-origin nil
   "Buffer from which capture was launched, used for context insertion.")
@@ -583,7 +583,7 @@ its target.  ORIGIN-BUF is used for context commands; defaults to current
 buffer.  INITIAL-CONTENT is inserted before display if non-nil.
 KIND sets `agent-shell-queue--capture-kind' (defaults to `prompt').
 MODE, when non-nil, is a major-mode function used instead of
-`agent-shell-queue-capture-mode'; C-c C-c and C-c C-k are bound in mode map.
+`agent-shell-queue-capture-mode'; \\[agent-shell-queue-capture-confirm] and \\[agent-shell-queue-capture-cancel] are bound in mode map.
 Optional DELAY-BEFORE and DELAY-AFTER specify per-task delays in seconds."
   (let* ((bucket-name (if target-buf
                           (buffer-name target-buf)
@@ -717,7 +717,7 @@ If a draft was previously saved from this buffer it is updated in place."
   (message "Background: off"))
 
 (defun agent-shell-queue-capture-yank-kill ()
-  "Insert the most recent kill-ring entry at point."
+  "Insert the most recent `kill-ring' entry at point."
   (interactive)
   (when kill-ring (insert (car kill-ring))))
 
@@ -781,8 +781,8 @@ Works in both capture and edit buffers."
 
 ;;;###autoload
 (defun agent-shell-queue-capture (&optional buf)
-  "Open a capture buffer targeting BUF (nil adds to the unassigned queue).
-When called interactively from an agent-shell buffer, targets that buffer.
+  "Open a capture buffer targeting BUF (nil add to the unassigned queue).
+When called interactively from an `agent-shell' buffer, targets that buffer.
 With a prefix argument, opens an unassigned capture instead."
   (interactive
    (list (cond
@@ -830,7 +830,7 @@ Uses the resolved clear command for BUF as the prompt."
 ;;;###autoload
 (defun agent-shell-queue-capture-unassigned ()
   "Open a capture buffer to compose a prompt for the unassigned queue.
-Unassigned items display in blue and can later be assigned to a shell via `t'."
+Unassigned items display in blue and can later be assigned to a shell via key t."
   (interactive)
   (agent-shell-queue--open-capture nil (current-buffer)))
 
@@ -853,7 +853,7 @@ rather than appended to the end."
 (defun agent-shell-queue-capture-from-region (&optional buf)
   "Open a capture buffer pre-seeded with the active region text.
 When no region is active, opens an empty capture.  BUF is the target
-agent-shell buffer; nil adds to the unassigned queue."
+`agent-shell' buffer; nil adds to the unassigned queue."
   (interactive
    (list (cond
           (current-prefix-arg nil)
@@ -867,7 +867,7 @@ agent-shell buffer; nil adds to the unassigned queue."
 ;;;###autoload
 (defun agent-shell-queue-capture-from-context (&optional buf)
   "Open a capture buffer pre-seeded with a string selected from context.
-Candidates include thing-at-point, active region, current line, and
+Candidates include `thing-at-point', active region, current line, and
 kill ring.  BUF is the target buffer; nil for unassigned queue."
   (interactive
    (list (cond
@@ -882,10 +882,9 @@ kill ring.  BUF is the target buffer; nil for unassigned queue."
      (unless (string-empty-p text)
        text))))
 
-;;;###autoload
 (defun agent-shell-queue-capture-from-clipboard (&optional buf)
   "Open a capture buffer pre-seeded with the current clipboard contents.
-BUF is the target agent-shell buffer; nil adds to the unassigned queue."
+BUF is the target `agent-shell' buffer; nil adds to the unassigned queue."
   (interactive
    (list (cond
           (current-prefix-arg nil)
@@ -898,7 +897,8 @@ BUF is the target agent-shell buffer; nil adds to the unassigned queue."
 
 ;;;###autoload
 (defun agent-shell-queue-add-directory (prompt dir &optional background delay-before delay-after)
-  "Add a new active item for PROMPT in directory queue DIR.  Save and refresh."
+  "Add a new active item for PROMPT in directory queue DIR.
+Optional BACKGROUND, DELAY-BEFORE, and DELAY-AFTER configure task settings."
   (interactive
    (list (read-string "Prompt: ")
          (read-directory-name "Directory queue: ")
@@ -921,8 +921,8 @@ BUF is the target agent-shell buffer; nil adds to the unassigned queue."
 ;;;###autoload
 (defun agent-shell-queue-enqueue-emacs (buf)
   "Open an Emacs Lisp capture buffer to compose a form for BUF's queue.
-The capture buffer is in `emacs-lisp-mode'.  Confirm with \\`C-c C-c',
-cancel with \\`C-c C-k'.  When dispatched, the form is evaluated via
+The capture buffer is in `emacs-lisp-mode'.  Confirm with \\[agent-shell-queue-capture-confirm],
+cancel with \\[agent-shell-queue-capture-cancel].  When dispatched, the form is evaluated via
 `eval'; errors are reported as messages and the item is marked done.
 BUF may be nil to enqueue to the unassigned bucket."
   (interactive (list (agent-shell-queue--pick-buffer-for-kind 'emacs-lisp "Target (or unassigned): ")))
@@ -944,7 +944,7 @@ BUF may be nil to enqueue to the unassigned bucket."
 ;;;###autoload
 (defun agent-shell-queue-enqueue-shell-eshell (buf)
   "Open a shell capture buffer to compose a command for eshell BUF.
-The capture buffer is in `sh-mode'.  Confirm with \\`C-c C-c'.
+The capture buffer is in `sh-mode'.  Confirm with \\[agent-shell-queue-capture-confirm].
 BUF may be nil to enqueue to the unassigned bucket."
   (interactive (list (agent-shell-queue--pick-buffer-for-kind 'shell-eshell "eshell buffer (or unassigned): ")))
   (agent-shell-queue--open-capture buf nil nil 'shell-eshell 'sh-mode))
@@ -952,7 +952,7 @@ BUF may be nil to enqueue to the unassigned bucket."
 ;;;###autoload
 (defun agent-shell-queue-enqueue-shell-eat (buf)
   "Open a shell capture buffer to compose a command for eat BUF.
-The capture buffer is in `sh-mode'.  Confirm with \\`C-c C-c'.
+The capture buffer is in `sh-mode'.  Confirm with \\[agent-shell-queue-capture-confirm].
 BUF may be nil to enqueue to the unassigned bucket."
   (interactive (list (agent-shell-queue--pick-buffer-for-kind 'shell-eat "eat buffer (or unassigned): ")))
   (agent-shell-queue--open-capture buf nil nil 'shell-eat 'sh-mode))
@@ -961,7 +961,7 @@ BUF may be nil to enqueue to the unassigned bucket."
 
 (defun agent-shell-queue--open-elisp-capture (target-buf)
   "Open an Emacs Lisp capture buffer targeting TARGET-BUF's queue.
-The buffer is in `emacs-lisp-mode' with C-c C-c / C-c C-k bindings.
+The buffer is in `emacs-lisp-mode' with \\[agent-shell-queue-capture-confirm] and \\[agent-shell-queue-capture-cancel] bindings.
 Items created from this buffer have kind `emacs-lisp'."
   (let* ((capture-buf (get-buffer-create
                        (format "*agent-shell-queue-elisp: %s*"
@@ -1003,8 +1003,7 @@ how the window was opened (i.e. independent of `quit-restore' state)."
   "When BUF's session is in a blocking mode, prompt for what to do.
 Returns non-nil if the item should be queued as `blocked.skip'.
 If the user chooses \"switch mode\", calls `agent-shell-set-session-mode'
-interactively on BUF and returns nil so the item is queued normally.
-Cancelling (C-g) defaults to \"queue as blocked\"."
+Cancelling (\\`C-g\\') defaults to \"queue as blocked\"."
   (when (and buf (agent-shell-queue--session-mode-blocked-p buf))
     (let* ((mode-id (map-nested-elt (buffer-local-value 'agent-shell--state buf)
                                     '(:session :mode-id)))
@@ -1058,7 +1057,7 @@ Alias for `agent-shell-queue-unpause-all-sessions'."
           (agent-shell-queue-store-items agent-shell-queue--store)))
 
 (defun agent-shell-queue-session-pause (&optional buf)
-  "Pause dispatch for BUF (default: current agent-shell session)."
+  "Pause dispatch for BUF (default: current `agent-shell' session)."
   (interactive
    (list (agent-shell-queue--pick-shell-with-state "Pause dispatch for: ")))
   (when-let* ((name (buffer-name buf)))
@@ -1067,7 +1066,7 @@ Alias for `agent-shell-queue-unpause-all-sessions'."
       (message "agent-shell-queue: %s PAUSED" name))))
 
 (defun agent-shell-queue-session-resume (&optional buf)
-  "Resume dispatch for BUF (default: current agent-shell session).
+  "Resume dispatch for BUF (default: current `agent-shell' session).
 Any running `pause' or `compact' item for BUF is marked done automatically."
   (interactive
    (list (agent-shell-queue--pick-shell-with-state "Resume dispatch for: ")))
@@ -1089,6 +1088,7 @@ Any running `pause' or `compact' item for BUF is marked done automatically."
 
 (defun agent-shell-queue--poll-for-idle-and-resume (buf attempt)
   "Poll BUF until idle, then call `agent-shell-queue-session-resume'.
+ATTEMPT tracks retry count up to 20 times (~10 seconds total).
 Retries every 0.5 seconds up to 20 times (~10 seconds total).
 Called by `agent-shell-queue-recover-stuck-shell'."
   (cond
@@ -1103,7 +1103,7 @@ Called by `agent-shell-queue-recover-stuck-shell'."
     (run-with-timer 0.5 nil #'agent-shell-queue--poll-for-idle-and-resume buf (1+ attempt)))))
 
 (defun agent-shell-queue-recover-stuck-shell (&optional buf)
-  "Interrupt a stuck shell and auto-resume queue dispatch when it becomes idle.
+  "Interrupt stuck shell BUF and auto-resume queue dispatch when it becomes idle.
 Marks any running item as aborted, sends an interrupt to the shell, then
 polls until the shell is no longer busy before resuming dispatch.
 Use this when the shell is frozen with no prompt appearing after the last turn."
@@ -1166,7 +1166,7 @@ is called."
                     lib))
              (_ (file-exists-p src)))
       (load-file src)
-    (error "agent-shell-queue-reload: cannot locate source file"))
+    (error "Agent-shell-queue-reload: cannot locate source file"))
   (agent-shell-queue--load)
   (setq agent-shell-queue--loaded t)
   (seq-do (lambda (it)
@@ -1293,12 +1293,12 @@ Installed as :before advice on `agent-shell-interrupt'."
 
 
 (defun agent-shell-queue--default-pick-buffer (prompt)
-  "Pick a live agent-shell buffer using PROMPT via `completing-read'."
+  "Pick a live `agent-shell' buffer using PROMPT via `completing-read'."
   (when-let* ((bufs (agent-shell-buffers)))
     (get-buffer (completing-read prompt (seq-map #'buffer-name bufs) nil t))))
 
 (defun agent-shell-queue--pick-shell-with-state (prompt)
-  "Select a live agent-shell buffer via PROMPT using queue-state annotations."
+  "Select a live `agent-shell' buffer via PROMPT using queue-state annotations."
   (let* ((bufs (or (agent-shell-buffers)
                    (user-error "No live agent-shell buffers")))
          (table (seq-map (lambda (buf)
@@ -1348,7 +1348,7 @@ the session queue is paused until the mode changes.")
    "\n"))
 
 (defun agent-shell-queue--make-item (prompt &optional background kind delay-before delay-after)
-  "Return new active item for PROMPT, BACKGROUND, KIND, and delays."
+  "Return new active item for PROMPT, BACKGROUND, KIND, DELAY-BEFORE, and DELAY-AFTER."
   (agent-shell-queue-item--make
    :id (agent-shell-queue--gen-id)
    :args (agent-shell-queue--clean-args prompt)
@@ -1374,7 +1374,7 @@ the session queue is paused until the mode changes.")
 ;; Buffer predicates
 
 (defun agent-shell-queue--agent-shell-buffer-p (buf)
-  "Return non-nil when BUF is a live agent-shell session buffer."
+  "Return non-nil when BUF is a live `agent-shell' session buffer."
   (and (buffer-live-p buf)
        (with-current-buffer buf (derived-mode-p 'agent-shell-mode))))
 
@@ -1389,7 +1389,7 @@ the session queue is paused until the mode changes.")
        (with-current-buffer buf (derived-mode-p 'eat-mode))))
 
 (defun agent-shell-queue--pick-buffer (prompt)
-  "Pick a live agent-shell buffer using PROMPT."
+  "Pick a live `agent-shell' buffer using PROMPT."
   (funcall agent-shell-queue-pick-buffer-function prompt))
 
 (defun agent-shell-queue--candidate-buffers-for-kind (kind)
@@ -1405,7 +1405,7 @@ When the kind has no buffer-pred (any-buffer), returns all live buffers."
   (truncate-string-to-width (or text "") max-width nil nil "…"))
 
 (defun agent-shell-queue--pick-buffer-for-kind (kind &optional prompt)
-  "Pick a buffer compatible with KIND via ACR, offering unassigned.
+  "Pick a buffer compatible with KIND via ACR using PROMPT, offering unassigned.
 Returns a live buffer, or nil meaning the unassigned bucket.
 When no compatible buffers exist: falls through to nil unless
 `agent-shell-queue-strict-buffer-assignment' is non-nil."
@@ -1553,7 +1553,8 @@ Registers a `turn-complete' subscription on BUF if one is not already active."
 ;; Prompt capture helpers
 
 (defun agent-shell-queue-add-unassigned (prompt &optional background delay-before delay-after)
-  "Add a new item for PROMPT to the unassigned bucket.  Save and refresh.
+  "Add a new item for PROMPT to the unassigned bucket.
+Optional BACKGROUND, DELAY-BEFORE, and DELAY-AFTER configure task settings.
 Unassigned items display in blue and sort after all shell-assigned items."
   (with-agent-shell-queue
     (let ((item (agent-shell-queue--make-item prompt background 'prompt delay-before delay-after)))
@@ -1845,7 +1846,8 @@ and dispatches the next item for BUF-NAME if the buffer is still live."
     (agent-shell-queue--complete-item item buf-name)))
 
 (defun agent-shell-queue--default-executor (item args &optional target-buf-name)
-  "Default dispatch for ITEM: send ARGS to the item's target shell buffer.
+  "Default dispatch for ITEM using TARGET-BUF-NAME.
+Send ARGS to the item's target shell buffer.
 Fires an alert with the truncated ARGS text, then calls `agent-shell-insert'
 to submit the text.  Background items are prefixed with
 resolved background prefix.  Records the buffer position after
@@ -2234,11 +2236,11 @@ No-op when BUF's session is paused."
 ;; Registry dispatch functions
 
 (defun agent-shell-queue--dispatch-to-session (item buf-name)
-  "Dispatch ITEM to its agent-shell session via the default executor."
+  "Dispatch ITEM to `agent-shell' session BUF-NAME via the default executor."
   (agent-shell-queue--default-executor item (agent-shell-queue-item-args item) buf-name))
 
 (defun agent-shell-queue--dispatch-emacs-lisp (item buf-name)
-  "Dispatch an emacs-lisp ITEM by evaluating its args as a Lisp form."
+  "Dispatch an emacs-lisp ITEM for BUF-NAME by evaluating its args as a Lisp form."
   (condition-case err
       (eval (read (agent-shell-queue-item-args item)) t)
     (error (message "agent-shell-queue: emacs-lisp %s error: %s"
@@ -2246,7 +2248,7 @@ No-op when BUF's session is paused."
   (agent-shell-queue--complete-item item buf-name))
 
 (defun agent-shell-queue--dispatch-emacs-command (item buf-name)
-  "Dispatch an emacs-command ITEM by invoking it interactively."
+  "Dispatch an emacs-command ITEM for BUF-NAME by invoking it interactively."
   (condition-case err
       (call-interactively (intern (agent-shell-queue-item-args item)))
     (error (message "agent-shell-queue: emacs-command %s error: %s"
@@ -2254,7 +2256,7 @@ No-op when BUF's session is paused."
   (agent-shell-queue--complete-item item buf-name))
 
 (defun agent-shell-queue--dispatch-pause-compact (item buf-name)
-  "Dispatch a pause or compact ITEM: pause the queue or delay and alert."
+  "Dispatch a pause or compact ITEM for BUF-NAME: pause the queue or delay and alert."
   (cl-pushnew (cons buf-name (agent-shell-queue-item-id item))
               agent-shell-queue--compact-running :test #'equal)
   (let ((duration (or (agent-shell-queue-item-delay-after item)
@@ -2286,7 +2288,7 @@ No-op when BUF's session is paused."
 (declare-function eshell-insert-and-send "esh-mode")
 
 (defun agent-shell-queue--dispatch-shell-eshell (item buf-name)
-  "Dispatch a shell-eshell ITEM by inserting and sending in the eshell buffer."
+  "Dispatch a shell-eshell ITEM for BUF-NAME by inserting and sending in eshell."
   (if-let* ((buf (get-buffer buf-name)))
       (progn
         (with-current-buffer buf
@@ -2298,7 +2300,7 @@ No-op when BUF's session is paused."
 (declare-function eat-term-send-string "eat")
 
 (defun agent-shell-queue--dispatch-shell-eat (item buf-name)
-  "Dispatch a shell-eat ITEM via eat-term-send-string."
+  "Dispatch a shell-eat ITEM for BUF-NAME via `eat-term-send-string'."
   (if-let* ((buf (get-buffer buf-name)))
       (progn
         (with-current-buffer buf
@@ -2775,7 +2777,7 @@ This prevents tasks from executing without any supervisory display."
   (agent-shell-queue--save))
 
 (define-derived-mode agent-shell-queue-mode tabulated-list-mode "Queue"
-  "Major mode for reviewing and managing the agent-shell prompt queue."
+  "Major mode for reviewing and managing the `agent-shell' prompt queue."
   (setq tabulated-list-format
         (agent-shell-queue--column-format t (agent-shell-queue--prompt-width t)))
   (setq agent-shell-queue--last-column-structure
@@ -2815,8 +2817,7 @@ This prevents tasks from executing without any supervisory display."
                             (when (> remaining 0)
                               (format "  |  Next sync in %s"
                                       (agent-shell-queue--format-age
-                                       (seconds-to-time remaining)))))))
-)
+                                       (seconds-to-time remaining))))))))
                   (format " Queue: %s  |  Sessions: %d  |  Depth: %d%s  |  Flushed: %s%s"
                           state sessions depth
                           (or scope-display "")
@@ -3410,8 +3411,6 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
           (set var (not (symbol-value var))))))
       (agent-shell-queue-buffer-refresh))))
 
-;; Persist display preferences and queue state across sessions.
-(defvar savehist-additional-variables nil)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue--queue)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-show-buffer-column)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-show-ordinal-column)
@@ -3421,7 +3420,6 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-default-pause-delay)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-on-pause-start)
 (add-to-list 'savehist-additional-variables 'agent-shell-queue-alert-before-pause-end)
-
 ;;; Queue Flow Modifiers and Wait Items
 
 ;; Item view
@@ -3573,7 +3571,7 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
    (list :key "q"       :label "Close"    :cmd 'quit-window                          :group nil :annotation nil :if nil))
   "Action table for `agent-shell-queue-item-view-mode'.
 Each entry is a plist with keys:
-  :key        — key-binding string for `kbd'
+  :key        — key binding string for `kbd'
   :label      — human-readable label
   :cmd        — command symbol
   :group      — transient group name (nil = keymap only)
@@ -3599,7 +3597,7 @@ Each entry is a plist with keys:
   "Keymap for `agent-shell-queue-item-view-mode'.")
 
 (define-derived-mode agent-shell-queue-item-view-mode markdown-mode "Queue-Item"
-  "Read-only view of a single agent-shell queue item."
+  "Read-only view of a single `agent-shell' queue item."
   (setq buffer-read-only t)
   (font-lock-mode -1))
 
@@ -3837,7 +3835,7 @@ Archiving must be enabled via `agent-shell-queue-archive-enabled'."
     (agent-shell-queue-item-view-refresh)))
 
 (defun agent-shell-queue-item-view-assign ()
-  "Assign the displayed item to a different agent-shell buffer."
+  "Assign the displayed item to a different `agent-shell' buffer."
   (interactive)
   (when-let* ((id agent-shell-queue--item-view-id)
               (pair (agent-shell-queue--item-by-id id))
@@ -3867,7 +3865,7 @@ Archiving must be enabled via `agent-shell-queue-archive-enabled'."
 ;; Detached item reassignment
 
 (defun agent-shell-queue--pick-shell-for-reassign (prompt)
-  "Prompt for a live agent-shell buffer or offer to create a new one.
+  "Prompt with PROMPT for a live `agent-shell' buffer or offer to create a new one.
 Returns a buffer name string, or nil if cancelled."
   (let* ((bufs (agent-shell-buffers))
          (live-entries (seq-map (lambda (b)
@@ -4002,7 +4000,7 @@ Binds p/j/y to switch formats, g to refresh, q to quit."
        (buffer-string)))
     ('yaml
      (unless (fboundp 'yaml-encode)
-       (user-error "yaml-encode not available; install the `yaml' package"))
+       (user-error "Yaml-encode not available; install the `yaml' package"))
      (yaml-encode
       (map-into (list (cons "buffer" target)
                       (cons "item" (agent-shell-queue--item-to-yaml item)))
@@ -4269,7 +4267,7 @@ excluded.")
      :if (lambda () (not agent-shell-queue-archive-enabled)))]])
 
 (defun agent-shell-queue-item-view-actions ()
-  "Show available item-view actions via annotated-completing-read."
+  "Show available item-view actions via `annotated-completing-read'."
   (interactive)
   (let* ((visible (thread-last agent-shell-queue--item-view-action-table
                     (seq-filter (lambda (a)
@@ -4395,7 +4393,7 @@ Offers nil/unassigned as an option for deferred assignment."
         (agent-shell-queue--assign-item id new-name)))))
 
 (defun agent-shell-queue-buffer-context-menu ()
-  "Offer context-sensitive actions for the item at point via completing-read."
+  "Offer context-sensitive actions for the item at point via `completing-read'."
   (interactive)
   (when-let* ((id (tabulated-list-get-id))
               (pair (agent-shell-queue--item-by-id id))
@@ -4447,7 +4445,7 @@ Offers nil/unassigned as an option for deferred assignment."
 (defun agent-shell-queue-buffer-toggle-only-mode ()
   "Toggle queue-only mode in the shell buffer for the item at point.
 Done and aborted items cannot be attached to a shell — re-enqueue them first.
-When the shell buffer is dead, picks a live replacement via completing-read."
+When the shell buffer is dead, picks a live replacement via `completing-read'."
   (interactive)
   (when-let* ((id (tabulated-list-get-id))
               (pair (agent-shell-queue--item-by-id id))
@@ -4477,6 +4475,7 @@ When the shell buffer is dead, picks a live replacement via completing-read."
       'default))
 
 (defun agent-shell-queue-only-enable ()
+  "Enable queue-only input mode in current shell buffer."
   (interactive)
   (agent-shell-queue-set-input-mode 'queue-only))
 
@@ -4487,6 +4486,7 @@ When the shell buffer is dead, picks a live replacement via completing-read."
          (eq (buffer-local-value 'agent-shell-queue-input-mode shell) 'queue-only))))
 
 (defun agent-shell-queue-only-disable-in-buffer (&optional buf)
+  "Disable queue-only input mode in BUF (defaults to current buffer)."
   (interactive)
   (with-current-buffer (or (when (bufferp buf) buf)
                            (when (get-buffer buf) buf)
@@ -4495,10 +4495,12 @@ When the shell buffer is dead, picks a live replacement via completing-read."
       (agent-shell-queue-set-input-mode 'default))))
 
 (defun agent-shell-queue-only-disable ()
+  "Disable queue-only input mode in current shell buffer."
   (interactive)
   (agent-shell-queue-only-disable-in-buffer))
 
 (defun agent-shell-queue-only-disable-all ()
+  "Disable queue-only input mode across all `agent-shell' buffers."
   (interactive)
   (let ((cleared (seq-filter (lambda (buf)
                                (eq (buffer-local-value 'agent-shell-queue-input-mode buf)
@@ -4507,7 +4509,6 @@ When the shell buffer is dead, picks a live replacement via completing-read."
     (seq-do #'agent-shell-queue-only-disable-in-buffer cleared)
     (when cleared (agent-shell-queue--refresh-buffer))
     (message "agent-shell-queue: queue-only disabled in %d buffer(s)" (length cleared))))
-
 (defun agent-shell-queue-buffer-open-shell ()
   "Switch to the shell buffer for the item at point.
 If the buffer is not live and the item's executor provides a create
@@ -4523,7 +4524,7 @@ function, offer to create a new buffer of the same type."
                 (executor-name (agent-shell-queue--executor-name executor-fn))
                 (entry (agent-shell-queue--find-executor executor-name))
                 (create-fn (agent-shell-queue-executor-create entry)))
-          (when (y-or-n-p (format "Buffer %s is not live. Create a new one? " buf-name))
+          (when (y-or-n-p (format "Buffer %s is not live.  Create a new one? " buf-name))
             (when-let* ((new-buf (funcall create-fn)))
               (pop-to-buffer new-buf)))
         (user-error "Shell buffer %s is not live" buf-name)))))
@@ -4541,7 +4542,7 @@ function, offer to create a new buffer of the same type."
                 (executor-name (agent-shell-queue--executor-name executor-fn))
                 (entry (agent-shell-queue--find-executor executor-name))
                 (create-fn (agent-shell-queue-executor-create entry)))
-          (when (y-or-n-p (format "Buffer %s is not live. Create a new one? " buf-name))
+          (when (y-or-n-p (format "Buffer %s is not live.  Create a new one? " buf-name))
             (when-let* ((new-buf (funcall create-fn)))
               (pop-to-buffer new-buf)))
         (user-error "Shell buffer %s is not live" buf-name)))))
@@ -4559,7 +4560,7 @@ function, offer to create a new buffer of the same type."
      :if-nil agent-shell-queue-archive-enabled)]])
 
 (define-advice agent-shell-queue-destructive-menu (:before () guard-queue-buffer)
-  "Signal an error when not invoked from an agent-shell queue overview buffer."
+  "Signal an error when not invoked from an `agent-shell' queue overview buffer."
   (unless (derived-mode-p 'agent-shell-queue-mode)
     (user-error "Queue menu is only available from the agent-shell queue buffer")))
 
@@ -4681,7 +4682,7 @@ function, offer to create a new buffer of the same type."
     ("lr" "Reload from disk" agent-shell-queue-reload)]])
 
 (define-advice agent-shell-queue-dispatch (:before () guard-queue-buffer)
-  "Signal an error when not invoked from an agent-shell queue overview buffer."
+  "Signal an error when not invoked from an `agent-shell' queue overview buffer."
   (unless (derived-mode-p 'agent-shell-queue-mode)
     (user-error "Queue menu is only available from the agent-shell queue buffer")))
 
@@ -4833,7 +4834,7 @@ being edited, switches to that buffer and signals an error."
               (_ (not (equal (buffer-local-value 'agent-shell-queue--editing-id existing) id))))
         (progn
           (pop-to-buffer existing '(display-buffer-below-selected))
-          (user-error "agent-shell-queue: already editing item %s — save or cancel first"
+          (user-error "Agent-shell-queue: already editing item %s — save or cancel first"
                       (buffer-local-value 'agent-shell-queue--editing-id existing)))
       (let ((edit-buf (get-buffer-create "*agent-shell-queue-edit*")))
           (with-current-buffer edit-buf
@@ -4862,7 +4863,7 @@ being edited, switches to that buffer and signals an error."
   "Edit a queued item's prompt.
 In `agent-shell-queue-mode' without SELECT (prefix argument): edit the item at
 point immediately.  With SELECT, or when point carries no item, or when called
-from outside `agent-shell-queue-mode': select via annotated-completing-read.
+from outside `agent-shell-queue-mode': select via `annotated-completing-read'.
 Candidates include all non-done, non-running items across all buffers."
   (interactive "P")
   (agent-shell-queue--ensure-loaded)
@@ -4905,7 +4906,7 @@ Candidates include all non-done, non-running items across all buffers."
                                                      :category 'agent-shell-queue-item
                                                      :require-match t
                                                      :history 'agent-shell-queue-edit-task))
-                  (id (map-elt id-by-key choice))) ;; map-elt might be able to handle the nill choice output and so this could all be inlined 
+                  (id (map-elt id-by-key choice)))
         (agent-shell-queue--open-edit-for-id id)))))
 
 (defun agent-shell-queue-edit-save-and-flush ()
@@ -4978,7 +4979,7 @@ individually paused before raw edit began stays paused afterward.")
 (defun agent-shell-queue--render-to-yaml ()
   "Render active/deferred queue items to a YAML string for raw editing."
   (unless (fboundp 'yaml-encode)
-    (error "yaml-encode not available; install the `yaml' package"))
+    (error "Yaml-encode not available; install the `yaml' package"))
   ;; if-let*
   (let ((buckets (thread-last (agent-shell-queue-store-items agent-shell-queue--store)
                               (seq-map (lambda (pair)
@@ -5194,7 +5195,7 @@ cancel with \\[agent-shell-queue-raw-edit-cancel]."
 
 ;;;###autoload
 (defun agent-shell-queue-import (&optional source)
-  "Import queue items from YAML.
+  "Import queue items from SOURCE (YAML).
 With no prefix arg reads from clipboard; with prefix arg prompts for file.
 For items whose ID exists, prompts to keep, replace, or assign new ID."
   (interactive (list (if current-prefix-arg 'file 'clipboard)))
@@ -5369,7 +5370,7 @@ Returns the worktree path string on success, nil on failure."
           nil))))))
 
 (defun agent-shell-queue--fork-create-session (source-buf fork-mode target-dir)
-  "Create a new agent-shell session and return the new buffer.
+  "Create a new `agent-shell' session and return the new buffer.
 SOURCE-BUF is the session being forked (used for directory and fork mode).
 FORK-MODE is `new' (agent-shell-new-shell) or `fork' (agent-shell-fork).
 TARGET-DIR, when non-nil, overrides the working directory.
@@ -5394,7 +5395,7 @@ Returns the newly created buffer on success, nil if none detected."
       (seq-find (lambda (it) (not (memq it before-bufs))) after-bufs))))
 
 (defun agent-shell-queue--fork-elisp-form (buf-name opts)
-  "Return an Emacs Lisp form string for a fork-queue emacs item.
+  "Return an Emacs Lisp form string for a fork-queue Emacs item.
 BUF-NAME is the source session; OPTS is the fork options plist.
 The form calls `agent-shell-queue--fork-session-from-running-emacs' at
 dispatch time to dynamically determine which items to fork."
@@ -5402,7 +5403,7 @@ dispatch time to dynamically determine which items to fork."
           buf-name opts))
 
 (defun agent-shell-queue--fork-session-from-running-emacs (buf-name opts)
-  "Fork items after the currently-running emacs item in BUF-NAME's queue.
+  "Fork items after the currently-running Emacs item in BUF-NAME's queue.
 Called at dispatch time by an emacs-kind fork item to determine from-id
 dynamically — handles reorderings that happened after the item was inserted.
 OPTS is the fork options plist (see `agent-shell-queue-fork-session')."
@@ -5447,7 +5448,7 @@ OPTS is a plist with these keys:
          ;; capture-pending intentionally leaves the source paused.
          (should-resume t))
     (unless items-to-fork
-      (user-error "agent-shell-queue: no eligible items to fork in %s" source-name))
+      (user-error "Agent-shell-queue: no eligible items to fork in %s" source-name))
     ;; Pause source session while we create the new one.
     (cl-pushnew source-name
                 (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
@@ -5457,11 +5458,11 @@ OPTS is a plist with these keys:
                              (agent-shell-queue--fork-create-worktree
                               source-buf worktree-branch worktree-path)))
                (_ (when (and use-worktree (null target-dir))
-                    (user-error "agent-shell-queue: worktree creation failed")))
+                    (user-error "Agent-shell-queue: worktree creation failed")))
                (new-buf (agent-shell-queue--fork-create-session
                          source-buf fork-mode target-dir)))
           (unless new-buf
-            (user-error "agent-shell-queue: could not detect new session after creation"))
+            (user-error "Agent-shell-queue: could not detect new session after creation"))
           (let ((new-name (buffer-name new-buf))
                 (fork-ids (seq-map #'agent-shell-queue-item-id items-to-fork)))
             (if capture-pending
@@ -5495,7 +5496,7 @@ OPTS is a plist with these keys:
 ;;;###autoload
 (defun agent-shell-queue-release-pending-fork (&optional buf)
   "Release all pending-fork items in BUF back to active status and resume dispatch.
-BUF defaults to the current agent-shell session when called from one."
+BUF defaults to the current `agent-shell' session when called from one."
   (interactive
    (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
              (agent-shell-queue--pick-buffer "Release pending-fork items in: "))))
@@ -5530,7 +5531,7 @@ IDX nil or out-of-range appends to the end."
 (defun agent-shell-queue-insert-fork-before (buf &optional item-id opts)
   "Insert a fork task into BUF's queue immediately before ITEM-ID.
 When ITEM-ID is nil, appends to the end of the queue.
-When the fork task is dispatched (as an emacs item), it forks the queue
+When the fork task is dispatched (as an Emacs item), it forks the queue
 starting at the item that follows the fork task in the queue at dispatch time.
 OPTS is the fork options plist (see `agent-shell-queue-fork-session')."
   (interactive
@@ -5675,9 +5676,10 @@ When called interactively, prompts for target buffer and context text."
 (defun agent-shell-queue-insert-wait (buf)
   "Insert a wait-until item into BUF's queue.
 Prompts for a target date/time; uses `org-read-date' when available,
-otherwise reads a string parseable by `date-to-time' (e.g. \"2026-05-16 14:30\").
-When dispatched the item blocks the queue until the target time is reached,
-then marks itself done and advances to the next item automatically."
+otherwise reads a string parseable by `date-to-time'
+\(e.g. \"2026-05-16 14:30\").  When dispatched the item blocks the queue until
+the target time is reached, then marks itself done and advances to the
+next item automatically."
   (interactive
    (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
              (agent-shell-queue--pick-buffer "Wait in queue for: "))))
@@ -5754,7 +5756,7 @@ and the queue advances to the next item."
     (agent-shell-queue-item-view-refresh)))
 
 (defun agent-shell-queue--fork-build-opts ()
-  "Build fork options plist interactively using annotated-completing-read.
+  "Build fork options plist interactively using `annotated-completing-read'.
 Prompts for fork mode, worktree settings, and capture-pending flag.
 Returns a plist suitable for `agent-shell-queue-fork-session' or nil to abort."
   (let* ((mode-choice (annotated-completing-read
@@ -5796,7 +5798,7 @@ Returns a plist suitable for `agent-shell-queue-fork-session' or nil to abort."
 ;;;###autoload
 (defun agent-shell-queue-buffer-fork ()
   "Fork the queue starting at the item at point into a new session.
-Prompts interactively for fork options; uses annotated-completing-read when
+Prompts interactively for fork options; uses `annotated-completing-read' when
 called outside the queue buffer to build options without task-at-point context."
   (interactive)
   (agent-shell-queue--ensure-loaded)
@@ -5846,10 +5848,10 @@ Prompts for fork options interactively."
                   (derived-mode-p 'agent-shell-queue-capture-mode)))
               (buffer-list)))
 
-(defun agent-shell-queue--ad:agent-shell-send-file-to (orig-fn &optional prompt-for-file)
-  "Around advice: include open queue capture buffers in the target picker.
+(defun agent-shell-queue--ad-agent-shell-send-file-to (orig-fn &optional prompt-for-file)
+  "Around advice using ORIG-FN and PROMPT-FOR-FILE to include capture buffers.
 When a capture buffer is chosen, the file context is inserted at point-max
-of that buffer instead of being sent to an agent-shell via `agent-shell-insert'."
+of that buffer instead of being sent to an `agent-shell' via `agent-shell-insert'."
   (let* ((capture-bufs (agent-shell-queue--live-capture-buffers))
          (shell-names (seq-map #'buffer-name (agent-shell-buffers)))
          (capture-names (seq-map #'buffer-name capture-bufs))
@@ -5885,7 +5887,7 @@ of that buffer instead of being sent to an agent-shell via `agent-shell-insert'.
             (funcall orig-fn prompt-for-file))))))))
 
 (advice-add 'agent-shell-send-file-to :around
-            #'agent-shell-queue--ad:agent-shell-send-file-to)
+            #'agent-shell-queue--ad-agent-shell-send-file-to)
 
 (defvar agent-shell-queue-interjection-continuation-suffix
   "\n\nAfter addressing the above, please resume your previous task where you left off."
@@ -5896,7 +5898,7 @@ Set to nil to send the user's text verbatim without a continuation instruction."
   "The queue item being interject-edited in this capture buffer.")
 
 (defvar-local agent-shell-queue-interjection--shell nil
-  "The agent-shell buffer associated with this interjection capture buffer.")
+  "The `agent-shell' buffer associated with this interjection capture buffer.")
 
 (defvar agent-shell-queue-interjection-mode-map
   (let ((m (make-sparse-keymap)))
@@ -5908,7 +5910,7 @@ Set to nil to send the user's text verbatim without a continuation instruction."
 
 (define-derived-mode agent-shell-queue-interjection-mode text-mode "ASQ-Interject"
   "Capture mode for interjection messages.
-C-c C-c to send, C-c C-k / q to close or abort.")
+Confirm with \\[agent-shell-queue-interjection-send], close with \\[agent-shell-queue-interjection-close].")
 
 (defun agent-shell-queue--open-interjection-buffer (item buf-name)
   "Create and display an interjection capture buffer for ITEM in BUF-NAME shell."
@@ -5966,7 +5968,7 @@ Strips the read-only header by looking for the separator line."
     (message "agent-shell-queue: interjection sent to %s — waiting for response…" buf-name)))
 
 (defun agent-shell-queue--interjection-mark-aborted (item buf-name)
-  "Mark ITEM as aborted due to interjection abort, clear interjection-pending."
+  "Mark ITEM in BUF-NAME as aborted due to interjection abort, clear interjection-pending."
   (setf (agent-shell-queue-item-status item) 'aborted)
   (setf (agent-shell-queue-item-completed item) (float-time))
   (setf (agent-shell-queue-item-outcome item) 'interrupted)
@@ -6080,10 +6082,10 @@ interjection buffer is already pending."
 ;;; Input Routing and Queue-Only Mode
 
 (defvar-local agent-shell-queue-intercept-mode nil
-  "When non-nil in an agent-shell buffer, capture user-typed turns as queue items.")
+  "When non-nil in an `agent-shell' buffer, capture user-typed turns as queue items.")
 
 (defvar-local agent-shell-queue-input-mode 'default
-  "Current input routing mode for this agent-shell buffer.
+  "Current input routing mode for this `agent-shell' buffer.
 One of `default' (normal shell input), `queue-intercept' (capture user
 input as queue items while still submitting), or `queue-only' (no prompt;
 all input routed through the queue).  Set via
@@ -6185,7 +6187,7 @@ Enforces mutual exclusivity and updates the prompt indicator."
      (_ 'default))))
 
 (defun agent-shell-queue-toggle-intercept-mode (&optional buf)
-  "Toggle queue-intercept mode for BUF; when active, user-typed turns are queued."
+  "Toggle queue-intercept mode for BUF; when active, user-typed input is queued."
   (interactive
    (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
              (agent-shell-queue--pick-buffer "Toggle intercept for: "))))
@@ -6197,7 +6199,7 @@ Enforces mutual exclusivity and updates the prompt indicator."
                agent-shell-queue-input-mode (buffer-name buf)))))
 
 (defun agent-shell-queue-enable-intercept-mode (&optional buf)
-  "Enable queue-intercept mode in BUF so user turns are queued."
+  "Enable queue-intercept mode in BUF so user-typed input is queued."
   (interactive
    (list (or (and (derived-mode-p 'agent-shell-mode) (current-buffer))
              (agent-shell-queue--pick-buffer "Enable intercept for: "))))
@@ -6219,7 +6221,7 @@ Enforces mutual exclusivity and updates the prompt indicator."
 
 ;;;###autoload
 (defun agent-shell-queue-disable-intercept-mode-all ()
-  "Reset all live agent-shell buffers in queue-intercept mode to default."
+  "Reset all live `agent-shell' buffers in queue-intercept mode to default."
   (interactive)
   (let ((cleared (seq-filter (lambda (buf)
                                (eq (buffer-local-value 'agent-shell-queue-input-mode buf)
@@ -6233,7 +6235,7 @@ Enforces mutual exclusivity and updates the prompt indicator."
     (message "agent-shell-queue: queue-intercept disabled in %d buffer(s)" (length cleared))))
 
 (defcustom agent-shell-queue-input-mode-default 'default
-  "Default input routing mode for new agent-shell sessions.
+  "Default input routing mode for new `agent-shell' sessions.
 One of `default' (normal shell input), `queue-intercept' (capture user
 input as queue items while still submitting), or `queue-only' (no prompt;
 all input routed through the queue).
@@ -6256,7 +6258,7 @@ Installed on `agent-shell-mode-hook'."
 (defun agent-shell-queue-set-input-mode-default (mode)
   "Set `agent-shell-queue-input-mode-default' to MODE and sync sessions.
 MODE is prompted interactively from the three valid options.
-All live agent-shell buffers are immediately updated to the new default."
+All live `agent-shell' buffers are immediately updated to the new default."
   (interactive
    (list (intern (completing-read "Input mode default: "
                                   '("default" "queue-intercept" "queue-only")
@@ -6275,7 +6277,7 @@ All live agent-shell buffers are immediately updated to the new default."
 
 ;;;###autoload
 (defun agent-shell-queue-reset-all-input-modes ()
-  "Reset all live agent-shell buffers to default input mode."
+  "Reset all live `agent-shell' buffers to default input mode."
   (interactive)
   (let ((changed (seq-filter (lambda (buf)
                                (not (eq (buffer-local-value 'agent-shell-queue-input-mode buf)
@@ -6348,7 +6350,7 @@ access to all registered item kinds rather than prompt-only capture."
 
 ;;;###autoload
 (define-minor-mode agent-shell-queue-only-mode
-  "Route all agent-shell input through the queue; show <ready> when idle."
+  "Route all `agent-shell' input through the queue; show <ready> when idle."
   :lighter " Q⌛"
   :keymap agent-shell-queue-only-mode-map
   (if agent-shell-queue-only-mode
@@ -6436,7 +6438,7 @@ is only a safety net for buffers that become idle outside that path.")
   "Alist mapping `<agent-shell-identifier>` to clear command string.")
 
 (defun agent-shell-queue--get-background-prefix (buf)
-  "Resolve the background prefix for BUF based on its agent-shell configuration."
+  "Resolve the background prefix for BUF based on its `agent-shell' configuration."
   (let* ((buffer (get-buffer buf))
          (config (and buffer (fboundp 'agent-shell-get-config) (agent-shell-get-config buffer)))
          (ident (and config (map-elt config :identifier)))
@@ -6447,7 +6449,7 @@ is only a safety net for buffers that become idle outside that path.")
      (t val))))
 
 (defun agent-shell-queue--get-clear-command (buf)
-  "Resolve the clear command for BUF based on its agent-shell configuration."
+  "Resolve the clear command for BUF based on its `agent-shell' configuration."
   (let* ((buffer (get-buffer buf))
          (config (and buffer (fboundp 'agent-shell-get-config) (agent-shell-get-config buffer)))
          (ident (and config (map-elt config :identifier)))
@@ -6465,7 +6467,7 @@ When nil (the default), completed items are not logged to disk.")
   "Function returning the path to the queue state file.")
 
 (defvar agent-shell-queue-pick-buffer-function #'agent-shell-queue--default-pick-buffer
-  "Function called with a PROMPT string to pick an agent-shell buffer.")
+  "Function called with a PROMPT string to pick an `agent-shell' buffer.")
 
 (defvar agent-shell-queue-archive-enabled nil
   "When non-nil, completed items can be archived.
@@ -6529,10 +6531,10 @@ Used by `agent-shell-queue-mark-done' to clean up session-pause state.")
 Set to t when user answers \\='a\\=' (all) at a removal prompt.")
 
 (defvar agent-shell-queue--response-start-positions nil
-  "Alist of (ITEM-ID . BUFFER-POSITION) recording where in the shell buffer
-each dispatched LLM prompt begins.  Used to capture the response text on
-turn-complete and store it in the item's response field.")
-
+  "Alist of (ITEM-ID . BUFFER-POSITION) recording response start.
+Records where in the shell buffer each dispatched LLM prompt begins.
+Used to capture the response text on turn-complete and store it in
+the item's response field.")
 (defvar agent-shell-queue-save-function nil
   "When non-nil, called instead of the default file-based save logic.
 The function is called with no arguments and must persist the current
@@ -6553,7 +6555,7 @@ Has no effect when `agent-shell-queue-save-function' is set.")
 
 (defvar agent-shell-queue-safe-save-directory nil
   "Directory for versioned queue backups written when safe-save is non-nil.
-Nil means use a subdirectory of `temporary-file-directory' named
+Nil means use a subdirectory of variable `temporary-file-directory' named
 \"emacs-<instance>\" where <instance> comes from
 `agent-shell-queue-instance-name'.")
 

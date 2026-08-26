@@ -34,6 +34,7 @@
 (require 'cl-lib)
 (require 'annotated-completing-read)
 (require 'transient)
+(require 'sprite-future nil t)
 (require 'agent-shell)
 (require 'agent-shell-queue)
 

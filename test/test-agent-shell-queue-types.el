@@ -10,6 +10,7 @@
 
 (require 'ert)
 (require 'cl-lib)
+(add-to-list 'load-path (file-name-directory (or load-file-name buffer-file-name)))
 (require 'agent-shell-queue)
 (require 'test-helper)
 

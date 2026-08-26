@@ -196,6 +196,8 @@ Called as `agent-shell-queue-load-function' when the DB backend is active."
                       (setcdr pair (append (cdr pair) (list item)))
                     (setq result (append result (list (list bucket item))))))))
             (sqlite-select conn agent-shell-queue-db--select-items))
+    (when (and (boundp 'agent-shell-queue--store) agent-shell-queue--store)
+      (setf (agent-shell-queue-store-items agent-shell-queue--store) result))
     (setq agent-shell-queue--items result)))
 
 ;; Enable / disable
