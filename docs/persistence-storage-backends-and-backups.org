@@ -1,0 +1,31 @@
+#+TITLE: Persistence, Storage Backends and Backups
+
+* Features
+
+- *Storage Backends*: Plist (default), JSON, YAML, Org-mode file backend (~agent-shell-queue-org~), or SQLite database (~agent-shell-queue-db~).
+
+- *Safe-Save Versioned Backups*: Automatic timestamped backups prior to state writes with point-in-time restore.
+
+- *JSONL Done-Log and Write Logging*: Optional audit trails for completed tasks and storage diagnostics.
+
+* Key Functions
+
+- ~agent-shell-queue-db-enable~ / ~agent-shell-queue-db-disable~: Activate/deactivate SQLite persistence.
+- ~agent-shell-queue-restore-from-backup~: Point-in-time restore from safe-save backups via ACR.
+- ~agent-shell-queue-show-write-log~: Display the in-memory persistence audit log.
+- ~agent-shell-queue-export~ / ~agent-shell-queue-import~: Export/import queue state to/from YAML.
+
+* Example
+
+#+BEGIN_SRC emacs-lisp
+  ;; Enable safe-save backups in init.el (setq
+  agent-shell-queue-safe-save t agent-shell-queue-safe-save-format 'yaml
+  agent-shell-queue-safe-save-max-files 50)
+
+  ;; Enable SQLite storage backend (require 'agent-shell-queue-db)
+  (agent-shell-queue-db-enable)
+#+END_SRC
+
+* Reference
+
+See the [[file:api.org][API Reference]] for full documentation of these functions.

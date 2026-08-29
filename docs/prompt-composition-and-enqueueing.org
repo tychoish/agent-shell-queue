@@ -1,0 +1,45 @@
+#+TITLE: Prompt Composition and Enqueueing
+
+* Features
+
+- *Targeted and Unassigned Capture*: Compose prompts destined for a specific
+  agent shell or park them in the =(unassigned)= queue to assign later.
+
+- *Context and Region Seeding*: Capture prompts seeded from the active region,
+  kill-ring, clipboard, or thing-at-point.
+
+- *Org-Mode Heading Refile*: Ingest task trees directly from Org files into the
+  prompt queue.
+
+- *Directory-Scoped Queues*: Queue items for directories without an active
+  shell; shells spawn automatically upon dispatch.
+
+- *Alternative Execution Kinds*: Queue Emacs Lisp forms, interactive commands,
+  eshell, or eat terminal commands.
+
+* Key Functions
+
+- ~agent-shell-queue-enqueue~: Queue a prompt for an active or specified shell buffer.
+- ~agent-shell-queue-capture~: Open an interactive markdown buffer for prompt composition.
+- ~agent-shell-queue-capture-unassigned~: Open capture buffer targeting the unassigned queue.
+- ~agent-shell-queue-capture-from-region~: Pre-seed capture buffer from active region.
+- ~agent-shell-queue-org-refile-from-heading~: Convert current Org heading into a queue item.
+- ~agent-shell-queue-add-directory~ / ~agent-shell-queue-enqueue-directory~: Target directory queues.
+
+* Example
+
+#+BEGIN_SRC emacs-lisp
+    ;; Programmatic enqueue with pre/post dispatch delays
+    (agent-shell-queue-enqueue
+     "Refactor auth middleware and add test cases"
+     (get-buffer "*agent-shell-backend*") nil) ; background flag 5.0
+    ; delay 5s before sending 2.0) ; delay 2s after turn completes
+
+    ;; Directory queue: creates shell on dispatch automatically
+    (agent-shell-queue-add-directory
+     "Run project linting and formatchecks" "~/src/project-b/")
+#+END_SRC
+
+* Reference
+
+See the [[file:api.org][API Reference]] for full documentation of these functions.

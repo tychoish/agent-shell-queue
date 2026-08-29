@@ -1,0 +1,35 @@
+#+TITLE: Task Interjection and Queue Inspection
+
+* Features
+
+- *Live Turn Interjection*: Interrupt a running agent turn to inject urgent instructions, automatically appending continuation prompts.
+
+- *Tabular Queue Management*: Review, reorder, defer, assign, or delete items in the ~*agent-shell-queue*~ overview.
+
+- *Popup and Direct YAML Editing*: Edit single prompts in markdown popups or bulk-edit queue structure in raw YAML.
+
+- *Inspect Raw Serialization*: View item representations in plist, JSON, or YAML format.
+
+* Key Functions
+
+- ~agent-shell-queue-interject~: Interrupt running item and open an interjection capture buffer.
+- ~agent-shell-queue-buffer-open~ / ~agent-shell-queue-buffer-switch~: Open/switch to queue overview.
+- ~agent-shell-queue-edit-task~: Interactively edit a queued prompt.
+- ~agent-shell-queue-raw-edit~: Bulk-edit entire queue state in YAML.
+- ~agent-shell-queue-buffer-inspect-item~: Inspect serialized item representation.
+
+* Example
+
+#+BEGIN_SRC emacs-lisp
+  ;; Interject the current running agent task
+  (agent-shell-queue-interject)
+
+  ;; Keybindings in *agent-shell-queue* buffer: RET - View item details
+  ;; e/C-e - Enqueue dispatch / Edit task prompt p/r - Pause / Resume
+  ;; item M-up - Move item earlier in queue M-down- Move item later in
+  ;; queue C-d x - Raw YAML queue editor
+#+END_SRC
+
+* Reference
+
+See the [[file:api.org][API Reference]] for full documentation of these functions.

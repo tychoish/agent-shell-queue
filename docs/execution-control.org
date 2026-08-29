@@ -1,0 +1,42 @@
+#+TITLE: Execution Control
+
+* Features
+
+- *Global and Per-Session Pausing*: Suspend dispatch globally or for an
+  individual session; active tasks finish while queued tasks hold.
+
+- *Flow Modifiers and Checkpoints*: Insert pause checkpoints, context wipes, or
+  wait-until timers anywhere in the queue order.
+
+- *Automated Recovery*: Recover stuck ACP/shell-maker processes by interrupting
+  and auto-resuming once idle.
+
+- *Pre and Post Turn Delays*: Regulate rate limits with configurable pauses
+  between consecutive turns.
+
+* Key Functions
+
+- ~agent-shell-queue-pause~ / ~agent-shell-queue-resume~: Toggle queue dispatch
+  globally.
+- ~agent-shell-queue-session-pause~ / ~agent-shell-queue-session-resume~:
+  Control dispatch for a single session.
+- ~agent-shell-queue-insert-pause~: Insert an auto-resuming or manual pause
+  item.
+- ~agent-shell-queue-insert-clear-context~: Insert a context-wipe boundary item.
+- ~agent-shell-queue-insert-wait~: Block queue until a specified date/time.
+- ~agent-shell-queue-recover-stuck-shell~: Interrupt a wedged shell and resume
+  when idle.
+
+* Example
+
+#+BEGIN_SRC emacs-lisp
+  ;; Insert a 30-second pause checkpoint into the active shell queue
+  (agent-shell-queue-insert-pause (current-buffer) nil 30.0)
+
+  ;; Insert a scheduled wait timer (agent-shell-queue-insert-wait
+  (current-buffer))
+#+END_SRC
+
+* Reference
+
+See the [[file:api.org][API Reference]] for full documentation of these functions.

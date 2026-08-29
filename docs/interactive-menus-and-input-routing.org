@@ -1,0 +1,36 @@
+#+TITLE: Interactive Menus and Input Routing
+
+* Features
+
+- *ACR and Transient Menus*: Annotated completing-read and transient dispatch prefixes for session switching, permissions, commands, and queues.
+
+- *Queue-Intercept Mode*: Intercept interactive user prompts in the shell buffer and route them into the queue.
+
+- *Queue-Only Mode*: Lock interactive input to queue routing with explicit =<ready>= visual indicators when idle.
+
+* Key Functions
+
+- ~agent-shell-menu-dispatch~: Transient menu for navigation, queueing, session control, and actions.
+
+- ~agent-shell-queue-capture-menu~: Transient prefix for prompt capture and flow insertion (bound to ~e~).
+
+- ~agent-shell-queue-only-mode~: Minor mode routing all shell prompt turns through the queue.
+
+- ~agent-shell-queue-set-input-mode-default~: Set default input mode (~default~, ~queue-intercept~, ~queue-only~).
+
+- ~agent-shell-menu-select-action~ / ~agent-shell-menu-resolve-permission~: Interactive ACR action pickers.
+
+* Example
+
+#+BEGIN_SRC emacs-lisp
+  ;; Bind transient dispatch menu to M in queue mode and global map
+  (define-key agent-shell-queue-mode-map (kbd "M")
+  #'agent-shell-menu-dispatch)
+
+  ;; Configure queue-intercept as default across all new agent sessions
+  (setq agent-shell-queue-input-mode-default 'queue-intercept)
+#+END_SRC
+
+* Reference
+
+See the [[file:api.org][API Reference]] for full documentation of these functions.

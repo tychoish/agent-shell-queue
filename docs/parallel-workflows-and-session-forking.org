@@ -1,0 +1,28 @@
+#+TITLE: Parallel Workflows and Session Forking
+
+* Features
+
+- *Queue Forking*: Split a queue from a selected item into a new agent-shell session (clean shell or ACP session fork).
+
+- *Git Worktree Isolation*: Automatically spin up an isolated Git worktree and branch for the forked session.
+
+- *Pending-Fork Freezing*: Freeze queued items in place while composing preceding tasks.
+
+* Key Functions
+
+- ~agent-shell-queue-fork-session~: Fork queued items into a newly spawned agent session.
+- ~agent-shell-queue-buffer-fork~: Interactively fork from the item at point.
+- ~agent-shell-queue-insert-fork-before~ / ~agent-shell-queue-insert-fork-after~: Schedule an in-queue fork task.
+- ~agent-shell-queue-release-pending-fork~: Release frozen fork items back to active dispatch.
+
+* Example
+
+#+BEGIN_SRC emacs-lisp
+  ;; Fork items starting at item "q0abcd" into a git worktree session
+  (agent-shell-queue-fork-session (current-buffer) "q0abcd" '(:fork-mode
+  fork :use-worktree t :worktree-branch "feature/experimental-branch"))
+#+END_SRC
+
+* Reference
+
+See the [[file:api.org][API Reference]] for full documentation of these functions.

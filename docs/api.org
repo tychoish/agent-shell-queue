@@ -1,0 +1,623 @@
+#+TITLE: agent-shell-queue API Reference
+#+OPTIONS: toc:3 num:nil
+
+Generated API reference for =agent-shell-menu.el=, =agent-shell-queue.el=,
+=agent-shell-queue-db.el=, =agent-shell-queue-org.el=, and
+=agent-shell-queue-persistence.el=.  Regenerate with =M-x org-docsgen-regenerate-dwim=
+(or =M-x org-docsgen-regenerate-file= pointed at this file) after editing
+any of the source files below.
+
+* API Reference
+#+BEGIN_SRC emacs-lisp :results output raw :exports none
+  (require 'org-docsgen)
+  (org-docsgen-run
+   :el-files (let ((base (expand-file-name "../" (file-name-directory (buffer-file-name)))))
+               (mapcar (lambda (f) (expand-file-name f base))
+                       '("agent-shell-menu.el"
+                         "agent-shell-queue.el"
+                         "agent-shell-queue-db.el"
+                         "agent-shell-queue-org.el"
+                         "agent-shell-queue-persistence.el")))
+   :scope 'autoloaded
+   :include-kinds '(variables customs)
+   :namespace "agent-shell"
+   :section-style 'triple-semi
+   :group-by '("agent-shell-menu"
+               "agent-shell-queue"
+               ("agent-shell-queue-persistence"
+  	      "agent-shell-queue-db")
+               "agent-shell-queue-org"))
+#+END_SRC
+
+
+#+RESULTS:
+** agent-shell-menu
+
+*** Session and Project Switching
+
+**** agent-shell-menu-select-session-mode :command:
+
+: (fn &optional ON-SUCCESS)
+
+Select a session mode via ~annotated-completing-read~. Annotates each candidate with its description (the same text shown at the start of an agent-shell session) and marks the active mode as "[current]", instead of requiring the user to already know the candidate list.  Unlike ~agent-shell-cycle-session-mode~ this prompts instead of blindly advancing to the next mode.
+
+Optionally, get notified of completion with /ON-SUCCESS/ function.
+
+**** agent-shell-menu-project-buffers
+
+Return live agent-shell buffers sharing the current buffer’s project directory.
+
+**** agent-shell-menu-switch-project-session :command:
+
+Switch to another agent-shell session in the same project directory.
+
+*** Actions and Commands
+
+**** agent-shell-menu-action-alist :variable:
+
+Alist mapping label strings to commands for ~agent-shell-menu-select-action~. Each entry is either (LABEL . COMMAND) or (LABEL . (COMMAND . PREDICATE)). When a PREDICATE is supplied it is called with no arguments; the entry is omitted from the menu when the predicate returns nil.
+
+**** agent-shell-menu-select-action :command:
+
+Pick a common agent-shell action and run it via ~call-interactively~. When a permission request is pending, permission responses are spliced into the menu.
+
+**** agent-shell-menu-resolve-permission :command:
+
+Resolve a pending permission prompt via ~annotated-completing-read~.
+
+**** agent-shell-menu-select-command :command:
+
+Insert one of the agent’s advertised ~/~ commands at the prompt.
+
+*** Content Insertion
+
+**** agent-shell-menu-send-file :command:
+
+Prompt for a file and send it to the current agent-shell session. Uses ~read-file-name~ for file selection, integrating with Consult/Vertico.
+
+**** agent-shell-menu-send-buffer :command:
+
+Pick a buffer and send its contents to the current agent-shell session. File-visiting buffers are sent as @file references; others as raw text.
+
+*** Output and Collapse Control
+
+**** agent-shell-menu-select-collapse :command:
+
+Pick a collapse action via ~annotated-completing-read~. Offers bulk expand/collapse, per-category toggles, entries to flip the three expand-by-default customization variables globally, and a buffer-local variant that only changes the default for this session.
+
+*** Session Diagnostics
+
+**** agent-shell-menu-info-map :variable:
+
+Keymap for agent-shell info help buffers.  Inherits ~help-mode-map~ once loaded.
+
+**** agent-shell-menu-session-info :command:
+
+Display a read-only ephemeral buffer with live session diagnostics. Shows fragment count, agent uptime, queue options, queue depth, and the underlying shell process uptime for the current agent-shell buffer.
+
+** agent-shell-queue
+
+*** Prompt Composition and Enqueueing
+
+**** agent-shell-queue-capture-mode-map :variable:
+
+Keymap for ~agent-shell-queue-capture-mode~.
+
+**** agent-shell-queue-capture :command:
+
+: (fn &optional BUF)
+
+Open a capture buffer targeting /BUF/ (nil adds to the unassigned queue). When called interactively from an agent-shell buffer, targets that buffer. With a prefix argument, opens an unassigned capture instead.
+
+**** agent-shell-queue-enqueue :command:
+
+: (fn PROMPT &optional BUF BACKGROUND DELAY-BEFORE DELAY-AFTER)
+
+Queue /PROMPT/ for /BUF/, optionally flagged for /BACKGROUND/ execution. Send immediately if /BUF/ is idle and no /DELAY-BEFORE/ is set, otherwise store in the queue.  When called interactively, opens a capture buffer for composing the prompt.  Optional /DELAY-BEFORE/ and /DELAY-AFTER/ specify pre-dispatch and post-completion delays in seconds.
+
+**** agent-shell-queue-enqueue-clear :command:
+
+: (fn &optional BUF)
+
+Enqueue a clear command for /BUF/. Uses the resolved clear command for /BUF/ as the prompt.
+
+**** agent-shell-queue-capture-unassigned :command:
+
+Open a capture buffer to compose a prompt for the unassigned queue. Unassigned items display in blue and can later be assigned to a shell via ~t~.
+
+**** agent-shell-queue-capture-from-region :command:
+
+: (fn &optional BUF)
+
+Open a capture buffer pre-seeded with the active region text. When no region is active, opens an empty capture.  /BUF/ is the target agent-shell buffer; nil adds to the unassigned queue.
+
+**** agent-shell-queue-capture-from-context :command:
+
+: (fn &optional BUF)
+
+Open a capture buffer pre-seeded with a string selected from context. Candidates include thing-at-point, active region, current line, and kill ring.  /BUF/ is the target buffer; nil for unassigned queue.
+
+**** agent-shell-queue-add-directory :command:
+
+: (fn PROMPT DIR &optional BACKGROUND DELAY-BEFORE DELAY-AFTER)
+
+Add a new active item for /PROMPT/ in directory queue /DIR/.  Save and refresh.
+
+**** agent-shell-queue-enqueue-directory :command:
+
+: (fn DIR)
+
+Open a capture buffer for directory queue /DIR/.
+
+**** agent-shell-queue-enqueue-emacs :command:
+
+: (fn BUF)
+
+Open an Emacs Lisp capture buffer to compose a form for /BUF/’s queue. The capture buffer is in ~emacs-lisp-mode~.  Confirm with C-c C-c, cancel with C-c C-k.  When dispatched, the form is evaluated via ~eval~; errors are reported as messages and the item is marked done. /BUF/ may be nil to enqueue to the unassigned bucket.
+
+**** agent-shell-queue-enqueue-emacs-command :command:
+
+: (fn COMMAND BUF)
+
+Enqueue an interactive /COMMAND/ to run in Emacs for /BUF/’s queue. /COMMAND/ is selected via ~read-command~ (completing-read over all commands). When dispatched, the command is invoked with ~call-interactively~. /BUF/ may be nil to enqueue to the unassigned bucket.
+
+**** agent-shell-queue-enqueue-shell-eshell :command:
+
+: (fn BUF)
+
+Open a shell capture buffer to compose a command for eshell /BUF/. The capture buffer is in ~sh-mode~.  Confirm with C-c C-c. /BUF/ may be nil to enqueue to the unassigned bucket.
+
+**** agent-shell-queue-enqueue-shell-eat :command:
+
+: (fn BUF)
+
+Open a shell capture buffer to compose a command for eat /BUF/. The capture buffer is in ~sh-mode~.  Confirm with C-c C-c. /BUF/ may be nil to enqueue to the unassigned bucket.
+
+*** Execution Control
+
+**** agent-shell-queue-pause :command:
+
+Pause dispatch for every known session (batch session-pause).
+
+**** agent-shell-queue-resume :command:
+
+Resume dispatch for every known session. Alias for ~agent-shell-queue-unpause-all-sessions~.
+
+**** agent-shell-queue-flush :command:
+
+Force-save queue state to disk immediately.
+
+**** agent-shell-queue-reload :command:
+
+Pause, flush, reload source code, and reload state from disk. Stops the idle timer, drops all turn-complete subscriptions, reloads ‘agent-shell-queue.el’ from source, re-reads queue state from disk, and reinstates subscriptions for buffers with active/running items. Every known session is paused before reload — the session-paused list survives the reload (it lives on ~agent-shell-queue--queue~, which ~defvar~ does not reset) — so nothing dispatches until ~agent-shell-queue-resume~ is called.
+
+**** agent-shell-queue-clear-unparsable :command:
+
+Remove items whose struct fields cannot be read; print each to *Messages*. Useful after a code reload that left in-memory structs with mismatched layouts. When called interactively, prompts y/n/a for each candidate before removing it. Affected buffer queues are paused and the queue state is saved.
+
+**** agent-shell-queue-show-disk-state :command:
+
+Display the on-disk queue state file in a read-only popup buffer.
+
+**** agent-shell-queue-blocked-session-modes :variable:
+
+Session mode IDs that block queue dispatch. When a target shell is in one of these modes the item is not sent and the session queue is paused until the mode changes.
+
+**** agent-shell-queue-item-done-hook :variable:
+
+Hook run when a queue item transitions to done status. Each function is called with two arguments: BUF-NAME and ITEM.
+
+*** Queue Buffer and Navigation
+
+**** agent-shell-queue-buffer-open :command:
+
+Open (or refresh) the *agent-shell-queue* buffer.
+
+**** agent-shell-queue-buffer-switch :command:
+
+Switch to the *agent-shell-queue* buffer in the current window.
+
+**** agent-shell-queue-set-scope :command:
+
+Narrow the queue buffer view: choose global, a directory, or a specific buffer.
+
+**** agent-shell-queue-scope-global :command:
+
+Reset the queue buffer to the global scope (show all items).
+
+**** agent-shell-queue-mode-map :variable:
+
+Keymap for ~agent-shell-queue-mode~.
+
+**** agent-shell-queue-show-buffer-column :variable:
+
+Show the Buffer column in the queue buffer. Toggle with ~agent-shell-queue-toggle-buffer-column~ (db in the menu).
+
+**** agent-shell-queue-show-ordinal-column :variable:
+
+Show the ordinal (#) column in the queue buffer.
+
+**** agent-shell-queue-show-age-column :variable:
+
+Show the Age column in the queue buffer.
+
+**** agent-shell-queue-show-kind-column :variable:
+
+Show the Kind column in the queue buffer.
+
+**** agent-shell-queue-multiline-format :variable:
+
+Display prompt on a second line with a separator between items. When non-nil, ‘<down>’ and ‘<up>’ move by item rather than by line.
+
+**** agent-shell-queue-select-columns :command:
+
+Pick column display options via ~annotated-completing-read~. Offers bulk presets, per-column visibility toggles, and multi-line switch. Changes take effect immediately via ~agent-shell-queue-buffer-refresh~.
+
+*** Item View and Raw Inspection
+
+**** agent-shell-queue-item-view-mode-map :variable:
+
+Keymap for ~agent-shell-queue-item-view-mode~.
+
+**** agent-shell-queue-inspect-mode-map :variable:
+
+Keymap for ~agent-shell-queue-inspect-mode~.
+
+**** agent-shell-queue-buffer-inspect-item :command:
+
+Open a read-only raw-serialization view of the queue item at point. Prompts for the serialization format (p=plist j=json y=yaml in the buffer).
+
+**** agent-shell-queue-item-view-inspect :command:
+
+Open a raw-serialization view of the item shown in this buffer. Prompts for the serialization format (p=plist j=json y=yaml in the buffer).
+
+**** agent-shell-queue-export :command:
+
+Export items in the current scope to a read-only YAML buffer. Multi-line prompt/response fields are formatted as literal block scalars.
+
+**** agent-shell-queue-edit-mode-map :variable:
+
+Keymap for ~agent-shell-queue-edit-mode~.
+
+**** agent-shell-queue-edit-task :command:
+
+: (fn &optional SELECT)
+
+Edit a queued item’s prompt. In ~agent-shell-queue-mode~ without /SELECT/ (prefix argument): edit the item at point immediately.  With /SELECT/, or when point carries no item, or when called from outside ~agent-shell-queue-mode~: select via annotated-completing-read. Candidates include all non-done, non-running items across all buffers.
+
+**** agent-shell-queue-raw-edit-mode-map :variable:
+
+Keymap for ~agent-shell-queue-raw-edit-mode~.
+
+**** agent-shell-queue-raw-edit :command:
+
+Open the queue for direct YAML editing. Every session not already paused is paused while the edit buffer is live. Confirm changes with M-x agent-shell-queue-raw-edit-confirm; cancel with M-x agent-shell-queue-raw-edit-cancel.
+
+**** agent-shell-queue-import :command:
+
+: (fn &optional SOURCE)
+
+Import queue items from YAML. With no prefix arg reads from clipboard; with prefix arg prompts for file. For items whose ID exists, prompts to keep, replace, or assign new ID.
+
+*** Session Management
+
+**** agent-shell-queue-fork-default-mode :variable:
+
+Default mode for creating new sessions when forking a queue. ~new~ creates a clean new session via ~agent-shell-new-shell~. ‘fork’ uses the ACP fork session option via ~agent-shell-fork~.
+
+**** agent-shell-queue-fork-session :command:
+
+: (fn SOURCE-BUF &optional FROM-ID OPTS)
+
+Fork the queue for /SOURCE-BUF/ starting at /FROM-ID/ into a new session.
+
+Items at or after /FROM-ID/ (by queue position among active/deferred/draft) are moved to the new session.  When /FROM-ID/ is nil, all eligible items are moved.  The original session is paused during session creation.
+
+/OPTS/ is a plist with these keys: :fork-mode       Symbol ~new~ (default) or ‘fork’. :use-worktree    Non-nil — create a git worktree for the new session. :worktree-path   String — explicit worktree path (auto-generated when nil). :worktree-branch String — new branch name for the worktree. :capture-pending Non-nil — mark items at/after /FROM-ID/ as ‘pending-fork’ in the original session instead of moving them, then leave the session paused so new items can be inserted.
+
+**** agent-shell-queue-release-pending-fork :command:
+
+: (fn &optional BUF)
+
+Release all pending-fork items in /BUF/ back to active status and resume dispatch. /BUF/ defaults to the current agent-shell session when called from one.
+
+**** agent-shell-queue-insert-fork-before :command:
+
+: (fn BUF &optional ITEM-ID OPTS)
+
+Insert a fork task into /BUF/’s queue immediately before /ITEM-ID/. When /ITEM-ID/ is nil, appends to the end of the queue. When the fork task is dispatched (as an emacs item), it forks the queue starting at the item that follows the fork task in the queue at dispatch time. /OPTS/ is the fork options plist (see ~agent-shell-queue-fork-session~).
+
+**** agent-shell-queue-insert-fork-after :command:
+
+: (fn BUF &optional ITEM-ID OPTS)
+
+Insert a fork task into /BUF/’s queue immediately after /ITEM-ID/. When /ITEM-ID/ is nil, appends to the end of the queue. When the fork task is dispatched, it forks the queue starting at the next item after the fork task (determined dynamically at dispatch time). /OPTS/ is the fork options plist (see ~agent-shell-queue-fork-session~).
+
+**** agent-shell-queue-insert-pause :command:
+
+: (fn &optional BUF POSITION DURATION)
+
+Insert a pause item into /BUF/’s queue, optionally at 1-based /POSITION/. If /DURATION/ is specified (seconds), pause auto-resumes after /DURATION/. When called interactively, prompts for target buffer (and duration with prefix arg).
+
+**** agent-shell-queue-insert-clear-context :command:
+
+: (fn PROMPT &optional BUF)
+
+Insert a context-drop item with /PROMPT/ into /BUF/’s queue. When called interactively, prompts for target buffer and context text.
+
+**** agent-shell-queue-insert-wait :command:
+
+: (fn BUF)
+
+Insert a wait-until item into /BUF/’s queue. Prompts for a target date/time; uses ~org-read-date~ when available, otherwise reads a string parseable by ~date-to-time~ (e.g. "2026-05-16 14:30"). When dispatched the item blocks the queue until the target time is reached, then marks itself done and advances to the next item automatically.
+
+**** agent-shell-queue-buffer-fork :command:
+
+Fork the queue starting at the item at point into a new session. Prompts interactively for fork options; uses annotated-completing-read when called outside the queue buffer to build options without task-at-point context.
+
+**** agent-shell-queue-buffer-insert-fork-before :command:
+
+Insert a fork queue item before the item at point. Prompts for fork options interactively.
+
+**** agent-shell-queue-buffer-insert-fork-after :command:
+
+Insert a fork queue item after the item at point. Prompts for fork options interactively.
+
+**** agent-shell-queue-interjection-continuation-suffix :variable:
+
+Text appended to the interjection prompt before sending. Set to nil to send the user’s text verbatim without a continuation instruction.
+
+**** agent-shell-queue-interjection-mode-map :variable:
+
+Keymap for ~agent-shell-queue-interjection-mode~.
+
+*** Input Routing and Queue-Only Mode
+
+**** agent-shell-queue-intercept-mode :variable:
+
+When non-nil in an agent-shell buffer, capture user-typed turns as queue items.
+
+**** agent-shell-queue-input-mode :variable:
+
+Current input routing mode for this agent-shell buffer. One of ~default~ (normal shell input), ‘queue-intercept’ (capture user input as queue items while still submitting), or ‘queue-only’ (no prompt; all input routed through the queue).  Set via ~agent-shell-queue-set-input-mode~.
+
+**** agent-shell-queue-disable-intercept-mode-all :command:
+
+Reset all live agent-shell buffers in queue-intercept mode to default.
+
+**** agent-shell-queue-input-mode-default :option:
+
+Default input routing mode for new agent-shell sessions. One of ~default~ (normal shell input), ‘queue-intercept’ (capture user input as queue items while still submitting), or ‘queue-only’ (no prompt; all input routed through the queue). Use ~agent-shell-queue-set-input-mode-default~ to change this and sync all existing sessions simultaneously.
+
+**** agent-shell-queue-set-input-mode-default :command:
+
+: (fn MODE)
+
+Set ~agent-shell-queue-input-mode-default~ to /MODE/ and sync sessions. /MODE/ is prompted interactively from the three valid options. All live agent-shell buffers are immediately updated to the new default.
+
+**** agent-shell-queue-reset-all-input-modes :command:
+
+Reset all live agent-shell buffers to default input mode.
+
+**** agent-shell-queue-toggle-intercept-default :command:
+
+Toggle queue-intercept as the default input mode and sync all sessions.
+
+**** agent-shell-queue-toggle-only-default :command:
+
+Toggle queue-only as the default input mode and sync all sessions.
+
+**** agent-shell-queue-ready-capture :command:
+
+Clear the ready overlay and open the queue enqueue dispatch menu. Any keypress in queue-only mode at the idle prompt routes here, giving access to all registered item kinds rather than prompt-only capture.
+
+**** agent-shell-queue-only-mode :command:
+
+: (fn &optional ARG)
+
+Route all agent-shell input through the queue; show <ready> when idle.
+
+This is a minor mode.  If called interactively, toggle the ‘Agent-Shell-Queue-Only mode’ mode.  If the prefix argument is positive, enable the mode, and if it is zero or negative, disable the mode.
+
+If called from Lisp, toggle the mode if /ARG/ is ‘toggle’.  Enable the mode if /ARG/ is nil, omitted, or is a positive number.  Disable the mode if /ARG/ is a negative number.
+
+To check whether the minor mode is enabled in the current buffer, evaluate the variable ~agent-shell-queue-only-mode~.
+
+The mode’s hook is called both when the mode is enabled and when it is disabled.
+
+*** Configuration
+
+**** agent-shell-queue-instance-name :variable:
+
+Instance identifier written into archive records. May be a string or a zero-argument function that returns a string. Defaults to the daemon name or system hostname.  Override in config: (setq agent-shell-queue-instance-name "<name>") (setq agent-shell-queue-instance-name 'get-instance-name
+
+**** agent-shell-queue-default-pause-delay :option:
+
+Default pause duration in seconds between tasks. Set to 0 or nil for no delay.
+
+**** agent-shell-queue-alert-on-pause-start :option:
+
+When non-nil, send an alert notification when a task pause or delay starts. The notification message includes the duration of the pause.
+
+**** agent-shell-queue-alert-before-pause-end :option:
+
+Duration in seconds before a pause ends to send an alert notification. When non-nil and less than the total pause duration, an alert is sent when ‘(total-pause-duration - alert-before-pause-end)‘ seconds elapses.
+
+**** agent-shell-queue-serialization-format :variable:
+
+Format used to persist queue state to disk. One of: ‘plist’ — s-expression with keyword-keyed plists (default; no extra deps) ‘json’  — JSON via built-in ~json-serialize~/~json-parse-string~ (Emacs 27+) ‘yaml’  — YAML via ~yaml-encode~/~yaml-parse-string~ from the ‘yaml’ package ‘org’   — Org-mode file backend via ‘agent-shell-queue-org’
+
+**** agent-shell-queue-idle-delay :variable:
+
+Idle delay in seconds for the backup auto-send timer. Primary draining happens via ~shell-maker-finish-output~ advice; this timer is only a safety net for buffers that become idle outside that path.
+
+**** agent-shell-queue-background-prefix :variable:
+
+Alist mapping ‘<agent-shell-identifier>‘ to background prefix string.
+
+**** agent-shell-queue-clear-command :variable:
+
+Alist mapping ‘<agent-shell-identifier>‘ to clear command string.
+
+**** agent-shell-queue-done-log-file :variable:
+
+File path for appending completed queue items as JSON lines. When nil (the default), completed items are not logged to disk.
+
+**** agent-shell-queue-state-file-function :variable:
+
+Function returning the path to the queue state file.
+
+**** agent-shell-queue-pick-buffer-function :variable:
+
+Function called with a PROMPT string to pick an agent-shell buffer.
+
+**** agent-shell-queue-archive-enabled :variable:
+
+When non-nil, completed items can be archived. Controls whether ~agent-shell-queue-buffer-archive~ is active. The destination path is controlled separately by ~agent-shell-queue-archive-file-function~.
+
+**** agent-shell-queue-archive-file-function :variable:
+
+Function returning the JSONL archive file path.  Called with no arguments. Override to store the archive at a custom location.  Only consulted when ~agent-shell-queue-archive-enabled~ is non-nil.
+
+**** agent-shell-queue-response-max-length :option:
+
+Maximum length (in characters) of captured response text to store. Responses longer than this are truncated with a "…[truncated]" suffix.
+
+This prevents very large responses from bloating the queue state file. Set to nil to disable truncation and store full responses.
+
+Default: 8192 (8KB) — balances completeness with file size.
+
+**** agent-shell-queue-response-max-length-absolute :variable:
+
+Absolute maximum length (1MB) for response text, regardless of configuration. This hard limit prevents pathological cases from consuming excessive memory or creating unmanageable state files.  Applies even when ~agent-shell-queue-response-max-length~ is nil.
+
+**** agent-shell-queue-auto-flush-interval :variable:
+
+Seconds between automatic queue flushes.  Set to nil to disable.
+
+**** agent-shell-queue-before-reload-hook :variable:
+
+Hook run just before code and state are reloaded. Queue is paused and flushed to disk before this hook fires.
+
+**** agent-shell-queue-after-reload-hook :variable:
+
+Hook run after code and state have been reloaded from disk.
+
+**** agent-shell-queue-save-function :variable:
+
+When non-nil, called instead of the default file-based save logic. The function is called with no arguments and must persist the current queue items to a durable store. Used by backends such as ‘agent-shell-queue-db’ to bypass file I/O.
+
+**** agent-shell-queue-load-function :variable:
+
+When non-nil, called instead of the default file-based load logic. The function is called with no arguments and must populate the queue items from a durable store. Used by backends such as ‘agent-shell-queue-db’ to bypass file I/O.
+
+**** agent-shell-queue-safe-save :variable:
+
+When non-nil, write a versioned backup before each queue state save. Backups are written to ~agent-shell-queue-safe-save-directory~ using the format selected by ~agent-shell-queue-safe-save-format~. Has no effect when ~agent-shell-queue-save-function~ is set.
+
+**** agent-shell-queue-safe-save-directory :variable:
+
+Directory for versioned queue backups written when safe-save is non-nil. Nil means use a subdirectory of ~temporary-file-directory~ named "emacs-<instance>" where <instance> comes from ~agent-shell-queue-instance-name~.
+
+**** agent-shell-queue-safe-save-format :variable:
+
+Serialization format for safe-save backups. When nil, use ~agent-shell-queue-serialization-format~.
+
+**** agent-shell-queue-safe-save-max-files :variable:
+
+Maximum number of versioned backup files to keep in the safe-save directory. When non-nil and the backup count exceeds this limit, the oldest file is deleted after each save — one file at a time so lowering the limit converges gradually.  Requires ~agent-shell-queue-safe-save~.
+
+**** agent-shell-queue-idle-flush-delay :variable:
+
+Seconds of Emacs idle time after which the queue state is flushed to disk. Set to nil to disable idle-triggered saves (default).
+
+**** agent-shell-queue-stall-timeout :variable:
+
+Seconds after dispatch before a still-running item is reported as stalled. The ACP/shell-maker layer has no watchdog of its own: a wedged Lisp event loop or a desynced busy flag leaves a dispatched item showing ‘running’ with no further user-visible feedback, indefinitely.  This is a one-shot check, not a retry loop — it only surfaces the condition via ~alert~, it does not cancel or resend the item.  Set to nil to disable.
+
+**** agent-shell-queue-strict-buffer-assignment :option:
+
+When non-nil, signal ~user-error~ when no compatible live buffer exists. When nil (default), fall through to nil/unassigned assignment instead.
+
+*** Persistence Diagnostics and Backup Restore
+
+**** agent-shell-queue-write-log-max-entries :option:
+
+Maximum entries retained in ~agent-shell-queue--write-log~.
+
+**** agent-shell-queue-write-log-enabled :option:
+
+When non-nil, log persistence events to *agent-shell-queue-log* buffer.
+
+**** agent-shell-queue-show-write-log :command:
+
+Display the in-memory write log in a readable buffer.
+
+*** Archive Management
+
+**** agent-shell-queue-buffer-archive :command:
+
+Archive the item at point to the archive file and remove it from the queue. Archiving must be enabled via ~agent-shell-queue-archive-enabled~. The destination path is provided by ~agent-shell-queue-archive-file-function~.
+
+**** agent-shell-queue-archive-done-n :command:
+
+: (fn N)
+
+Archive the /N/ oldest done items across all queues. Errors if archiving is not enabled.
+
+**** agent-shell-queue-archive-done-all :command:
+
+Archive all done items across all queues. Errors if archiving is not enabled or no done items exist.
+
+**** agent-shell-queue-toggle-archive :command:
+
+Toggle ~agent-shell-queue-archive-enabled~ and report the new state.
+
+**** agent-shell-queue-load-archive :command:
+
+: (fn &optional FILE)
+
+Import items from the JSONL archive file into the queue as active items. /FILE/ defaults to the path returned by ~agent-shell-queue-archive-file-function~; when called interactively with a prefix argument, prompts for a file path.
+
+**** agent-shell-queue-restore-from-backup :command:
+
+Restore queue items from a versioned backup via annotated-completing-read. Lists backup files in the safe-save directory newest-first.  Only items whose item-id is not already present in the live queue are added, so the operation is safe to run against an active queue.  Saves and refreshes after merging.
+
+** agent-shell-queue-persistence
+
+*** agent-shell-queue-db-file :variable:
+
+Path to the SQLite database file used by the queue DB backend. When nil, the path is derived from ~user-emacs-directory~ as "agent-shell-queue.db".  Set before calling ~agent-shell-queue-db-enable~ to store the database at a custom location.
+
+*** agent-shell-queue-db-enable :command:
+
+Activate the SQLite persistence backend for agent-shell-queue. When DB-FILE is non-nil, use it as the database path; otherwise the default path under ~user-emacs-directory~ is used (see ~agent-shell-queue-db-file~). Sets ~agent-shell-queue-save-function~, ~agent-shell-queue-load-function~, and ~agent-shell-queue-state-file-function~ to SQLite-aware variants. Saves the previous values so ~agent-shell-queue-db-disable~ can restore them.
+
+*** agent-shell-queue-db-disable :command:
+
+Deactivate the SQLite backend and revert to the previous persistence settings. Closes the database connection.
+
+*** agent-shell-queue-db-show-state :command:
+
+Display the SQLite database contents in a read-only popup buffer. Shows per-bucket item counts and a tabular dump of all persisted rows.
+
+*** agent-shell-queue-db-export :command:
+
+Export current queue items from SQLite to a YAML buffer. Loads current state from the DB then delegates to ~agent-shell-queue-export~.
+
+*** agent-shell-queue-db-import :command:
+
+Import queue items from YAML into the SQLite database. SOURCE follows the same convention as ~agent-shell-queue-import~: nil or ‘clipboard’ reads from the clipboard; ‘file’ prompts for a file. After importing, the DB is flushed immediately.
+
+** agent-shell-queue-org
+*** agent-shell-queue-org-refile-from-heading :command:
+
+: (fn &optional REMOVE-ORIGINAL)
+
+Capture the current org heading’s subtree text into the agent-shell-queue. Opens a queue capture buffer pre-seeded with the heading content. With prefix arg /REMOVE-ORIGINAL/, delete the original subtree immediately after opening the capture buffer.
+
+
+
+
+
+
