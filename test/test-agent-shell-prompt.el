@@ -144,6 +144,26 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
    (should (eq (agent-shell-prompt--arg-key 'thing) :thing))
    (should (eq (agent-shell-prompt--arg-key :thing) :thing))))
 
+(ert-deftest agent-shell-prompt/read-arg-integer-type-uses-read-number ()
+  "An arg-spec of :type integer reads its value via `read-number'."
+  (cl-letf (((symbol-function 'read-number) (lambda (&rest _) 7)))
+    (should (equal (agent-shell-prompt--read-arg '(run-id :type integer)) '(:run-id . 7)))))
+
+(ert-deftest agent-shell-prompt/read-arg-symbol-type-uses-completing-read ()
+  "An arg-spec of :type symbol reads its value via `completing-read', interned."
+  (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "chosen")))
+    (should (equal (agent-shell-prompt--read-arg '(mode :type symbol)) '(:mode . chosen)))))
+
+(ert-deftest agent-shell-prompt/read-arg-required-empty-signals-error ()
+  "A required (non-optional) arg-spec errors when the typed value is empty."
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+    (should-error (agent-shell-prompt--read-arg '(thing :prompt "Thing: ")) :type 'user-error)))
+
+(ert-deftest agent-shell-prompt/read-arg-optional-empty-is-allowed ()
+  "An :optional arg-spec permits an empty typed value without erroring."
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+    (should (equal (agent-shell-prompt--read-arg '(thing :optional t)) '(:thing . "")))))
+
 ;;; ─────────────────────────────────────────────────────────────
 ;;; Pre/post execution engine
 
@@ -234,6 +254,16 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 
 ;;; ─────────────────────────────────────────────────────────────
 ;;; Dispatch routing
+
+(ert-deftest agent-shell-prompt/resolve-target-passes-through-concrete-target ()
+  "A concrete target resolves to itself without prompting."
+  (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) (error "should not prompt"))))
+    (should (eq (agent-shell-prompt--resolve-target :session-new) :session-new))))
+
+(ert-deftest agent-shell-prompt/resolve-target-ask-prompts-via-completing-read ()
+  ":ask resolves interactively via `completing-read', interned to a keyword."
+  (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) ":queue")))
+    (should (eq (agent-shell-prompt--resolve-target :ask) :queue))))
 
 (ert-deftest agent-shell-prompt/dispatch-unknown-id-errors ()
   "Dispatching an unregistered id signals an error."
@@ -371,6 +401,41 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
                 (list :args (list :repo "acme/x" :run-id 9)))))
       (should (string-match-p "acme/x" (plist-get ctx :ci-summary)))
       (should (string-match-p "--log-failed" (plist-get ctx :ci-log))))))
+
+(ert-deftest agent-shell-prompt/library-gather-runs-each-pair-into-ctx ()
+  "agent-shell-prompt-library--gather stores each command's output under its key."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
+             (lambda (&rest args) (mapconcat #'identity args " "))))
+    (let ((ctx (agent-shell-prompt-library--gather
+                '(:a 1) (list (list :one "echo" "one") (list :two "echo" "two")))))
+      (should (equal (plist-get ctx :one) "echo one"))
+      (should (equal (plist-get ctx :two) "echo two"))
+      (should (= 1 (plist-get ctx :a))))))
+
+(ert-deftest agent-shell-prompt/library-pr-review-pre-op-populates-ctx ()
+  "pr-review-patch's pre-op fetches PR comments via gh into ctx."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
+             (lambda (&rest args) (mapconcat #'identity args " "))))
+    (let ((ctx (agent-shell-prompt-library--pr-review-pre-op
+                (list :args (list :pr-number 42)))))
+      (should (string-match-p "42" (plist-get ctx :pr-comments)))
+      (should (string-match-p "--comments" (plist-get ctx :pr-comments))))))
+
+(ert-deftest agent-shell-prompt/library-coverage-pre-op-populates-ctx ()
+  "expand-coverage's pre-op diffs :file against HEAD into ctx."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
+             (lambda (&rest args) (mapconcat #'identity args " "))))
+    (let ((ctx (agent-shell-prompt-library--coverage-pre-op
+                (list :args (list :file "foo.el")))))
+      (should (string-match-p "diff HEAD -- foo.el" (plist-get ctx :file-diff))))))
+
+(ert-deftest agent-shell-prompt/library-refactor-pre-op-populates-ctx ()
+  "refactor-module's pre-op gathers recent git log for :file into ctx."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
+             (lambda (&rest args) (mapconcat #'identity args " "))))
+    (let ((ctx (agent-shell-prompt-library--refactor-pre-op
+                (list :args (list :file "foo.el")))))
+      (should (string-match-p "log --oneline -n 10 -- foo.el" (plist-get ctx :recent-history))))))
 
 ;;; ─────────────────────────────────────────────────────────────
 ;;; ACR menu

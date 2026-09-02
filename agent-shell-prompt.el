@@ -75,13 +75,13 @@ Populate via `agent-shell-prompt-def'.")
   (map-values agent-shell-prompt-registry))
 
 (cl-defun agent-shell-prompt-register (&key id doc category args pre-op template submit target post-op)
-  "Register a prompt spec built from ID, DOC, CATEGORY, ARGS, PRE-OP,
+  "Register a prompt spec built from ID, DOC, CATEGORY, ARGS, PRE-OP.
 TEMPLATE, SUBMIT, TARGET, and POST-OP.  Re-registering an existing ID
 replaces the entry."
   (unless id
-    (error "agent-shell-prompt: :id is required"))
+    (error "Agent-shell-prompt: `:id' is required"))
   (unless template
-    (error "agent-shell-prompt %s: :template is required" id))
+    (error "Agent-shell-prompt %s: `:template' is required" id))
   (puthash id
            (agent-shell-prompt-spec--make
             :id id :doc doc :category (or category "General") :args args
@@ -92,7 +92,7 @@ replaces the entry."
 (defmacro agent-shell-prompt-def (id &rest keys)
   "Define and register a prompt workflow named ID.
 KEYS is a plist accepting the same keys as `agent-shell-prompt-register'
-(:doc :category :args :pre-op :template :submit :target :post-op).
+\(:doc :category :args :pre-op :template :submit :target :post-op).
 :args is data (an arg-spec list), not code, and is quoted automatically."
   (declare (indent 1))
   (let ((keys (if (plist-member keys :args)
@@ -295,7 +295,7 @@ ARGS is a plist of pre-known argument values; any argument the spec
 declares but ARGS omits is collected interactively.  TARGET and SUBMIT
 override the spec's defaults when supplied."
   (let* ((spec (or (agent-shell-prompt-get id)
-                   (error "agent-shell-prompt: unknown prompt %s" id)))
+                   (error "Agent-shell-prompt: unknown prompt %s" id)))
          (full-args (agent-shell-prompt--collect-args spec args))
          (ctx (list :prompt-id id
                     :args full-args

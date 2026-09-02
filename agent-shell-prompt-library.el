@@ -43,19 +43,24 @@ instead of aborting the workflow."
      (with-current-buffer standard-output
        (apply #'call-process (car args) nil t nil (cdr args))))))
 
+(defun agent-shell-prompt-library--gather (ctx pairs)
+  "Populate CTX with the output of each shell command in PAIRS.
+PAIRS is a list of (CTX-KEY COMMAND ARG...) entries; each COMMAND is run
+via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
+  (dolist (pair pairs ctx)
+    (plist-put ctx (car pair) (apply #'agent-shell-prompt-library--shell (cdr pair)))))
+
 ;; CI failure remediation
 
 (defun agent-shell-prompt-library--fix-ci-pre-op (ctx)
   "Fetch the failing CI run's summary and log for :repo/:run-id in CTX."
   (let* ((args (plist-get ctx :args))
          (repo (plist-get args :repo))
-         (run-id (plist-get args :run-id))
-         (summary (agent-shell-prompt-library--shell
-                   "gh" "run" "view" (format "%s" run-id) "--repo" repo))
-         (log (agent-shell-prompt-library--shell
-               "gh" "run" "view" (format "%s" run-id) "--repo" repo "--log-failed")))
-    (plist-put ctx :ci-summary summary)
-    (plist-put ctx :ci-log log)))
+         (run-id (format "%s" (plist-get args :run-id))))
+    (agent-shell-prompt-library--gather
+     ctx
+     (list (list :ci-summary "gh" "run" "view" run-id "--repo" repo)
+           (list :ci-log "gh" "run" "view" run-id "--repo" repo "--log-failed")))))
 
 (agent-shell-prompt-def fix-ci
   :doc "Download CI artifacts and prompt agent to fix build failure"
@@ -72,10 +77,9 @@ instead of aborting the workflow."
 (defun agent-shell-prompt-library--pr-review-pre-op (ctx)
   "Fetch review comments for :pr-number in CTX."
   (let* ((args (plist-get ctx :args))
-         (pr-number (plist-get args :pr-number))
-         (comments (agent-shell-prompt-library--shell
-                    "gh" "pr" "view" (format "%s" pr-number) "--comments")))
-    (plist-put ctx :pr-comments comments)))
+         (pr-number (format "%s" (plist-get args :pr-number))))
+    (agent-shell-prompt-library--gather
+     ctx (list (list :pr-comments "gh" "pr" "view" pr-number "--comments")))))
 
 (agent-shell-prompt-def pr-review-patch
   :doc "Fetch PR review comments and draft remediation patch"
@@ -89,11 +93,11 @@ instead of aborting the workflow."
 ;; Test coverage expansion
 
 (defun agent-shell-prompt-library--coverage-pre-op (ctx)
-  "Compute a diff of :file in CTX against HEAD to scope untested changes."
+  "Diff :file in CTX against HEAD to scope untested edits."
   (let* ((args (plist-get ctx :args))
-         (file (plist-get args :file))
-         (diff (agent-shell-prompt-library--shell "git" "diff" "HEAD" "--" file)))
-    (plist-put ctx :file-diff diff)))
+         (file (plist-get args :file)))
+    (agent-shell-prompt-library--gather
+     ctx (list (list :file-diff "git" "diff" "HEAD" "--" file)))))
 
 (agent-shell-prompt-def expand-coverage
   :doc "Analyze uncovered lines and author missing unit tests"
@@ -107,11 +111,11 @@ instead of aborting the workflow."
 ;; Refactor / dead-code cleanup
 
 (defun agent-shell-prompt-library--refactor-pre-op (ctx)
-  "Gather git blame summary for :file in CTX to scope stale/legacy code."
+  "Gather git log summary for :file in CTX to scope stale/legacy code."
   (let* ((args (plist-get ctx :args))
-         (file (plist-get args :file))
-         (blame (agent-shell-prompt-library--shell "git" "log" "--oneline" "-n" "10" "--" file)))
-    (plist-put ctx :recent-history blame)))
+         (file (plist-get args :file)))
+    (agent-shell-prompt-library--gather
+     ctx (list (list :recent-history "git" "log" "--oneline" "-n" "10" "--" file)))))
 
 (agent-shell-prompt-def refactor-module
   :doc "Clean up dead code and migrate legacy macro forms"
