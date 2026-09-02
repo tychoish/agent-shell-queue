@@ -19,8 +19,8 @@
 
 #+BEGIN_SRC emacs-lisp
   ;; Fork items starting at item "q0abcd" into a git worktree session
-  (agent-shell-queue-fork-session (current-buffer) "q0abcd" '(:fork-mode
-  fork :use-worktree t :worktree-branch "feature/experimental-branch"))
+  (agent-shell-queue-fork-session (current-buffer) "q0abcd"
+   '(:fork-mode fork :use-worktree t :worktree-branch "feature/experimental-branch"))
 #+END_SRC
 
 * Reference

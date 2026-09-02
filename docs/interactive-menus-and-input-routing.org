@@ -24,8 +24,7 @@
 
 #+BEGIN_SRC emacs-lisp
   ;; Bind transient dispatch menu to M in queue mode and global map
-  (define-key agent-shell-queue-mode-map (kbd "M")
-  #'agent-shell-menu-dispatch)
+  (define-key agent-shell-queue-mode-map (kbd "M") #'agent-shell-menu-dispatch)
 
   ;; Configure queue-intercept as default across all new agent sessions
   (setq agent-shell-queue-input-mode-default 'queue-intercept)

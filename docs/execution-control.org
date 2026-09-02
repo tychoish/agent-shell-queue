@@ -33,8 +33,9 @@
   ;; Insert a 30-second pause checkpoint into the active shell queue
   (agent-shell-queue-insert-pause (current-buffer) nil 30.0)
 
-  ;; Insert a scheduled wait timer (agent-shell-queue-insert-wait
-  (current-buffer))
+  ;; Insert a scheduled wait timer
+  (agent-shell-queue-insert-wait
+   (current-buffer))
 #+END_SRC
 
 * Reference

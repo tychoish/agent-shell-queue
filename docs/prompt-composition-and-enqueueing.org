@@ -32,8 +32,7 @@
     ;; Programmatic enqueue with pre/post dispatch delays
     (agent-shell-queue-enqueue
      "Refactor auth middleware and add test cases"
-     (get-buffer "*agent-shell-backend*") nil) ; background flag 5.0
-    ; delay 5s before sending 2.0) ; delay 2s after turn completes
+     (get-buffer "*agent-shell-backend*") nil)
 
     ;; Directory queue: creates shell on dispatch automatically
     (agent-shell-queue-add-directory

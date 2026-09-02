@@ -23,11 +23,6 @@
 #+BEGIN_SRC emacs-lisp
   ;; Interject the current running agent task
   (agent-shell-queue-interject)
-
-  ;; Keybindings in *agent-shell-queue* buffer: RET - View item details
-  ;; e/C-e - Enqueue dispatch / Edit task prompt p/r - Pause / Resume
-  ;; item M-up - Move item earlier in queue M-down- Move item later in
-  ;; queue C-d x - Raw YAML queue editor
 #+END_SRC
 
 * Reference

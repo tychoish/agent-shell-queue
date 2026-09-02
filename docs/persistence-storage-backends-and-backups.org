@@ -18,11 +18,13 @@
 * Example
 
 #+BEGIN_SRC emacs-lisp
-  ;; Enable safe-save backups in init.el (setq
-  agent-shell-queue-safe-save t agent-shell-queue-safe-save-format 'yaml
-  agent-shell-queue-safe-save-max-files 50)
+  ;; Enable safe-save backups in init.el
+  (setq agent-shell-queue-safe-save t)
+  (setq agent-shell-queue-safe-save-format 'yaml)
+  (setq agent-shell-queue-safe-save-max-files 50)
 
-  ;; Enable SQLite storage backend (require 'agent-shell-queue-db)
+  ;; Enable SQLite storage backend
+  (require 'agent-shell-queue-db)
   (agent-shell-queue-db-enable)
 #+END_SRC
 
