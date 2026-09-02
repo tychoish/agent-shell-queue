@@ -5,7 +5,7 @@
 ;; Keywords: tools, agent-shell
 ;; Version: 0.1.0
 ;; URL: https://github.com/tychoish/agent-shell-queue
-;; Package-Requires: ((emacs "29.1") (agent-shell "0.1") (agent-shell-queue "0.1"))
+;; Package-Requires: ((emacs "29.1") (agent-shell "0.1"))
 
 ;; This file is not part of GNU Emacs
 
@@ -104,7 +104,9 @@ KEYS is a plist accepting the same keys as `agent-shell-prompt-register'
 
 (defun agent-shell-prompt--arg-key (name)
   "Normalize an arg-spec NAME (bare symbol or keyword) to a plist keyword key."
-  (if (keywordp name) name (intern (format ":%s" name))))
+  (if (keywordp name)
+      name
+    (intern (format ":%s" name))))
 
 (defun agent-shell-prompt--read-arg (arg-spec)
   "Interactively read one value for ARG-SPEC and return (KEY . VALUE).
