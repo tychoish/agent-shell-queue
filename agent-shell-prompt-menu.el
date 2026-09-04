@@ -79,7 +79,7 @@ CATEGORY non-nil, only prompts in that category are offered."
 ;; `agent-shell-prompt-select'.
 (declare-function agent-shell-menu-dispatch "agent-shell-menu")
 (with-eval-after-load 'agent-shell-menu
-  (transient-append-suffix 'agent-shell-menu-dispatch '("ac")
+  (transient-append-suffix 'agent-shell-menu-dispatch "ac"
     '("ap" "Prompt library" agent-shell-prompt-select)))
 
 (provide 'agent-shell-prompt-menu)
