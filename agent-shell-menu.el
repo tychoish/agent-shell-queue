@@ -32,12 +32,12 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'help-mode)
 (require 'annotated-completing-read)
 (require 'transient)
 (require 'sprite-future nil t)
 (require 'agent-shell)
 (require 'agent-shell-queue)
-
 (declare-function agent-shell-viewport--shell-buffer "agent-shell-viewport")
 (declare-function agent-shell-ui--toggle-fragment-at-point "agent-shell-ui")
 (declare-function agent-shell--config-icon "agent-shell")
@@ -604,11 +604,11 @@ buffer-local variant that only changes the default for this session."
               (start (alist-get 'start attrs)))
     start))
 
-(defvar agent-shell-menu-info-map (make-sparse-keymap)
-  "Keymap for agent-shell info help buffers.  Inherits `help-mode-map' once loaded.")
-
-(with-eval-after-load 'help-mode
-  (set-keymap-parent agent-shell-menu-info-map help-mode-map))
+(defvar agent-shell-menu-info-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map help-mode-map)
+    map)
+  "Keymap for agent-shell info help buffers.")
 
 ;;;###autoload
 (defun agent-shell-menu-session-info ()
@@ -706,7 +706,7 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
                 '(ignore))
            (call-interactively #',fn)))
        (define-key agent-shell-mode-map (kbd ,key-str) #',name)
-       (with-eval-after-load 'agent-shell-viewport
+       (when (boundp 'agent-shell-viewport-view-mode-map)
          (define-key agent-shell-viewport-view-mode-map (kbd ,key-str) #',fn)))))
 
 (defun agent-shell-menu-new-shell-in-dir (dir)
@@ -722,7 +722,9 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
 (defun agent-shell-menu--agent-review-available-p ()
   "Return non-nil when `agent-review' is loaded."
   (featurep 'agent-review))
-
+(defun agent-shell-menu--prompt-select-available-p ()
+  "Return non-nil when `agent-shell-prompt-select' is available."
+  (fboundp 'agent-shell-prompt-select))
 (defun agent-shell-menu--interjection-p ()
   "Return non-nil when in an active interjection buffer."
   (derived-mode-p 'agent-shell-queue-interjection-mode))
@@ -802,6 +804,8 @@ Keys are assigned as 1, 2, 3… in button order."
     ("ai" "Interrupt" agent-shell-interrupt)
     ("ar" "Resolve permission" agent-shell-menu-resolve-permission)
     ("ac" "Command menu" agent-shell-menu-select-command)
+    ("ap" "Prompt library" agent-shell-prompt-select
+     :if agent-shell-menu--prompt-select-available-p)
     ("ax" "Collapse menu" agent-shell-menu-select-collapse)
     ("ij" "Interject" agent-shell-queue-interject
      :inapt-if-not agent-shell-queue-interject-available-p)
