@@ -29,14 +29,14 @@
 * Example
 
 #+BEGIN_SRC emacs-lisp
-    ;; Programmatic enqueue with pre/post dispatch delays
-    (agent-shell-queue-enqueue
-     "Refactor auth middleware and add test cases"
-     (get-buffer "*agent-shell-backend*") nil)
+  ;; Programmatic enqueue with pre/post dispatch delays
+  (agent-shell-queue-enqueue
+   "Refactor auth middleware and add test cases"
+   (get-buffer "*agent-shell-backend*") nil)
 
-    ;; Directory queue: creates shell on dispatch automatically
-    (agent-shell-queue-add-directory
-     "Run project linting and formatchecks" "~/src/project-b/")
+  ;; Directory queue: creates shell on dispatch automatically
+  (agent-shell-queue-add-directory
+   "Run project linting and formatchecks" "~/src/project-b/")
 #+END_SRC
 
 * Reference

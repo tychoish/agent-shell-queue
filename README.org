@@ -17,68 +17,28 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
 * Contents                                                       :TOC_3:
 - [[#overview][Overview]]
 - [[#installation][Installation]]
-  - [[#package-vc][package-vc]]
-  - [[#use-package-with-vc][use-package with VC]]
-  - [[#use-package][Use Package]]
-  - [[#manual][Manual]]
   - [[#elpaish-snapshot-repository][ELPAish Snapshot Repository]]
+  - [[#use-package-with-vc][use-package with VC]]
+  - [[#manual][Manual]]
 - [[#user-guides][User Guides]]
 - [[#api-reference][API Reference]]
 - [[#license][License]]
 
 * Installation
-** package-vc
-
-Requires Emacs 29.1+.  Run once to clone and register the package:
-
-#+BEGIN_SRC emacs-lisp
-(package-vc-install '(agent-shell-queue
-                      :url "https://github.com/tychoish/agent-shell-queue"))
-#+END_SRC
-
-** use-package with VC
-
-Requires Emacs 30+.  Installs on first load if not already present:
-
-#+BEGIN_SRC emacs-lisp
-(use-package agent-shell-queue
-  :vc (:url "https://github.com/tychoish/agent-shell-queue")
-  :after agent-shell)
-#+END_SRC
-
-** Use Package
-#+BEGIN_SRC sh
-git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
-#+END_SRC
-
-#+BEGIN_SRC emacs-lisp
-(use-package agent-shell-queue
-  :load-path "~/.emacs.d/elpa/agent-shell-queue"
-  :after agent-shell)
-#+END_SRC
-
-** Manual
-
-#+BEGIN_SRC sh
-git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
-#+END_SRC
-
-#+BEGIN_SRC emacs-lisp
-(add-to-list 'load-path "~/.emacs.d/elpa/agent-shell-queue")
-(require 'agent-shell-queue)
-#+END_SRC
-
 ** ELPAish Snapshot Repository
-
-agent-shell-queue is also published as a development snapshot on
-[[https://github.com/tychoish/elpaish][ELPAish]], a self-hosted, GPG-signed
-Emacs Lisp package archive.  Add the snapshot stream to
-~package-archives~ and install normally with =package-install=:
+=agent-shell-queue= is also published as a development snapshot on [[https://github.com/tychoish/elpaish][ELPAish]], a
+self-hosted, GPG-signed Emacs Lisp package archive.  Add the snapshot stream to
+~package-archives~:
 
 #+BEGIN_SRC emacs-lisp
 (add-to-list 'package-archives
              '("elpaish" . "https://tychoish.github.io/elpaish/snapshot/") t)
 (package-refresh-contents)
+#+END_SRC
+
+You can install with =package-install=:
+
+#+BEGIN_SRC emacs-lisp
 (package-install 'agent-shell-queue)
 #+END_SRC
 
@@ -92,8 +52,35 @@ To verify package signatures, import the ELPAish signing key into
 (setq package-check-signature t)
 #+END_SRC
 
-* User Guides
+** use-package with VC
+Requires Emacs 30+. Installs on first load if not already present:
 
+#+BEGIN_SRC emacs-lisp
+(use-package agent-shell-queue
+  :vc (:url "https://github.com/tychoish/agent-shell-queue")
+  :after agent-shell)
+#+END_SRC
+
+** Manual
+#+BEGIN_SRC sh
+git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp
+(add-to-list 'load-path "~/.emacs.d/elpa/agent-shell-queue")
+(require 'agent-shell-queue)
+#+END_SRC
+
+You can also, with Emacs 29.1+, use ~package-vc-install~ to manage the dependency:
+
+#+BEGIN_SRC emacs-lisp
+(package-vc-install '(agent-shell-queue
+                      :url "https://github.com/tychoish/agent-shell-queue"))
+#+END_SRC
+
+
+
+* User Guides
 Detailed use-case guides live under [[file:docs/][docs/]]:
 
 - [[file:docs/prompt-composition-and-enqueueing.org][Prompt Composition and Enqueueing]]
@@ -104,7 +91,6 @@ Detailed use-case guides live under [[file:docs/][docs/]]:
 - [[file:docs/interactive-menus-and-input-routing.org][Interactive Menus and Input Routing]]
 
 * API Reference
-
 See [[file:docs/api.org][docs/api.org]] for the generated API reference, covering
 ~agent-shell-menu~, ~agent-shell-queue~, ~agent-shell-queue-persistence~,
 ~agent-shell-queue-db~, and ~agent-shell-queue-org~.
