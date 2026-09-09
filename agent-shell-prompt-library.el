@@ -80,14 +80,31 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
                 (t (format "%dd ago" (/ diff 86400)))))
       "n/a")))
 
+(defun agent-shell-prompt-library--resolve-repo-slug (repo)
+  "Resolve REPO name or path to an OWNER/NAME GitHub repository slug string."
+  (if (and (stringp repo) (string-match-p "/" repo))
+      repo
+    (or (ignore-errors
+          (let ((slug (string-trim (shell-command-to-string "gh repo view --json nameWithOwner --jq .nameWithOwner"))))
+            (unless (or (string-empty-p slug) (string-match-p "^error" slug))
+              slug)))
+        (ignore-errors
+          (and (fboundp 'magit-dash-gh--repo-info)
+               (when-let* ((info (magit-dash-gh--repo-info))
+                           (o (plist-get info :owner))
+                           (r (plist-get info :repo)))
+                 (format "%s/%s" o r))))
+        repo)))
+
 (defun agent-shell-prompt-library--fetch-runs (repo &optional limit)
   "Fetch recent GitHub Action runs for REPO as a list of alists."
-  (when (and repo (executable-find "gh" t))
+  (when-let* ((slug (agent-shell-prompt-library--resolve-repo-slug repo))
+              ((executable-find "gh" t)))
     (let* ((lim (number-to-string (or limit 20)))
            (json-str (with-output-to-string
                        (with-current-buffer standard-output
                          (call-process "gh" nil t nil "run" "list"
-                                       "--repo" repo
+                                       "--repo" slug
                                        "--limit" lim
                                        "--json" "databaseId,displayTitle,status,conclusion,headBranch,headSha,createdAt,updatedAt,startedAt,url"))))
            (parsed (ignore-errors (json-parse-string json-str :object-type 'alist :array-type 'list))))
