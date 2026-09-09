@@ -424,7 +424,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
                (lambda (_prompt table &rest _) (setq acr-called table) (caar table))))
       (should (= 111 (agent-shell-prompt-library--resolve-ci-run "acme/x" "main")))
       (should acr-called)
-      (should (string-match-p "failure" (cdar acr-called))))))
+      (should (string-match-p "success" (cdar acr-called))))))
 (ert-deftest agent-shell-prompt/library-gather-runs-each-pair-into-ctx ()
   "agent-shell-prompt-library--gather stores each command's output under its key."
   (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)

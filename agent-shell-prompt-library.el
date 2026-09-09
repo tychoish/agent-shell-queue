@@ -171,22 +171,23 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
 (defun agent-shell-prompt-library--fix-ci-pre-op (ctx)
   "Fetch the failing CI run's summary and log for :repo/:run-id in CTX."
   (let* ((args (plist-get ctx :args))
-         (repo (or (plist-get args :repo)
-                   (ignore-errors
-                     (and (fboundp 'magit-dash--repo-at-point)
-                          (when-let* ((r (magit-dash--repo-at-point)))
-                            (magit-dash-repo-name r))))
-                   (user-error "No repository specified for fix-ci")))
+         (raw-repo (or (plist-get args :repo)
+                       (ignore-errors
+                         (and (fboundp 'magit-dash--repo-at-point)
+                              (when-let* ((r (magit-dash--repo-at-point)))
+                                (magit-dash-repo-name r))))
+                       (user-error "No repository specified for fix-ci")))
+         (repo-slug (agent-shell-prompt-library--resolve-repo-slug raw-repo))
          (run-id (or (plist-get args :run-id)
-                     (agent-shell-prompt-library--resolve-ci-run repo (plist-get args :branch))))
+                     (agent-shell-prompt-library--resolve-ci-run repo-slug (plist-get args :branch))))
          (run-id-str (when run-id (format "%s" run-id)))
-         (updated-args (plist-put (plist-put (copy-sequence args) :repo repo) :run-id run-id))
+         (updated-args (plist-put (plist-put (copy-sequence args) :repo repo-slug) :run-id run-id))
          (updated-ctx (plist-put (copy-sequence ctx) :args updated-args)))
-    (if (and repo run-id-str)
+    (if (and repo-slug run-id-str)
         (agent-shell-prompt-library--gather
          updated-ctx
-         (list (list :ci-summary "gh" "run" "view" run-id-str "--repo" repo)
-               (list :ci-log "gh" "run" "view" run-id-str "--repo" repo "--log-failed")))
+         (list (list :ci-summary "gh" "run" "view" run-id-str "--repo" repo-slug)
+               (list :ci-log "gh" "run" "view" run-id-str "--repo" repo-slug "--log-failed")))
       updated-ctx)))
 
 (agent-shell-prompt-def fix-ci
