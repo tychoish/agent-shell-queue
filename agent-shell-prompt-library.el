@@ -55,18 +55,25 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
 (defun agent-shell-prompt-library--fix-ci-pre-op (ctx)
   "Fetch the failing CI run's summary and log for :repo/:run-id in CTX."
   (let* ((args (plist-get ctx :args))
-         (repo (plist-get args :repo))
-         (run-id (format "%s" (plist-get args :run-id))))
-    (agent-shell-prompt-library--gather
-     ctx
-     (list (list :ci-summary "gh" "run" "view" run-id "--repo" repo)
-           (list :ci-log "gh" "run" "view" run-id "--repo" repo "--log-failed")))))
+         (repo (or (plist-get args :repo)
+                   (and (fboundp 'magit-dash-repo-name)
+                        (fboundp 'magit-dash--repo-at-point)
+                        (when-let* ((r (magit-dash--repo-at-point)))
+                          (magit-dash-repo-name r)))))
+         (run-id (plist-get args :run-id))
+         (run-id-str (when run-id (format "%s" run-id))))
+    (if (and repo run-id-str)
+        (agent-shell-prompt-library--gather
+         ctx
+         (list (list :ci-summary "gh" "run" "view" run-id-str "--repo" repo)
+               (list :ci-log "gh" "run" "view" run-id-str "--repo" repo "--log-failed")))
+      ctx)))
 
 (agent-shell-prompt-def fix-ci
   :doc "Download CI artifacts and prompt agent to fix build failure"
   :category "CI/CD"
-  :args ((repo :prompt "Repository: ")
-         (run-id :prompt "Run ID: " :type integer))
+  :args ((repo :prompt "Repository: " :optional t)
+         (run-id :prompt "Run ID: " :type integer :optional t))
   :pre-op #'agent-shell-prompt-library--fix-ci-pre-op
   :template "Investigate and fix the CI failure in {{args.repo}} (run #{{args.run-id}}).\n\nSummary:\n{{ci-summary}}\n\nFailed step log:\n{{ci-log}}"
   :submit t
