@@ -60,6 +60,9 @@
   '((t :foreground "steelblue3"))
   "Face for compact (non-LLM manual) work items.")
 
+(defface agent-shell-queue-blocked-question-face
+  '((t :foreground "darkorange1" :weight bold))
+  "Face for queue items blocked on a Human-in-the-Loop question.")
 (defface agent-shell-queue-draft-face
   '((t :foreground "gray50" :slant italic))
   "Face for queue items saved as drafts (not yet queued for dispatch).")
@@ -104,6 +107,27 @@ to its buffer name."
         (when item-id
           (rename-buffer (concat (buffer-name buf) "-" item-id) t))))
     buf))
+
+(defun agent-shell-queue--resurrect-shell (target-shell &optional default-directory-override)
+  "Resurrect or spawn target shell buffer TARGET-SHELL.
+If TARGET-SHELL is live, returns it directly.
+Otherwise, creates a new `agent-shell' buffer in DEFAULT-DIRECTORY-OVERRIDE
+\(or target-shell's associated directory if target-shell is a directory bucket\)
+and renames it to match TARGET-SHELL."
+  (if (and target-shell (get-buffer target-shell) (buffer-live-p (get-buffer target-shell)))
+      (get-buffer target-shell)
+    (let* ((dir (or default-directory-override
+                    (when (and target-shell (agent-shell-queue--dir-bucket-p target-shell))
+                      (agent-shell-queue--dir-from-bucket target-shell))
+                    default-directory))
+           (canonical-dir (agent-shell-queue--canonicalize-dir dir))
+           (buf (when (fboundp 'agent-shell-new-shell)
+                  (let ((default-directory canonical-dir))
+                    (agent-shell-new-shell)))))
+      (when (and buf (buffer-live-p buf) target-shell (not (agent-shell-queue--dir-bucket-p target-shell)))
+        (with-current-buffer buf
+          (rename-buffer target-shell t)))
+      buf)))
 
 (declare-function shell-maker-busy "shell-maker")
 (declare-function markdown-mode "markdown-mode")
