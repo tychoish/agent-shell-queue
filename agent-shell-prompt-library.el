@@ -50,24 +50,127 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
   (dolist (pair pairs ctx)
     (plist-put ctx (car pair) (apply #'agent-shell-prompt-library--shell (cdr pair)))))
 
-;; CI failure remediation
+(declare-function annotated-completing-read "annotated-completing-read")
+
+(defun agent-shell-prompt-library--iso-to-seconds (iso-str)
+  "Convert ISO-STR timestamp string to float seconds."
+  (when (and (stringp iso-str) (not (string-empty-p iso-str)))
+    (ignore-errors
+      (float-time (encode-time (parse-time-string iso-str))))))
+
+(defun agent-shell-prompt-library--format-duration (start-iso end-iso)
+  "Format duration between START-ISO and END-ISO string."
+  (let ((s (agent-shell-prompt-library--iso-to-seconds start-iso))
+        (e (agent-shell-prompt-library--iso-to-seconds end-iso)))
+    (if (and s e)
+        (let ((diff (max 0 (floor (- e s)))))
+          (cond ((< diff 60) (format "%ds" diff))
+                ((< diff 3600) (format "%dm %ds" (/ diff 60) (% diff 60)))
+                (t (format "%dh %dm" (/ diff 3600) (% (% diff 3600) 60)))))
+      "n/a")))
+
+(defun agent-shell-prompt-library--format-time-ago (iso-time)
+  "Format ISO-TIME string as relative time ago."
+  (let ((t-sec (agent-shell-prompt-library--iso-to-seconds iso-time)))
+    (if t-sec
+        (let ((diff (max 0 (floor (- (float-time) t-sec)))))
+          (cond ((< diff 60) "just now")
+                ((< diff 3600) (format "%dm ago" (/ diff 60)))
+                ((< diff 86400) (format "%dh ago" (/ diff 3600)))
+                (t (format "%dd ago" (/ diff 86400)))))
+      "n/a")))
+
+(defun agent-shell-prompt-library--fetch-runs (repo &optional limit)
+  "Fetch recent GitHub Action runs for REPO as a list of alists."
+  (when (and repo (executable-find "gh" t))
+    (let* ((lim (number-to-string (or limit 20)))
+           (json-str (with-output-to-string
+                       (with-current-buffer standard-output
+                         (call-process "gh" nil t nil "run" "list"
+                                       "--repo" repo
+                                       "--limit" lim
+                                       "--json" "databaseId,displayTitle,status,conclusion,headBranch,headSha,createdAt,updatedAt,startedAt,url"))))
+           (parsed (ignore-errors (json-parse-string json-str :object-type 'alist :array-type 'list))))
+      (when (listp parsed) parsed))))
+
+(defun agent-shell-prompt-library--current-branch ()
+  "Return current git branch name or `main'."
+  (or (ignore-errors
+        (and (fboundp 'magit-get-current-branch)
+             (magit-get-current-branch)))
+      (ignore-errors
+        (car (vc-git-branches)))
+      (let ((b (ignore-errors (string-trim (shell-command-to-string "git branch --show-current")))))
+        (unless (or (null b) (string-empty-p b)) b))
+      "main"))
+
+(defun agent-shell-prompt-library--resolve-ci-run (repo &optional target-branch)
+  "Return a run-id for REPO and TARGET-BRANCH.
+If the latest run on TARGET-BRANCH is failing, return its run-id automatically.
+Otherwise, prompt the user with an ACR picker showing recent runs with duration and time ago."
+  (let* ((branch (or target-branch (agent-shell-prompt-library--current-branch)))
+         (runs (agent-shell-prompt-library--fetch-runs repo 20))
+         (branch-runs (seq-filter (lambda (r) (equal (map-elt r 'headBranch) branch)) runs))
+         (target-runs (or branch-runs runs))
+         (latest (car target-runs))
+         (latest-conclusion (and latest (or (map-elt latest 'conclusion) (map-elt latest 'status))))
+         (latest-failing-p (and latest
+                                (member latest-conclusion '("failure" "cancelled" "timed_out" "action_required")))))
+    (if latest-failing-p
+        (map-elt latest 'databaseId)
+      (if (null target-runs)
+          (user-error "No CI runs found for %s" repo)
+        (let* ((items (mapcar
+                       (lambda (r)
+                         (let* ((id (map-elt r 'databaseId))
+                                (title (map-elt r 'displayTitle))
+                                (sha (map-elt r 'headSha))
+                                (short-sha (if (and (stringp sha) (>= (length sha) 7))
+                                               (substring sha 0 7)
+                                             (or sha "")))
+                                (b (map-elt r 'headBranch))
+                                (status (map-elt r 'status))
+                                (conclusion (or (map-elt r 'conclusion) status))
+                                (dur (agent-shell-prompt-library--format-duration
+                                      (map-elt r 'startedAt) (map-elt r 'updatedAt)))
+                                (ago (agent-shell-prompt-library--format-time-ago
+                                      (or (map-elt r 'updatedAt) (map-elt r 'createdAt))))
+                                (cand (format "#%s %s (%s) [%s]" id title short-sha b))
+                                (ann (format "%s | %s | %s" conclusion dur ago)))
+                           (list cand id ann)))
+                       target-runs))
+               (table (mapcar (lambda (item) (cons (nth 0 item) (nth 2 item))) items))
+               (selected (if (fboundp 'annotated-completing-read)
+                             (annotated-completing-read table
+                                                        :prompt "Select CI Run: "
+                                                        :require-match t
+                                                        :history 'agent-shell-prompt-ci-run-history)
+                           (completing-read "Select CI Run: " table nil t)))
+               (match (assoc selected items)))
+          (if match
+              (nth 1 match)
+            (user-error "No CI run selected")))))))
 
 (defun agent-shell-prompt-library--fix-ci-pre-op (ctx)
   "Fetch the failing CI run's summary and log for :repo/:run-id in CTX."
   (let* ((args (plist-get ctx :args))
          (repo (or (plist-get args :repo)
-                   (and (fboundp 'magit-dash-repo-name)
-                        (fboundp 'magit-dash--repo-at-point)
-                        (when-let* ((r (magit-dash--repo-at-point)))
-                          (magit-dash-repo-name r)))))
-         (run-id (plist-get args :run-id))
-         (run-id-str (when run-id (format "%s" run-id))))
+                   (ignore-errors
+                     (and (fboundp 'magit-dash--repo-at-point)
+                          (when-let* ((r (magit-dash--repo-at-point)))
+                            (magit-dash-repo-name r))))
+                   (user-error "No repository specified for fix-ci")))
+         (run-id (or (plist-get args :run-id)
+                     (agent-shell-prompt-library--resolve-ci-run repo (plist-get args :branch))))
+         (run-id-str (when run-id (format "%s" run-id)))
+         (updated-args (plist-put (plist-put (copy-sequence args) :repo repo) :run-id run-id))
+         (updated-ctx (plist-put (copy-sequence ctx) :args updated-args)))
     (if (and repo run-id-str)
         (agent-shell-prompt-library--gather
-         ctx
+         updated-ctx
          (list (list :ci-summary "gh" "run" "view" run-id-str "--repo" repo)
                (list :ci-log "gh" "run" "view" run-id-str "--repo" repo "--log-failed")))
-      ctx)))
+      updated-ctx)))
 
 (agent-shell-prompt-def fix-ci
   :doc "Download CI artifacts and prompt agent to fix build failure"

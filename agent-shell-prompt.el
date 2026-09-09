@@ -128,12 +128,12 @@ the :args plist key."
     (cons key raw)))
 
 (defun agent-shell-prompt--collect-args (spec provided)
-  "Return a complete args plist for SPEC, reading any keys missing from PROVIDED.
-PROVIDED is a plist of already-known argument values, keyed by keyword."
+  "Return a complete args plist for SPEC, reading any missing required keys from PROVIDED."
   (seq-reduce
    (lambda (acc arg-spec)
-     (let ((key (agent-shell-prompt--arg-key (car arg-spec))))
-       (if (plist-member acc key)
+     (let ((key (agent-shell-prompt--arg-key (car arg-spec)))
+           (optional (plist-get (cdr arg-spec) :optional)))
+       (if (or (plist-member acc key) optional)
            acc
          (let ((pair (agent-shell-prompt--read-arg arg-spec)))
            (plist-put acc (car pair) (cdr pair))))))
@@ -236,13 +236,32 @@ agent-shell-menu in turn would be circular."
               (agent-shell-buffers)))
 
 (defun agent-shell-prompt--session-buffer (target)
-  "Return a live `agent-shell' buffer for TARGET, creating one if needed.
-`:session-reuse' searches buffers scoped to `default-directory' first;
-`:session-new' always creates a fresh session."
-  (pcase target
-    (:session-new (agent-shell-new-shell))
-    (_ (or (car (agent-shell-prompt--project-buffers default-directory))
-           (agent-shell-new-shell)))))
+  "Return a live `agent-shell' buffer for TARGET, creating or prompting if needed.
+When TARGET is not `:session-new', search for open agent-shell buffers matching
+`default-directory' (or project). If matching buffers exist, prompt the user
+whether to reuse an existing shell buffer or open a new one. Otherwise, launch a
+new shell with `:session-strategy 'new'."
+  (if (eq target :session-new)
+      (agent-shell-new-shell :session-strategy 'new :location default-directory)
+    (let* ((buffers (agent-shell-prompt--project-buffers default-directory))
+           (dir-name (file-name-nondirectory (directory-file-name default-directory))))
+      (cond
+       ((null buffers)
+        (agent-shell-new-shell :session-strategy 'new :location default-directory))
+       ((= (length buffers) 1)
+        (let ((buf (car buffers)))
+          (if (y-or-n-p (format "Reuse open agent-shell %s for %s? "
+                                (buffer-name buf) dir-name))
+              buf
+            (agent-shell-new-shell :session-strategy 'new :location default-directory))))
+       (t
+        (let* ((new-option "[New agent-shell]")
+               (choices (cons new-option (mapcar #'buffer-name buffers)))
+               (selected (completing-read (format "Select agent-shell for %s: " dir-name)
+                                          choices nil t)))
+          (if (or (string-equal selected new-option) (string-empty-p selected))
+              (agent-shell-new-shell :session-strategy 'new :location default-directory)
+            (get-buffer selected))))))))
 
 (defun agent-shell-prompt--subscribe-post (spec shell-buffer ctx)
   "Subscribe to SHELL-BUFFER's turn-complete event to run SPEC's post-op.
@@ -291,29 +310,56 @@ reimplementing it."
              (agent-shell-prompt--subscribe-post spec shell-buffer ctx))))))))
 
 ;;;###autoload
-(cl-defun agent-shell-prompt-dispatch (id &key args target (submit nil submit-supplied-p))
+(defun agent-shell-prompt-dispatch (id &rest kwargs)
   "Run the prompt workflow registered as ID.
-ARGS is a plist of pre-known argument values; any argument the spec
-declares but ARGS omits is collected interactively.  TARGET and SUBMIT
-override the spec's defaults when supplied."
-  (let* ((spec (or (agent-shell-prompt-get id)
+KWARGS can be keyword arguments (:args PLIST :target TARGET :submit SUBMIT)
+or a single args plist passed as the second argument."
+  (let* ((plist (if (and (= (length kwargs) 1)
+                         (listp (car kwargs))
+                         (keywordp (caar kwargs)))
+                    (list :args (car kwargs))
+                  kwargs))
+         (args (plist-get plist :args))
+         (target (plist-get plist :target))
+         (submit-supplied-p (plist-member plist :submit))
+         (submit (plist-get plist :submit))
+         (spec (or (agent-shell-prompt-get id)
                    (error "Agent-shell-prompt: unknown prompt %s" id)))
+         (context-repo (or (plist-get args :repo)
+                           (ignore-errors
+                             (and (fboundp 'magit-dash--repo-at-point)
+                                  (when-let* ((r (magit-dash--repo-at-point)))
+                                    (magit-dash-repo-name r))))
+                           (and (fboundp 'project-current)
+                                (when-let* ((proj (project-current)))
+                                  (file-name-nondirectory (directory-file-name (project-root proj)))))))
+         (context-dir (or (ignore-errors
+                            (and (fboundp 'magit-dash--repo-at-point)
+                                 (when-let* ((r (magit-dash--repo-at-point)))
+                                   (file-name-as-directory (magit-dash-repo-path r)))))
+                          default-directory))
+         (args (if (and context-repo (not (plist-member args :repo)))
+                   (plist-put (copy-sequence args) :repo context-repo)
+                 args))
          (full-args (agent-shell-prompt--collect-args spec args))
          (ctx (list :prompt-id id
                     :args full-args
-                    :directory default-directory
+                    :directory context-dir
                     :target (or target (agent-shell-prompt-spec-target spec))
                     :submit (if submit-supplied-p
                                 submit
                               (agent-shell-prompt-spec-submit spec)))))
-    (agent-shell-prompt-exec-pre
-     spec ctx
-     (lambda (updated-ctx)
-       (let* ((rendered (agent-shell-prompt-render
-                         (agent-shell-prompt-spec-template spec) updated-ctx))
-              (final-ctx (plist-put (copy-sequence updated-ctx) :rendered-prompt rendered)))
-         (agent-shell-prompt--dispatch-rendered spec final-ctx))))))
+    (let ((default-directory context-dir))
+      (agent-shell-prompt-exec-pre
+       spec ctx
+       (lambda (updated-ctx)
+         (let* ((rendered (agent-shell-prompt-render
+                           (agent-shell-prompt-spec-template spec) updated-ctx))
+                (final-ctx (plist-put (copy-sequence updated-ctx) :rendered-prompt rendered)))
+           (agent-shell-prompt--dispatch-rendered spec final-ctx)))))))
 
+;;;###autoload
+(defalias 'agent-shell-prompt-exec #'agent-shell-prompt-dispatch)
 ;; Queue integration
 
 (defun agent-shell-prompt--dispatch-queue-item (item buf-name)

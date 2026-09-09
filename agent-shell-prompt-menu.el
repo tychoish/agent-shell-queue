@@ -73,6 +73,8 @@ CATEGORY non-nil, only prompts in that category are offered."
   "Single entry point into the `agent-shell-prompt' ACR picker."
   ["Prompt Library"
    ("p" "Select prompt…" agent-shell-prompt-select)])
+;;;###autoload
+(defalias 'agent-shell-prompt-menu #'agent-shell-prompt-select)
 
 (provide 'agent-shell-prompt-menu)
 

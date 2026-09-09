@@ -402,6 +402,29 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
       (should (string-match-p "acme/x" (plist-get ctx :ci-summary)))
       (should (string-match-p "--log-failed" (plist-get ctx :ci-log))))))
 
+(ert-deftest agent-shell-prompt/library-resolve-ci-run-auto-selects-failing ()
+  "Auto-selects the latest run when its conclusion indicates failure."
+  (let ((runs '(((databaseId . 34348785571) (displayTitle . "bump: dependencies") (status . "completed") (conclusion . "failure") (headBranch . "main") (headSha . "dd16f2f0107ebda9373d78cda7049397db797605"))
+                ((databaseId . 34295328476) (displayTitle . "fix bug") (status . "completed") (conclusion . "success") (headBranch . "main") (headSha . "cdc9b486796226f379f82f32a66b385408cc19be")))))
+    (cl-letf (((symbol-function 'agent-shell-prompt-library--fetch-runs) (lambda (&rest _) runs))
+              ((symbol-function 'agent-shell-prompt-library--current-branch) (lambda () "main"))
+              ((symbol-function 'annotated-completing-read) (lambda (&rest _) (error "should not prompt"))))
+      (should (= 34348785571 (agent-shell-prompt-library--resolve-ci-run "acme/x" "main"))))))
+
+(ert-deftest agent-shell-prompt/library-resolve-ci-run-uses-acr-picker-when-not-failing ()
+  "Presents an ACR picker when the latest run is not failing."
+  (let ((runs '(((databaseId . 111) (displayTitle . "feat: test") (status . "completed") (conclusion . "success") (headBranch . "main") (headSha . "abc1234567") (startedAt . "2026-09-09T10:00:00Z") (updatedAt . "2026-09-09T10:02:00Z") (createdAt . "2026-09-09T10:00:00Z"))
+                ((databaseId . 222) (displayTitle . "fix: bug") (status . "completed") (conclusion . "failure") (headBranch . "main") (headSha . "def9876543") (startedAt . "2026-09-09T08:00:00Z") (updatedAt . "2026-09-09T08:01:30Z") (createdAt . "2026-09-09T08:00:00Z"))))
+        acr-called)
+    (cl-letf (((symbol-function 'agent-shell-prompt-library--fetch-runs) (lambda (&rest _) runs))
+              ((symbol-function 'agent-shell-prompt-library--current-branch) (lambda () "main"))
+              ((symbol-function 'annotated-completing-read)
+               (lambda (table &rest _) (setq acr-called table) (caar table)))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _) (setq acr-called table) (caar table))))
+      (should (= 111 (agent-shell-prompt-library--resolve-ci-run "acme/x" "main")))
+      (should acr-called)
+      (should (string-match-p "failure" (cdar acr-called))))))
 (ert-deftest agent-shell-prompt/library-gather-runs-each-pair-into-ctx ()
   "agent-shell-prompt-library--gather stores each command's output under its key."
   (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
