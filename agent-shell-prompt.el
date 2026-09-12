@@ -48,19 +48,30 @@
 (cl-defstruct (agent-shell-prompt-spec
                (:constructor agent-shell-prompt-spec--make)
                (:copier nil))
-  "A registered reusable prompt workflow.
-ID: symbol — unique registry key.
-DOC: string — one-line description shown in menus.
-CATEGORY: string — grouping label shown in menus.
-ARGS: list of (NAME :prompt STRING :type TYPE :optional BOOL) specs.
-PRE-OP: function called as (PRE-OP ctx) or (PRE-OP ctx callback) — see
-  `agent-shell-prompt-exec-pre'.
-TEMPLATE: string with {{key}} placeholders resolved against ctx.
-SUBMIT: non-nil to submit the rendered prompt immediately on insertion.
-TARGET: one of `:session-reuse', `:session-new', `:queue', `:ask'.
-POST-OP: function called as (POST-OP shell-buffer ctx response-text)
-  on turn completion; see `agent-shell-prompt-exec-post'."
-  id doc category args pre-op template submit target post-op)
+  "A registered reusable prompt workflow."
+  (id nil :documentation "Symbol — unique registry key.")
+  (doc nil :documentation "String — one-line description shown in menus.")
+  (category nil :documentation "Grouping label shown in menus.")
+  (args nil
+        :documentation
+        "List of (NAME :prompt STRING :type TYPE :optional BOOL) specs.")
+  (pre-op nil
+          :documentation
+          "Function called as (PRE-OP ctx) or (PRE-OP ctx callback) — see
+`agent-shell-prompt-exec-pre'.")
+  (template nil
+            :documentation
+            "String with {{key}} placeholders resolved against ctx.")
+  (submit nil
+          :documentation
+          "Non-nil to submit the rendered prompt immediately on insertion.")
+  (target nil
+          :documentation
+          "One of `:session-reuse', `:session-new', `:queue', `:ask'.")
+  (post-op nil
+           :documentation
+           "Function called as (POST-OP shell-buffer ctx response-text)
+on turn completion; see `agent-shell-prompt-exec-post'."))
 
 (defvar agent-shell-prompt-registry (make-hash-table :test #'eq)
   "Hash table of symbol id to `agent-shell-prompt-spec'.
