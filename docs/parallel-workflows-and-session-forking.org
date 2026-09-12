@@ -2,18 +2,18 @@
 
 * Features
 
-- *Queue Forking*: Split a queue from a selected item into a new agent-shell session (clean shell or ACP session fork).
+- *Queue Forking*: Split a queue from a selected item into a new agent-shell session (via [[file:api.org::#agent-shell-queue-fork-session][~agent-shell-queue-fork-session~]] or [[file:api.org::#agent-shell-queue-buffer-fork][~agent-shell-queue-buffer-fork~]]).
 
-- *Git Worktree Isolation*: Automatically spin up an isolated Git worktree and branch for the forked session.
+- *Git Worktree Isolation*: Automatically spin up an isolated Git worktree and branch for the forked session (configured in [[file:api.org::#agent-shell-queue-fork-session][~agent-shell-queue-fork-session~]] parameters).
 
-- *Pending-Fork Freezing*: Freeze queued items in place while composing preceding tasks.
+- *Pending-Fork Freezing*: Freeze queued items in place while composing preceding tasks (released via [[file:api.org::#agent-shell-queue-release-pending-fork][~agent-shell-queue-release-pending-fork~]]).
 
 * Key Functions
 
-- ~agent-shell-queue-fork-session~: Fork queued items into a newly spawned agent session.
-- ~agent-shell-queue-buffer-fork~: Interactively fork from the item at point.
-- ~agent-shell-queue-insert-fork-before~ / ~agent-shell-queue-insert-fork-after~: Schedule an in-queue fork task.
-- ~agent-shell-queue-release-pending-fork~: Release frozen fork items back to active dispatch.
+- [[file:api.org::#agent-shell-queue-fork-session][~agent-shell-queue-fork-session~]]: Fork queued items into a newly spawned agent session.
+- [[file:api.org::#agent-shell-queue-buffer-fork][~agent-shell-queue-buffer-fork~]]: Interactively fork from the item at point.
+- [[file:api.org::#agent-shell-queue-insert-fork-before][~agent-shell-queue-insert-fork-before~]] / [[file:api.org::#agent-shell-queue-insert-fork-after][~agent-shell-queue-insert-fork-after~]]: Schedule an in-queue fork task.
+- [[file:api.org::#agent-shell-queue-release-pending-fork][~agent-shell-queue-release-pending-fork~]]: Release frozen fork items back to active dispatch.
 
 * Example
 

@@ -2,23 +2,23 @@
 
 * Features
 
-- *ACR and Transient Menus*: Annotated completing-read and transient dispatch prefixes for session switching, permissions, commands, and queues.
+- *ACR and Transient Menus*: Annotated completing-read and transient dispatch prefixes (via [[file:api.org::#agent-shell-menu-dispatch][~agent-shell-menu-dispatch~]]) for session switching, permissions, commands, and queues.
 
-- *Queue-Intercept Mode*: Intercept interactive user prompts in the shell buffer and route them into the queue.
+- *Queue-Intercept Mode*: Intercept interactive user prompts in the shell buffer (via [[file:api.org::#agent-shell-queue-intercept-mode][~agent-shell-queue-intercept-mode~]]) and route them into the queue.
 
-- *Queue-Only Mode*: Lock interactive input to queue routing with explicit =<ready>= visual indicators when idle.
+- *Queue-Only Mode*: Lock interactive input to queue routing (via [[file:api.org::#agent-shell-queue-only-mode][~agent-shell-queue-only-mode~]]) with explicit =<ready>= visual indicators when idle.
 
 * Key Functions
 
-- ~agent-shell-menu-dispatch~: Transient menu for navigation, queueing, session control, and actions.
+- [[file:api.org::#agent-shell-menu-dispatch][~agent-shell-menu-dispatch~]]: Transient menu for navigation, queueing, session control, and actions.
 
-- ~agent-shell-queue-capture-menu~: Transient prefix for prompt capture and flow insertion (bound to ~e~).
+- [[file:api.org::#agent-shell-queue-capture][~agent-shell-queue-capture~]]: Prompt capture and flow insertion interface.
 
-- ~agent-shell-queue-only-mode~: Minor mode routing all shell prompt turns through the queue.
+- [[file:api.org::#agent-shell-queue-only-mode][~agent-shell-queue-only-mode~]]: Minor mode routing all shell prompt turns through the queue.
 
-- ~agent-shell-queue-set-input-mode-default~: Set default input mode (~default~, ~queue-intercept~, ~queue-only~).
+- [[file:api.org::#agent-shell-queue-set-input-mode-default][~agent-shell-queue-set-input-mode-default~]]: Set default input mode (~default~, ~queue-intercept~, ~queue-only~).
 
-- ~agent-shell-menu-select-action~ / ~agent-shell-menu-resolve-permission~: Interactive ACR action pickers.
+- [[file:api.org::#agent-shell-menu-select-action][~agent-shell-menu-select-action~]] / [[file:api.org::#agent-shell-menu-resolve-permission][~agent-shell-menu-resolve-permission~]]: Interactive ACR action pickers.
 
 * Example
 

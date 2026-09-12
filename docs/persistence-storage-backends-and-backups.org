@@ -2,18 +2,18 @@
 
 * Features
 
-- *Storage Backends*: Plist (default), JSON, YAML, Org-mode file backend (~agent-shell-queue-org~), or SQLite database (~agent-shell-queue-db~).
+- *Storage Backends*: Plist (default), JSON, YAML, Org-mode file backend ([[file:api.org::#agent-shell-queue-org-refile-from-heading][~agent-shell-queue-org~]]), or SQLite database ([[file:api.org::#agent-shell-queue-db-enable][~agent-shell-queue-db~]]). Configured via [[file:api.org::#agent-shell-queue-serialization-format][~agent-shell-queue-serialization-format~]].
 
-- *Safe-Save Versioned Backups*: Automatic timestamped backups prior to state writes with point-in-time restore.
+- *Safe-Save Versioned Backups*: Automatic timestamped backups prior to state writes (via [[file:api.org::#agent-shell-queue-safe-save][~agent-shell-queue-safe-save~]]) with point-in-time restore (via [[file:api.org::#agent-shell-queue-restore-from-backup][~agent-shell-queue-restore-from-backup~]]).
 
-- *JSONL Done-Log and Write Logging*: Optional audit trails for completed tasks and storage diagnostics.
+- *JSONL Done-Log and Write Logging*: Optional audit trails for completed tasks (via [[file:api.org::#agent-shell-queue-done-log-file][~agent-shell-queue-done-log-file~]]) and storage diagnostics (via [[file:api.org::#agent-shell-queue-show-write-log][~agent-shell-queue-show-write-log~]]).
 
 * Key Functions
 
-- ~agent-shell-queue-db-enable~ / ~agent-shell-queue-db-disable~: Activate/deactivate SQLite persistence.
-- ~agent-shell-queue-restore-from-backup~: Point-in-time restore from safe-save backups via ACR.
-- ~agent-shell-queue-show-write-log~: Display the in-memory persistence audit log.
-- ~agent-shell-queue-export~ / ~agent-shell-queue-import~: Export/import queue state to/from YAML.
+- [[file:api.org::#agent-shell-queue-db-enable][~agent-shell-queue-db-enable~]] / [[file:api.org::#agent-shell-queue-db-disable][~agent-shell-queue-db-disable~]]: Activate/deactivate SQLite persistence.
+- [[file:api.org::#agent-shell-queue-restore-from-backup][~agent-shell-queue-restore-from-backup~]]: Point-in-time restore from safe-save backups via ACR.
+- [[file:api.org::#agent-shell-queue-show-write-log][~agent-shell-queue-show-write-log~]]: Display the in-memory persistence audit log.
+- [[file:api.org::#agent-shell-queue-export][~agent-shell-queue-export~]] / [[file:api.org::#agent-shell-queue-import][~agent-shell-queue-import~]]: Export/import queue state to/from YAML.
 
 * Example
 

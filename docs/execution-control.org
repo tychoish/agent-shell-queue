@@ -2,29 +2,28 @@
 
 * Features
 
-- *Global and Per-Session Pausing*: Suspend dispatch globally or for an
-  individual session; active tasks finish while queued tasks hold.
+- *Global and Per-Session Pausing*: Suspend dispatch globally (via [[file:api.org::#agent-shell-queue-pause][~agent-shell-queue-pause~]]) or for an
+  individual session (via [[file:api.org::#agent-shell-queue-session-pause][~agent-shell-queue-session-pause~]]); active tasks finish while queued tasks hold.
 
-- *Flow Modifiers and Checkpoints*: Insert pause checkpoints, context wipes, or
-  wait-until timers anywhere in the queue order.
+- *Flow Modifiers and Checkpoints*: Insert pause checkpoints (via [[file:api.org::#agent-shell-queue-insert-pause][~agent-shell-queue-insert-pause~]]), context wipes (via [[file:api.org::#agent-shell-queue-insert-clear-context][~agent-shell-queue-insert-clear-context~]]), or
+  wait-until timers (via [[file:api.org::#agent-shell-queue-insert-wait][~agent-shell-queue-insert-wait~]]) anywhere in the queue order.
 
-- *Automated Recovery*: Recover stuck ACP/shell-maker processes by interrupting
+- *Automated Recovery*: Recover stuck ACP/shell-maker processes (via [[file:api.org::#agent-shell-queue-recover-stuck-shell][~agent-shell-queue-recover-stuck-shell~]]) by interrupting
   and auto-resuming once idle.
 
-- *Pre and Post Turn Delays*: Regulate rate limits with configurable pauses
-  between consecutive turns.
+- *Pre and Post Turn Delays*: Regulate rate limits with configurable pauses between consecutive turns (via [[file:api.org::#agent-shell-queue-default-pause-delay][~agent-shell-queue-default-pause-delay~]]).
 
 * Key Functions
 
-- ~agent-shell-queue-pause~ / ~agent-shell-queue-resume~: Toggle queue dispatch
+- [[file:api.org::#agent-shell-queue-pause][~agent-shell-queue-pause~]] / [[file:api.org::#agent-shell-queue-resume][~agent-shell-queue-resume~]]: Toggle queue dispatch
   globally.
-- ~agent-shell-queue-session-pause~ / ~agent-shell-queue-session-resume~:
+- [[file:api.org::#agent-shell-queue-session-pause][~agent-shell-queue-session-pause~]] / [[file:api.org::#agent-shell-queue-session-resume][~agent-shell-queue-session-resume~]]:
   Control dispatch for a single session.
-- ~agent-shell-queue-insert-pause~: Insert an auto-resuming or manual pause
+- [[file:api.org::#agent-shell-queue-insert-pause][~agent-shell-queue-insert-pause~]]: Insert an auto-resuming or manual pause
   item.
-- ~agent-shell-queue-insert-clear-context~: Insert a context-wipe boundary item.
-- ~agent-shell-queue-insert-wait~: Block queue until a specified date/time.
-- ~agent-shell-queue-recover-stuck-shell~: Interrupt a wedged shell and resume
+- [[file:api.org::#agent-shell-queue-insert-clear-context][~agent-shell-queue-insert-clear-context~]]: Insert a context-wipe boundary item.
+- [[file:api.org::#agent-shell-queue-insert-wait][~agent-shell-queue-insert-wait~]]: Block queue until a specified date/time.
+- [[file:api.org::#agent-shell-queue-recover-stuck-shell][~agent-shell-queue-recover-stuck-shell~]]: Interrupt a wedged shell and resume
   when idle.
 
 * Example

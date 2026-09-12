@@ -19,9 +19,14 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
 - [[#installation][Installation]]
   - [[#elpaish-snapshot-repository][ELPAish Snapshot Repository]]
   - [[#use-package-with-vc][use-package with VC]]
-  - [[#manual][Manual]]
+  - [[#manual-installation][Manual Installation]]
+- [[#configuration][Configuration]]
+  - [[#key-options--customization][Key Options & Customization]]
 - [[#user-guides][User Guides]]
 - [[#api-reference][API Reference]]
+  - [[#agent-shell-menu][agent-shell-menu]]
+  - [[#agent-shell-queue][agent-shell-queue]]
+  - [[#persistence--integrations][Persistence & Integrations]]
 - [[#license][License]]
 
 * Installation
@@ -61,7 +66,7 @@ Requires Emacs 30+. Installs on first load if not already present:
   :after agent-shell)
 #+END_SRC
 
-** Manual
+** Manual Installation
 #+BEGIN_SRC sh
 git clone https://github.com/tychoish/agent-shell-queue ~/.emacs.d/elpa/agent-shell-queue
 #+END_SRC
@@ -78,7 +83,64 @@ You can also, with Emacs 29.1+, use ~package-vc-install~ to manage the dependenc
                       :url "https://github.com/tychoish/agent-shell-queue"))
 #+END_SRC
 
+* Configuration
 
+Below is an example ~use-package~ configuration block mirroring typical production setups, using standard Emacs keybinding patterns without external keymap dependencies:
+
+#+BEGIN_SRC emacs-lisp
+(use-package agent-shell-queue
+  :ensure t
+  :after agent-shell
+  :defer t
+  :commands (agent-shell-queue-buffer-open
+             agent-shell-queue-capture
+             agent-shell-prompt-menu
+             agent-shell-prompt-select
+             agent-shell-prompt-dispatch)
+  :bind (("C-c q q" . agent-shell-queue-buffer-open)
+         ("C-c q c" . agent-shell-queue-capture)
+         ("C-c q m" . agent-shell-menu-dispatch))
+  :config
+  ;; Load prompt extensions
+  (require 'agent-shell-prompt)
+  (require 'agent-shell-prompt-menu)
+  (require 'agent-shell-prompt-library)
+  (require 'agent-shell-queue-org)
+
+  ;; Serialization format ('org, 'json, 'yaml, or 'plist)
+  (setq agent-shell-queue-serialization-format 'org)
+  (setq agent-shell-queue-default-pause-delay 30.0)
+  (setq agent-shell-queue-archive-enabled t)
+  (setq agent-shell-queue-write-log-enabled t)
+
+  ;; Backup & save hygiene
+  (setq agent-shell-queue-safe-save t)
+  (setq agent-shell-queue-safe-save-max-files 50)
+
+  ;; UI & Display defaults
+  (setq agent-shell-queue-pick-buffer-function #'agent-shell-menu--pick-buffer)
+  (setq agent-shell-queue-show-ordinal-column nil)
+
+  ;; Optional: Completion capf setup for capture and edit buffers
+  (defun my/agent-shell-queue-completion-setup ()
+    "Enable completion in queue capture buffers."
+    (when (fboundp 'corfu-mode)
+      (corfu-mode +1))
+    (setq-local corfu-auto-prefix 2)
+    (setq-local completion-at-point-functions
+		(append '(cape-dabbrev agent-shell-queue-capture--slash-command-capf)
+			(remq t completion-at-point-functions))))
+
+  (add-hook 'agent-shell-queue-capture-mode-hook #'my/agent-shell-queue-completion-setup)
+  (add-hook 'agent-shell-queue-edit-mode-hook #'my/agent-shell-queue-completion-setup))
+#+END_SRC
+
+** Key Options & Customization
+- *Serialization Format*: ~agent-shell-queue-serialization-format~ controls queue persistence (~'org~, ~'json~, ~'yaml~, or ~'plist~).
+- *SQLite Backend*: To use SQLite instead of file serialization, call ~(agent-shell-queue-db-enable)~ or set ~agent-shell-queue-db-file~.
+- *Safe Save Backups*: ~agent-shell-queue-safe-save~ enables versioned queue backups, capped by ~agent-shell-queue-safe-save-max-files~.
+- *Pause Delays*: ~agent-shell-queue-default-pause-delay~ sets the pause duration (in seconds) inserted when pausing queue processing.
+- *Archive Lifecycle*: ~agent-shell-queue-archive-enabled~ enables archiving finished queue items to a JSONL file via ~agent-shell-queue-buffer-archive~.
 
 * User Guides
 Detailed use-case guides live under [[file:docs/][docs/]]:
@@ -91,9 +153,36 @@ Detailed use-case guides live under [[file:docs/][docs/]]:
 - [[file:docs/interactive-menus-and-input-routing.org][Interactive Menus and Input Routing]]
 
 * API Reference
-See [[file:docs/api.org][docs/api.org]] for the generated API reference, covering
-~agent-shell-menu~, ~agent-shell-queue~, ~agent-shell-queue-persistence~,
-~agent-shell-queue-db~, and ~agent-shell-queue-org~.
+
+Detailed API documentation for all interactive commands, options, and functions is available in [[file:docs/api.org][docs/api.org]].
+
+** agent-shell-menu
+| Topic / Heading               | Description                                                      |
+|-------------------------------+------------------------------------------------------------------|
+| [[file:docs/api.org::*Session and Project Switching][Session and Project Switching]] | Session mode selection and project switching commands            |
+| [[file:docs/api.org::*Actions and Commands][Actions and Commands]]          | ACR-driven action selection, permission resolution, and commands |
+| [[file:docs/api.org::*Content Insertion][Content Insertion]]             | Send files and buffers into active agent prompts                 |
+| [[file:docs/api.org::*Output and Collapse Control][Output and Collapse Control]]   | Toggle folding and collapse rules for agent responses            |
+| [[file:docs/api.org::*Session Diagnostics][Session Diagnostics]]           | View session state, model, and diagnostic mapping                |
+
+** agent-shell-queue
+| Topic / Heading                   | Description                                                              |
+|-----------------------------------+--------------------------------------------------------------------------|
+| [[file:docs/api.org::*Prompt Composition and Enqueueing][Prompt Composition and Enqueueing]] | Interactive prompt capture, context seeding, and multi-target enqueueing |
+| [[file:docs/api.org::*Execution Control][Execution Control]]                 | Queue pause, resume, disk flush, reload, and completion hooks            |
+| [[file:docs/api.org::*Queue Buffer and Navigation][Queue Buffer and Navigation]]       | Tabular queue dashboard, column customization, and buffer scoping        |
+| [[file:docs/api.org::*Item View and Raw Inspection][Item View and Raw Inspection]]      | Detailed item views, inline task editing, raw state inspection           |
+| [[file:docs/api.org::*Session Management][Session Management]]                | Sub-session forking, control markers (pauses, waits), and interjection   |
+| [[file:docs/api.org::*Input Routing and Queue-Only Mode][Input Routing and Queue-Only Mode]] | Intercept mode, queue-only routing, and slash command auto-completion    |
+| [[file:docs/api.org::*Configuration][Configuration Options]]             | Options for serialization, timers, backups, and custom hooks             |
+| [[file:docs/api.org::*Persistence Diagnostics and Backup Restore][Persistence Diagnostics & Restore]] | In-memory persistence logging and versioned backup restoration           |
+| [[file:docs/api.org::*Archive Management][Archive Management]]                | Manual and batch item archiving and archive recovery                     |
+
+** Persistence & Integrations
+| Topic / Heading               | Description                                                               |
+|-------------------------------+---------------------------------------------------------------------------|
+| [[file:docs/api.org::*agent-shell-queue-persistence][agent-shell-queue-persistence]] | SQLite backqend integration, database inspection, and state export/import |
+| [[file:docs/api.org::*agent-shell-queue-org][agent-shell-queue-org]]         | Refile Org headings and subtree content directly into queue tasks         |
 
 * License
 

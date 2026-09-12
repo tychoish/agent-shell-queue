@@ -2,21 +2,21 @@
 
 * Features
 
-- *Live Turn Interjection*: Interrupt a running agent turn to inject urgent instructions, automatically appending continuation prompts.
+- *Live Turn Interjection*: Interrupt a running agent turn to inject urgent instructions (via [[file:api.org::#agent-shell-queue-interject][~agent-shell-queue-interject~]]), automatically appending continuation prompts.
 
-- *Tabular Queue Management*: Review, reorder, defer, assign, or delete items in the ~*agent-shell-queue*~ overview.
+- *Tabular Queue Management*: Review, reorder, defer, assign, or delete items in the ~*agent-shell-queue*~ overview (via [[file:api.org::#agent-shell-queue-buffer-open][~agent-shell-queue-buffer-open~]] or [[file:api.org::#agent-shell-queue-buffer-switch][~agent-shell-queue-buffer-switch~]]).
 
-- *Popup and Direct YAML Editing*: Edit single prompts in markdown popups or bulk-edit queue structure in raw YAML.
+- *Popup and Direct YAML Editing*: Edit single prompts in markdown popups (via [[file:api.org::#agent-shell-queue-edit-task][~agent-shell-queue-edit-task~]]) or bulk-edit queue structure in raw YAML (via [[file:api.org::#agent-shell-queue-raw-edit][~agent-shell-queue-raw-edit~]]).
 
-- *Inspect Raw Serialization*: View item representations in plist, JSON, or YAML format.
+- *Inspect Raw Serialization*: View item representations in plist, JSON, or YAML format (via [[file:api.org::#agent-shell-queue-buffer-inspect-item][~agent-shell-queue-buffer-inspect-item~]]).
 
 * Key Functions
 
-- ~agent-shell-queue-interject~: Interrupt running item and open an interjection capture buffer.
-- ~agent-shell-queue-buffer-open~ / ~agent-shell-queue-buffer-switch~: Open/switch to queue overview.
-- ~agent-shell-queue-edit-task~: Interactively edit a queued prompt.
-- ~agent-shell-queue-raw-edit~: Bulk-edit entire queue state in YAML.
-- ~agent-shell-queue-buffer-inspect-item~: Inspect serialized item representation.
+- [[file:api.org::#agent-shell-queue-interject][~agent-shell-queue-interject~]]: Interrupt running item and open an interjection capture buffer.
+- [[file:api.org::#agent-shell-queue-buffer-open][~agent-shell-queue-buffer-open~]] / [[file:api.org::#agent-shell-queue-buffer-switch][~agent-shell-queue-buffer-switch~]]: Open/switch to queue overview.
+- [[file:api.org::#agent-shell-queue-edit-task][~agent-shell-queue-edit-task~]]: Interactively edit a queued prompt.
+- [[file:api.org::#agent-shell-queue-raw-edit][~agent-shell-queue-raw-edit~]]: Bulk-edit entire queue state in YAML.
+- [[file:api.org::#agent-shell-queue-buffer-inspect-item][~agent-shell-queue-buffer-inspect-item~]]: Inspect serialized item representation.
 
 * Example
 
