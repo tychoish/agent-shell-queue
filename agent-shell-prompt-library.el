@@ -32,6 +32,7 @@
 
 ;;; Code:
 
+(require 'seq)
 (require 'agent-shell-prompt)
 
 (declare-function magit-git-output "magit-git" (&rest args))
@@ -182,14 +183,148 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
               (nth 1 match)
             (user-error "No CI run selected")))))))
 
+;; Local filesystem helpers for prompt artifacts
+
+(defun agent-shell-prompt-library--project-root ()
+  "Return the root directory of the current project or repository."
+  (file-name-as-directory
+   (expand-file-name
+    (or (ignore-errors (vc-root-dir))
+        (ignore-errors (locate-dominating-file default-directory ".git"))
+        default-directory))))
+
+(defun agent-shell-prompt-library--write-file (file-path content)
+  "Write CONTENT string to FILE-PATH, creating parent directories as needed."
+  (let ((dir (file-name-directory file-path)))
+    (when (and dir (not (file-directory-p dir)))
+      (make-directory dir t)))
+  (with-temp-file file-path
+    (insert (or content ""))))
+
+(defun agent-shell-prompt-library--format-pr-comments-markdown (repo pr-num view-obj inline-comments raw-comments)
+  "Format PR review comments into Markdown.
+REPO is the repository slug string.  PR-NUM is the PR number string.
+VIEW-OBJ is the parsed hash-table from `gh pr view --json ...'.
+INLINE-COMMENTS is the parsed vector of hash-tables from `gh api ...'.
+RAW-COMMENTS is fallback plain text from `gh pr view --comments'."
+  (with-temp-buffer
+    (let* ((title (if (hash-table-p view-obj) (or (gethash "title" view-obj) "") ""))
+           (author-val (if (hash-table-p view-obj) (gethash "author" view-obj) nil))
+           (author (cond ((hash-table-p author-val) (or (gethash "login" author-val) ""))
+                         ((stringp author-val) author-val)
+                         (t "")))
+           (url (if (hash-table-p view-obj) (or (gethash "url" view-obj) "") ""))
+           (reviews (if (hash-table-p view-obj) (gethash "reviews" view-obj) nil))
+           (comments (if (hash-table-p view-obj) (gethash "comments" view-obj) nil))
+           (inline inline-comments))
+      (insert (format "# PR #%s Comments" pr-num))
+      (unless (string-empty-p title)
+        (insert (format ": %s" title)))
+      (insert "\n\n")
+      (when repo
+        (insert (format "- **Repository**: %s\n" repo)))
+      (unless (string-empty-p author)
+        (insert (format "- **Author**: @%s\n" author)))
+      (unless (string-empty-p url)
+        (insert (format "- **URL**: %s\n" url)))
+      (insert (format "- **Generated**: %s\n" (format-time-string "%Y-%m-%dT%T%z")))
+      (insert (format "- **Reviews**: %d\n" (if (vectorp reviews) (length reviews) 0)))
+      (insert (format "- **Top-level Comments**: %d\n" (if (vectorp comments) (length comments) 0)))
+      (insert (format "- **Inline Comments**: %d\n\n" (if (vectorp inline) (length inline) 0)))
+
+      ;; Reviews
+      (when (and (vectorp reviews) (> (length reviews) 0))
+        (insert (format "## Reviews (%d)\n\n" (length reviews)))
+        (seq-doseq (r reviews)
+          (let* ((u-obj (gethash "author" r))
+                 (user (if (hash-table-p u-obj) (gethash "login" u-obj) (format "%s" (or u-obj ""))))
+                 (state (or (gethash "state" r) ""))
+                 (submitted (or (gethash "submittedAt" r) ""))
+                 (r-url (or (gethash "url" r) ""))
+                 (body (or (gethash "body" r) "")))
+            (unless (equal user "github-actions")
+              (insert (format "### Review by @%s (%s)\n" (or user "unknown") state))
+              (unless (string-empty-p submitted) (insert (format "- **Submitted**: %s\n" submitted)))
+              (unless (string-empty-p r-url) (insert (format "- **URL**: %s\n" r-url)))
+              (unless (string-empty-p body)
+                (insert "\n**Body**:\n")
+                (insert body)
+                (insert "\n"))
+              (insert "\n---\n\n")))))
+
+      ;; Comments
+      (when (and (vectorp comments) (> (length comments) 0))
+        (insert (format "## Top-level Comments (%d)\n\n" (length comments)))
+        (seq-doseq (c comments)
+          (let* ((u-obj (gethash "author" c))
+                 (user (if (hash-table-p u-obj) (gethash "login" u-obj) (format "%s" (or u-obj ""))))
+                 (created (or (gethash "createdAt" c) ""))
+                 (c-url (or (gethash "url" c) ""))
+                 (body (or (gethash "body" c) "")))
+            (unless (equal user "github-actions")
+              (insert (format "### Comment by @%s\n" (or user "unknown")))
+              (unless (string-empty-p created) (insert (format "- **At**: %s\n" created)))
+              (unless (string-empty-p c-url) (insert (format "- **URL**: %s\n" c-url)))
+              (unless (string-empty-p body)
+                (insert "\n**Body**:\n")
+                (insert body)
+                (insert "\n"))
+              (insert "\n---\n\n")))))
+
+      ;; Inline comments
+      (when (and (vectorp inline) (> (length inline) 0))
+        (insert (format "## Inline Review Comments (%d)\n\n" (length inline)))
+        (seq-doseq (ic inline)
+          (let* ((u-obj (gethash "user" ic))
+                 (user (if (hash-table-p u-obj) (gethash "login" u-obj) (format "%s" (or u-obj ""))))
+                 (path (or (gethash "path" ic) ""))
+                 (line (or (gethash "line" ic) (gethash "original_line" ic) 0))
+                 (created (or (gethash "created_at" ic) ""))
+                 (i-url (or (gethash "html_url" ic) (gethash "url" ic) ""))
+                 (diff (or (gethash "diff_hunk" ic) ""))
+                 (body (or (gethash "body" ic) "")))
+            (unless (equal user "github-actions")
+              (insert (format "### Inline Comment by @%s on `%s` (line %s)\n" (or user "unknown") path line))
+              (insert (format "- **File**: `%s:%s`\n" path line))
+              (unless (string-empty-p created) (insert (format "- **At**: %s\n" created)))
+              (unless (string-empty-p i-url) (insert (format "- **URL**: %s\n" i-url)))
+              (unless (string-empty-p diff)
+                (insert "\n```diff\n")
+                (insert diff)
+                (insert "\n```\n"))
+              (unless (string-empty-p body)
+                (insert "\n**Comment**:\n")
+                (insert body)
+                (insert "\n"))
+              (insert "\n---\n\n")))))
+
+      ;; Fallback when structured data is absent
+      (when (and (or (null reviews) (= (length reviews) 0))
+                 (or (null comments) (= (length comments) 0))
+                 (or (null inline) (= (length inline) 0))
+                 (and raw-comments (not (string-empty-p raw-comments))))
+        (insert "## Comments\n\n")
+        (insert raw-comments)
+        (insert "\n"))
+
+      (buffer-string))))
+
+;; CI build failure remediation
+
 (defun agent-shell-prompt-library--fix-ci-pre-op (ctx)
-  "Fetch the failing CI run's summary and log for :repo/:run-id in CTX."
+  "Fetch failing CI artifacts for :repo/:run-id in CTX and save them locally.
+Artifacts (failed-step log, jobs metadata JSON, and triage index) are written
+under <project-root>/.agent/fix-ci/ so the agent can inspect them as files."
   (let* ((args (plist-get ctx :args))
          (raw-repo (or (plist-get args :repo)
                        (ignore-errors
                          (and (fboundp 'magit-dash--repo-at-point)
                               (when-let* ((r (magit-dash--repo-at-point)))
                                 (magit-dash-repo-name r))))
+                       (ignore-errors
+                         (let ((slug (string-trim (shell-command-to-string "gh repo view --json nameWithOwner --jq .nameWithOwner"))))
+                           (unless (or (string-empty-p slug) (string-match-p "^error" slug))
+                             slug)))
                        (user-error "No repository specified for fix-ci")))
          (repo-slug (agent-shell-prompt-library--resolve-repo-slug raw-repo))
          (run-id (or (plist-get args :run-id)
@@ -198,37 +333,233 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
          (updated-args (plist-put (plist-put (copy-sequence args) :repo repo-slug) :run-id run-id))
          (updated-ctx (plist-put (copy-sequence ctx) :args updated-args)))
     (if (and repo-slug run-id-str)
-        (agent-shell-prompt-library--gather
-         updated-ctx
-         (list (list :ci-summary "gh" "run" "view" run-id-str "--repo" repo-slug)
-               (list :ci-log "gh" "run" "view" run-id-str "--repo" repo-slug "--log-failed")))
+        (let* ((root (agent-shell-prompt-library--project-root))
+               (ci-dir (expand-file-name ".agent/fix-ci" root))
+               (log-file (expand-file-name (format "run-%s-logs.txt" run-id-str) ci-dir))
+               (jobs-file (expand-file-name (format "run-%s-jobs.json" run-id-str) ci-dir))
+               (index-file (expand-file-name "ci-triage-index.md" ci-dir))
+               (alias-log-file (expand-file-name "ci-logs.txt" ci-dir))
+               (alias-jobs-file (expand-file-name "ci-jobs.json" ci-dir))
+               (rel-ci-dir (file-relative-name ci-dir root))
+               (rel-log-file (file-relative-name log-file root))
+               (rel-jobs-file (file-relative-name jobs-file root))
+               (rel-index-file (file-relative-name index-file root))
+               ;; Fetch run summary, failed logs, and job metadata
+               (ci-summary (agent-shell-prompt-library--shell "gh" "run" "view" run-id-str "--repo" repo-slug))
+               (ci-log (agent-shell-prompt-library--shell "gh" "run" "view" run-id-str "--repo" repo-slug "--log-failed"))
+               (ci-jobs (agent-shell-prompt-library--shell "gh" "run" "view" run-id-str "--repo" repo-slug "--json" "jobs,conclusion,workflowName,url,displayTitle,headBranch"))
+               (log-content (if (and (stringp ci-log) (not (string-empty-p ci-log)))
+                                ci-log
+                              (let ((full-log (agent-shell-prompt-library--shell "gh" "run" "view" run-id-str "--repo" repo-slug "--log")))
+                                (if (and (stringp full-log) (not (string-empty-p full-log)))
+                                    full-log
+                                  (format "No failed-step logs returned for run #%s.\n\nSummary:\n%s" run-id-str ci-summary)))))
+               (jobs-content (if (and (stringp ci-jobs) (not (string-empty-p ci-jobs)))
+                                 ci-jobs
+                               "{}"))
+               (index-content
+                (format "# CI Triage Index\n\n- **Repository**: %s\n- **Run ID**: %s\n- **Generated**: %s\n- **Log File**: `%s`\n- **Jobs Metadata**: `%s`\n\n## Summary\n\n```\n%s\n```\n"
+                        repo-slug run-id-str (format-time-string "%Y-%m-%dT%T%z") rel-log-file rel-jobs-file ci-summary)))
+          ;; Write artifacts to local filesystem
+          (agent-shell-prompt-library--write-file log-file log-content)
+          (agent-shell-prompt-library--write-file jobs-file jobs-content)
+          (agent-shell-prompt-library--write-file index-file index-content)
+          (agent-shell-prompt-library--write-file alias-log-file log-content)
+          (agent-shell-prompt-library--write-file alias-jobs-file jobs-content)
+          ;; Populate context
+          (setq updated-ctx (plist-put updated-ctx :ci-summary ci-summary))
+          (setq updated-ctx (plist-put updated-ctx :ci-dir rel-ci-dir))
+          (setq updated-ctx (plist-put updated-ctx :ci-log-file rel-log-file))
+          (setq updated-ctx (plist-put updated-ctx :ci-jobs-file rel-jobs-file))
+          (setq updated-ctx (plist-put updated-ctx :ci-index-file rel-index-file))
+          (setq updated-ctx (plist-put updated-ctx :ci-log ci-log))
+          updated-ctx)
       updated-ctx)))
 
 (register-agent-shell-prompt fix-ci
-  :doc "Download CI artifacts and prompt agent to fix build failure"
+  :doc "Download CI artifacts to local filesystem and prompt agent to fix build failure"
   :category "CI/CD"
   :args ((repo :prompt "Repository: " :optional t)
          (run-id :prompt "Run ID: " :type integer :optional t))
   :pre-op #'agent-shell-prompt-library--fix-ci-pre-op
-  :template "Investigate and fix the CI failure in {{args.repo}} (run #{{args.run-id}}).\n\nSummary:\n{{ci-summary}}\n\nFailed step log:\n{{ci-log}}"
+  :template "Investigate and fix the CI failure in {{args.repo}} (run #{{args.run-id}}).
+
+## Run Summary:
+{{ci-summary}}
+
+## CI Artifacts Saved Locally:
+- Failed step log: `{{ci-log-file}}`
+- Failing jobs metadata: `{{ci-jobs-file}}`
+- CI triage index: `{{ci-index-file}}`
+
+Do NOT read the entire log file into context. Inspect the logs as files using search or reading from the end first (failures typically appear in the last 150-200 lines).
+
+## Triage Instructions:
+1. **Analyze Failure**:
+   - Inspect `{{ci-log-file}}` starting with the final lines, or search for `FAIL`, `panic:`, compiler errors (`syntax error`, `undefined:`), lint failures, or stale generated code.
+   - Cross-reference with `{{ci-jobs-file}}` for job names and URLs.
+2. **Draft a Fix Plan**:
+   - Write a structured fix plan to `.agent/fix-ci/fix-plan.md` detailing:
+     - Summary of failures and root cause
+     - Table of failing checks and error classifications
+     - Action items (files affected, concrete changes needed, log line references)
+     - Verification steps (narrow compilation and tests)
+     - Open questions (if any)
+3. **Present and Confirm**:
+   - Present the fix plan to the user with the proposed action items.
+   - Ask for explicit confirmation before modifying source files.
+   - NEVER attempt to fix secrets, credentials, or infrastructure issues—flag these immediately.
+4. **Implement and Verify**:
+   - Once confirmed, make targeted edits and verify narrowly before running broader tests."
   :submit t
   :target :session-reuse)
 
 ;; PR review comment remediation
 
 (defun agent-shell-prompt-library--pr-review-pre-op (ctx)
-  "Fetch review comments for :pr-number in CTX."
+  "Fetch PR review comments for :pr-number in CTX and save them locally.
+Markdown summary and JSON export are saved under <project-root>/.agent/pr-comments/."
   (let* ((args (plist-get ctx :args))
-         (pr-number (format "%s" (plist-get args :pr-number))))
-    (agent-shell-prompt-library--gather
-     ctx (list (list :pr-comments "gh" "pr" "view" pr-number "--comments")))))
+         (raw-repo (or (plist-get args :repo)
+                       (ignore-errors
+                         (and (fboundp 'magit-dash--repo-at-point)
+                              (when-let* ((r (magit-dash--repo-at-point)))
+                                (magit-dash-repo-name r))))
+                       (ignore-errors
+                         (let ((slug (string-trim (shell-command-to-string "gh repo view --json nameWithOwner --jq .nameWithOwner"))))
+                           (unless (or (string-empty-p slug) (string-match-p "^error" slug))
+                             slug)))))
+         (repo-slug (when raw-repo (agent-shell-prompt-library--resolve-repo-slug raw-repo)))
+         (pr-arg (plist-get args :pr-number))
+         (pr-number (or (and pr-arg (if (numberp pr-arg) pr-arg (string-to-number (format "%s" pr-arg))))
+                        (ignore-errors
+                          (let ((val (string-trim (shell-command-to-string "gh pr view --json number --jq .number"))))
+                            (when (and val (not (string-empty-p val)) (string-match-p "^[0-9]+$" val))
+                              (string-to-number val))))))
+         (pr-str (if pr-number (format "%s" pr-number)
+                   (user-error "No PR number specified or detected for pr-review-patch")))
+         (root (agent-shell-prompt-library--project-root))
+         (pr-dir (expand-file-name ".agent/pr-comments" root))
+         (md-file (expand-file-name (format "pr-%s-comments.md" pr-str) pr-dir))
+         (json-file (expand-file-name (format "pr-%s-comments.json" pr-str) pr-dir))
+         (alias-md-file (expand-file-name "pr-comments.md" pr-dir))
+         (alias-json-file (expand-file-name "pr-comments.json" pr-dir))
+         (rel-pr-dir (file-relative-name pr-dir root))
+         (rel-md-file (file-relative-name md-file root))
+         (rel-json-file (file-relative-name json-file root))
+         (repo-args (if repo-slug (list "--repo" repo-slug) nil))
+         ;; Fetch structured review info
+         (view-json-raw
+          (apply #'agent-shell-prompt-library--shell
+                 "gh" "pr" "view" pr-str "--json"
+                 "number,title,author,url,reviews,comments"
+                 repo-args))
+         ;; Fetch inline review comments
+         (api-json-raw
+          (when repo-slug
+            (agent-shell-prompt-library--shell
+             "gh" "api" (format "repos/%s/pulls/%s/comments" repo-slug pr-str)
+             "--paginate")))
+         ;; Fetch raw formatted comments fallback
+         (raw-comments
+          (apply #'agent-shell-prompt-library--shell
+                 "gh" "pr" "view" pr-str "--comments"
+                 repo-args))
+         ;; Parse JSON responses
+         (view-obj (ignore-errors
+                     (json-parse-string view-json-raw :object-type 'hash-table :array-type 'array)))
+         (api-arr (ignore-errors
+                    (when (and api-json-raw (not (string-empty-p api-json-raw)))
+                      (json-parse-string api-json-raw :object-type 'hash-table :array-type 'array))))
+         ;; Render Markdown
+         (md-content (agent-shell-prompt-library--format-pr-comments-markdown
+                      repo-slug pr-str view-obj api-arr raw-comments))
+         ;; Build structured JSON
+         (json-content
+          (if (hash-table-p view-obj)
+              (let ((table (make-hash-table :test #'equal)))
+                (puthash "pr" (or pr-number (string-to-number pr-str)) table)
+                (when repo-slug (puthash "repo" repo-slug table))
+                (when-let* ((t-val (gethash "title" view-obj))) (puthash "title" t-val table))
+                (when-let* ((u-val (gethash "url" view-obj))) (puthash "url" u-val table))
+                (puthash "reviews" (or (gethash "reviews" view-obj) []) table)
+                (puthash "comments" (or (gethash "comments" view-obj) []) table)
+                (puthash "inline_comments" (or api-arr []) table)
+                (or (ignore-errors (json-serialize table)) "{}"))
+            (if (and view-json-raw (not (string-empty-p view-json-raw)))
+                view-json-raw
+              "{}")))
+         ;; Summary string
+         (pr-summary
+          (if (hash-table-p view-obj)
+              (let* ((title (or (gethash "title" view-obj) ""))
+                     (author-obj (gethash "author" view-obj))
+                     (author (if (hash-table-p author-obj) (gethash "login" author-obj) (format "%s" (or author-obj ""))))
+                     (reviews (gethash "reviews" view-obj))
+                     (comments (gethash "comments" view-obj))
+                     (inline api-arr))
+                (format "PR #%s: %s (by @%s) — %d review(s), %d comment(s), %d inline comment(s)"
+                        pr-str title author
+                        (if (vectorp reviews) (length reviews) 0)
+                        (if (vectorp comments) (length comments) 0)
+                        (if (vectorp inline) (length inline) 0)))
+            (format "PR #%s in %s" pr-str (or repo-slug "repository")))))
+    ;; Write artifacts to disk
+    (agent-shell-prompt-library--write-file md-file md-content)
+    (agent-shell-prompt-library--write-file json-file (or json-content "{}"))
+    (agent-shell-prompt-library--write-file alias-md-file md-content)
+    (agent-shell-prompt-library--write-file alias-json-file (or json-content "{}"))
+    ;; Populate context
+    (let* ((updated-args (plist-put (copy-sequence args) :pr-number (or pr-number (string-to-number pr-str))))
+           (updated-ctx (plist-put (copy-sequence ctx) :args updated-args)))
+      (when repo-slug
+        (setq updated-args (plist-put updated-args :repo repo-slug))
+        (setq updated-ctx (plist-put updated-ctx :args updated-args)))
+      (setq updated-ctx (plist-put updated-ctx :pr-summary pr-summary))
+      (setq updated-ctx (plist-put updated-ctx :pr-dir rel-pr-dir))
+      (setq updated-ctx (plist-put updated-ctx :pr-comments-file rel-md-file))
+      (setq updated-ctx (plist-put updated-ctx :pr-comments-json-file rel-json-file))
+      (setq updated-ctx (plist-put updated-ctx :pr-comments raw-comments))
+      updated-ctx)))
 
 (register-agent-shell-prompt pr-review-patch
-  :doc "Fetch PR review comments and draft remediation patch"
+  :doc "Fetch PR review comments to local filesystem and draft remediation patch"
   :category "Code Review"
-  :args ((pr-number :prompt "PR number: " :type integer))
+  :args ((pr-number :prompt "PR number: " :type integer :optional t)
+         (repo :prompt "Repository: " :optional t))
   :pre-op #'agent-shell-prompt-library--pr-review-pre-op
-  :template "Address the review comments on PR #{{args.pr-number}}.\n\nComments:\n{{pr-comments}}"
+  :template "Address the review comments on PR #{{args.pr-number}} in {{args.repo}}.
+
+## PR Summary:
+{{pr-summary}}
+
+## Review Comments Saved Locally:
+- Markdown summary: `{{pr-comments-file}}`
+- Structured JSON: `{{pr-comments-json-file}}`
+
+Do NOT read all raw comment data into context at once. Review the comments in `{{pr-comments-file}}` (and `{{pr-comments-json-file}}` if detailed metadata is needed) using search or file viewing.
+
+## Review Instructions:
+1. **Categorize Comments**:
+   Read through `{{pr-comments-file}}` and categorize each comment into:
+   - `change-required`: Reviewer explicitly asks for a code or design change
+   - `question`: Reviewer asks a question requiring an author reply
+   - `nit`: Minor style or syntax preference
+   - `praise`: Positive feedback (no action needed)
+   - `discussion`: Open-ended discussion requiring clarification
+   - `resolved`: Already addressed in subsequent commits
+2. **Draft Review Plan**:
+   - Write a structured plan to `.agent/pr-comments/review-plan.md` containing:
+     - High-level summary of reviewer sentiment and themes
+     - Proposed Changes (grouped by file and line)
+     - Questions Requiring a Response (table with reviewer, comment quote/link, suggested reply)
+     - Items to Discuss with the User (focused questions)
+3. **Present and Confirm**:
+   - Present a concise summary of comment counts by category.
+   - For questions and discussion items, ask the user directly with numbered items so they can answer.
+   - Ask for confirmation before modifying code.
+4. **Implement Remediation**:
+   - Once confirmed, apply the requested changes, verify tests pass, and keep changes minimal."
   :submit t
   :target :session-reuse)
 

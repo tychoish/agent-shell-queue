@@ -405,12 +405,61 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 
 (ert-deftest agent-shell-prompt/library-fix-ci-pre-op-populates-ctx ()
   "fix-ci's pre-op fetches summary and log text via gh into ctx."
-  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
-             (lambda (&rest args) (mapconcat #'identity args " "))))
-    (let ((ctx (agent-shell-prompt-library--fix-ci-pre-op
-                (list :args (list :repo "acme/x" :run-id 9)))))
-      (should (string-match-p "acme/x" (plist-get ctx :ci-summary)))
-      (should (string-match-p "--log-failed" (plist-get ctx :ci-log))))))
+  (let ((tmp-dir (make-temp-file "asq-fix-ci-pre-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-prompt-library--project-root)
+                   (lambda () (file-name-as-directory tmp-dir)))
+                  ((symbol-function 'agent-shell-prompt-library--shell)
+                   (lambda (&rest args) (mapconcat #'identity args " "))))
+          (let ((ctx (agent-shell-prompt-library--fix-ci-pre-op
+                      (list :args (list :repo "acme/x" :run-id 9)))))
+            (should (string-match-p "acme/x" (plist-get ctx :ci-summary)))
+            (should (string-match-p "--log-failed" (plist-get ctx :ci-log)))))
+      (delete-directory tmp-dir t))))
+
+(ert-deftest agent-shell-prompt/library-fix-ci-saves-files-and-renders-template ()
+  "fix-ci pre-op saves logs/jobs/index to filesystem and renders template with paths."
+  (let ((tmp-dir (make-temp-file "asq-fix-ci-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function (quote agent-shell-prompt-library--project-root))
+                   (lambda () (file-name-as-directory tmp-dir)))
+                  ((symbol-function (quote agent-shell-prompt-library--shell))
+                   (lambda (&rest args)
+                     (cond
+                      ((member "--log-failed" args)
+                       "--- FAIL: TestWidget (0.05s)\n    widget_test.go:42: unexpected nil\nFAIL")
+                      ((member "--json" args)
+                       "{\"jobs\":[{\"name\":\"test\",\"conclusion\":\"failure\"}]}")
+                      (t
+                       "X Run #123 (Workflow: CI, Branch: main)")))))
+          (let* ((spec (agent-shell-prompt-get (quote fix-ci)))
+                 (ctx (agent-shell-prompt-library--fix-ci-pre-op
+                       (list :args (list :repo "org/app" :run-id 123))))
+                 (log-path (expand-file-name (plist-get ctx :ci-log-file) tmp-dir))
+                 (jobs-path (expand-file-name (plist-get ctx :ci-jobs-file) tmp-dir))
+                 (index-path (expand-file-name (plist-get ctx :ci-index-file) tmp-dir))
+                 (rendered (agent-shell-prompt-render (agent-shell-prompt-spec-template spec) ctx)))
+            ;; Files exist on disk
+            (should (file-exists-p log-path))
+            (should (file-exists-p jobs-path))
+            (should (file-exists-p index-path))
+            ;; Content was written
+            (with-temp-buffer
+              (insert-file-contents log-path)
+              (should (string-match-p "TestWidget" (buffer-string))))
+            (with-temp-buffer
+              (insert-file-contents index-path)
+              (should (string-match-p "CI Triage Index" (buffer-string))))
+            ;; Rendered template refers to files and gives triage guidance
+            (should (string-match-p "\\.agent/fix-ci/run-123-logs\\.txt" rendered))
+            (should (string-match-p "\\.agent/fix-ci/run-123-jobs\\.json" rendered))
+            (should (string-match-p "\\.agent/fix-ci/ci-triage-index\\.md" rendered))
+            (should (string-match-p "Do NOT read the entire log file into context" rendered))
+            (should (string-match-p "150-200 lines" rendered))
+            ;; Rendered template does NOT inline the entire log body
+            (should-not (string-match-p "widget_test\\.go:42" rendered))))
+      (delete-directory tmp-dir t))))
+
 
 (ert-deftest agent-shell-prompt/library-resolve-ci-run-auto-selects-failing ()
   "Auto-selects the latest run when its conclusion indicates failure."
@@ -447,12 +496,62 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 
 (ert-deftest agent-shell-prompt/library-pr-review-pre-op-populates-ctx ()
   "pr-review-patch's pre-op fetches PR comments via gh into ctx."
-  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
-             (lambda (&rest args) (mapconcat #'identity args " "))))
-    (let ((ctx (agent-shell-prompt-library--pr-review-pre-op
-                (list :args (list :pr-number 42)))))
-      (should (string-match-p "42" (plist-get ctx :pr-comments)))
-      (should (string-match-p "--comments" (plist-get ctx :pr-comments))))))
+  (let ((tmp-dir (make-temp-file "asq-pr-pre-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-prompt-library--project-root)
+                   (lambda () (file-name-as-directory tmp-dir)))
+                  ((symbol-function 'agent-shell-prompt-library--shell)
+                   (lambda (&rest args) (mapconcat #'identity args " "))))
+          (let ((ctx (agent-shell-prompt-library--pr-review-pre-op
+                      (list :args (list :pr-number 42)))))
+            (should (string-match-p "42" (plist-get ctx :pr-comments)))
+            (should (string-match-p "--comments" (plist-get ctx :pr-comments)))))
+      (delete-directory tmp-dir t))))
+
+(ert-deftest agent-shell-prompt/library-pr-review-saves-files-and-renders-template ()
+  "pr-review-patch pre-op saves markdown/JSON to filesystem and renders template with paths."
+  (let ((tmp-dir (make-temp-file "asq-pr-review-test-" t)))
+    (unwind-protect
+        (cl-letf (((symbol-function (quote agent-shell-prompt-library--project-root))
+                   (lambda () (file-name-as-directory tmp-dir)))
+                  ((symbol-function (quote agent-shell-prompt-library--shell))
+                   (lambda (&rest args)
+                     (cond
+                      ((member "--json" args)
+                       "{\"title\":\"Support Foo\",\"author\":{\"login\":\"alice\"},\"url\":\"https://github.com/org/app/pull/55\",\"reviews\":[{\"author\":{\"login\":\"bob\"},\"state\":\"COMMENTED\",\"body\":\"Please simplify this function.\"}],\"comments\":[]}")
+                      ((member "repos/org/app/pulls/55/comments" args)
+                       "[{\"user\":{\"login\":\"carol\"},\"path\":\"widget.go\",\"line\":25,\"diff_hunk\":\"@@ -20,4 +20,5 @@\",\"body\":\"Handle error return here.\"}]")
+                      ((member "--comments" args)
+                       "Review by bob: Please simplify this function.")
+                      (t "")))))
+          (let* ((spec (agent-shell-prompt-get (quote pr-review-patch)))
+                 (ctx (agent-shell-prompt-library--pr-review-pre-op
+                       (list :args (list :repo "org/app" :pr-number 55))))
+                 (md-path (expand-file-name (plist-get ctx :pr-comments-file) tmp-dir))
+                 (json-path (expand-file-name (plist-get ctx :pr-comments-json-file) tmp-dir))
+                 (alias-md (expand-file-name ".agent/pr-comments/pr-comments.md" tmp-dir))
+                 (rendered (agent-shell-prompt-render (agent-shell-prompt-spec-template spec) ctx)))
+            ;; Files exist on disk
+            (should (file-exists-p md-path))
+            (should (file-exists-p json-path))
+            (should (file-exists-p alias-md))
+            ;; Markdown formatted properly
+            (with-temp-buffer
+              (insert-file-contents md-path)
+              (let ((text (buffer-string)))
+                (should (string-match-p "PR #55 Comments: Support Foo" text))
+                (should (string-match-p "Review by @bob" text))
+                (should (string-match-p "Inline Comment by @carol on `widget\\.go`" text))))
+            ;; Rendered template directs agent to read files
+            (should (string-match-p "\\.agent/pr-comments/pr-55-comments\\.md" rendered))
+            (should (string-match-p "\\.agent/pr-comments/pr-55-comments\\.json" rendered))
+            (should (string-match-p "Do NOT read all raw comment data into context" rendered))
+            (should (string-match-p "change-required" rendered))
+            (should (string-match-p "review-plan\\.md" rendered))
+            ;; Rendered template does NOT inline the entire comments dump
+            (should-not (string-match-p "Please simplify this function" rendered))))
+      (delete-directory tmp-dir t))))
+
 
 (ert-deftest agent-shell-prompt/library-coverage-pre-op-populates-ctx ()
   "expand-coverage's pre-op diffs :file against HEAD into ctx."
