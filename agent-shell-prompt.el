@@ -32,7 +32,7 @@
 ;;
 ;; Workflows dispatch either directly to a live or new `agent-shell'
 ;; session, or as a queued item in `agent-shell-queue'.  See
-;; `agent-shell-prompt-def' to register a workflow and
+;; `register-agent-shell-prompt' to register a workflow and
 ;; `agent-shell-prompt-dispatch' to run one.
 
 ;;; Code:
@@ -75,7 +75,7 @@ on turn completion; see `agent-shell-prompt-exec-post'."))
 
 (defvar agent-shell-prompt-registry (make-hash-table :test #'eq)
   "Hash table of symbol id to `agent-shell-prompt-spec'.
-Populate via `agent-shell-prompt-def'.")
+Populate via `register-agent-shell-prompt'.")
 
 (defun agent-shell-prompt-get (id)
   "Return the `agent-shell-prompt-spec' registered under ID, or nil."
@@ -100,7 +100,7 @@ replaces the entry."
             :target (or target :ask) :post-op post-op)
            agent-shell-prompt-registry))
 
-(defmacro agent-shell-prompt-def (id &rest keys)
+(defmacro register-agent-shell-prompt (id &rest keys)
   "Define and register a prompt workflow named ID.
 KEYS is a plist accepting the same keys as `agent-shell-prompt-register'
 \(:doc :category :args :pre-op :template :submit :target :post-op).
@@ -110,6 +110,8 @@ KEYS is a plist accepting the same keys as `agent-shell-prompt-register'
                   (plist-put (copy-sequence keys) :args (list 'quote (plist-get keys :args)))
                 keys)))
     `(agent-shell-prompt-register :id ',id ,@keys)))
+
+(defalias 'agent-shell-prompt-def #'register-agent-shell-prompt)
 
 ;; Argument collection
 
@@ -166,7 +168,7 @@ the :args plist key."
 CTX is a plist; {{args.KEY}} looks inside the :args sub-plist, any other
 {{key}} looks up the top-level :key entry."
   (replace-regexp-in-string
-   "{{\\([-a-zA-Z0-9.]+\\)}}"
+   "{{[-a-zA-Z0-9.]+}}"
    (lambda (matched)
      ;; `split-string' below uses regexp matching internally, which would
      ;; otherwise clobber the match-data `replace-regexp-in-string' needs
@@ -175,8 +177,8 @@ CTX is a plist; {{args.KEY}} looks inside the :args sub-plist, any other
        (let* ((key (substring matched 2 -2))
               (segments (split-string key "\\."))
               (value (if (and (> (length segments) 1) (string= (car segments) "args"))
-                        (plist-get (plist-get ctx :args) (intern (concat ":" (cadr segments))))
-                      (plist-get ctx (intern (concat ":" key))))))
+                         (plist-get (plist-get ctx :args) (intern (concat ":" (cadr segments))))
+                       (plist-get ctx (intern (concat ":" key))))))
          (agent-shell-prompt--stringify value))))
    template t t))
 
@@ -268,125 +270,103 @@ new shell with `:session-strategy 'new'."
        (t
         (let* ((new-option "[New agent-shell]")
                (choices (cons new-option (mapcar #'buffer-name buffers)))
-               (selected (completing-read (format "Select agent-shell for %s: " dir-name)
-                                          choices nil t)))
-          (if (or (string-equal selected new-option) (string-empty-p selected))
+               (choice (completing-read (format "Select agent-shell for %s: " dir-name)
+                                        choices nil t)))
+          (if (string-equal choice new-option)
               (agent-shell-new-shell :session-strategy 'new :location default-directory)
-            (get-buffer selected))))))))
+            (get-buffer choice))))))))
 
-(defun agent-shell-prompt--subscribe-post (spec shell-buffer ctx)
-  "Subscribe to SHELL-BUFFER's turn-complete event to run SPEC's post-op.
-CTX is the execution context passed through to the post-op; its
-:response-start position (set by `agent-shell-prompt--dispatch-rendered')
-scopes the visible-response-text walk."
-  (let (token)
-    (setq token
+(defun agent-shell-prompt--dispatch-rendered (spec ctx target submit)
+  "Deliver the rendered prompt for SPEC and CTX to TARGET.
+When SUBMIT is non-nil, submit the prompt immediately."
+  (let* ((target (agent-shell-prompt--resolve-target (or target (agent-shell-prompt-spec-target spec))))
+         (submit (if (null submit) (agent-shell-prompt-spec-submit spec) submit)))
+    (if (eq target :queue)
+        (let ((rendered (agent-shell-prompt-render (agent-shell-prompt-spec-template spec) ctx)))
+          (agent-shell-queue--enqueue-args
+           (prin1-to-string (list :prompt-id (agent-shell-prompt-spec-id spec)
+                                  :rendered rendered
+                                  :submit submit))
+           'prompt-library
+           nil))
+      (let* ((shell-buffer (agent-shell-prompt--session-buffer target))
+             (insertion (agent-shell-prompt--insert spec ctx shell-buffer submit))
+             (resp-start (alist-get :end insertion)))
+        (when (agent-shell-prompt-spec-post-op spec)
           (agent-shell-subscribe-to
            :shell-buffer shell-buffer
            :event 'turn-complete
-           :on-event
-           (lambda (_event)
-             (agent-shell-unsubscribe :subscription token)
-             (let* ((response (agent-shell-prompt--last-response-text
-                               shell-buffer (plist-get ctx :response-start)))
-                    (result (agent-shell-prompt-exec-post spec shell-buffer ctx response)))
-               (agent-shell-prompt--apply-post-result result shell-buffer)))))))
+           :callback (lambda ()
+                       (let* ((resp (agent-shell-prompt--last-response-text shell-buffer resp-start))
+                              (result (agent-shell-prompt-exec-post spec shell-buffer ctx resp)))
+                         (agent-shell-prompt--apply-post-result result shell-buffer)))))))))
+
+(defun agent-shell-prompt--insert (spec ctx shell-buffer submit)
+  "Render SPEC with CTX and insert it into SHELL-BUFFER.
+When SUBMIT is non-nil, submit immediately.  Returns the plist returned by
+`agent-shell-insert'."
+  (let ((rendered (agent-shell-prompt-render (agent-shell-prompt-spec-template spec) ctx)))
+    (agent-shell-insert :text rendered
+                        :shell-buffer shell-buffer
+                        :submit submit)))
 
 (defun agent-shell-prompt--last-response-text (shell-buffer start-pos)
-  "Return the visible agent response text in SHELL-BUFFER from START-POS.
-Reuses `agent-shell-queue--collect-visible-response-text' — the shell-maker
-boundary/invisible-block walk already implemented there — rather than
-reimplementing it."
-  (when (and (buffer-live-p shell-buffer) start-pos)
+  "Extract the agent response text in SHELL-BUFFER from START-POS to point-max.
+Returns nil when START-POS is nil.  Reuses the visibility walker from
+`agent-shell-queue' to omit folded/hidden regions."
+  (when (and shell-buffer (buffer-live-p shell-buffer) start-pos)
     (agent-shell-queue--collect-visible-response-text shell-buffer start-pos)))
 
-(defun agent-shell-prompt--dispatch-rendered (spec ctx)
-  "Deliver SPEC's rendered prompt in CTX to its resolved dispatch target."
-  (let* ((target (agent-shell-prompt--resolve-target (plist-get ctx :target)))
-         (rendered (plist-get ctx :rendered-prompt))
-         (submit (plist-get ctx :submit)))
-    (pcase target
-      (:queue
-       (agent-shell-queue--enqueue-args
-        (prin1-to-string (list :prompt-id (agent-shell-prompt-spec-id spec)
-                               :rendered rendered))
-        'prompt-library nil))
-      (_
-       (let* ((shell-buffer (agent-shell-prompt--session-buffer target))
-              (insertion (agent-shell-insert :text rendered :submit submit
-                                             :no-focus nil :shell-buffer shell-buffer)))
-         (when (agent-shell-prompt-spec-post-op spec)
-           (let ((ctx (plist-put (plist-put (copy-sequence ctx) :shell-buffer shell-buffer)
-                                 :response-start (map-elt insertion :end))))
-             (agent-shell-prompt--subscribe-post spec shell-buffer ctx))))))))
-
 ;;;###autoload
-(defun agent-shell-prompt-dispatch (id &rest kwargs)
-  "Run the prompt workflow registered as ID.
-KWARGS can be keyword arguments (:args PLIST :target TARGET :submit SUBMIT)
-or a single args plist passed as the second argument."
-  (let* ((plist (if (and (= (length kwargs) 1)
-                         (listp (car kwargs))
-                         (keywordp (caar kwargs)))
-                    (list :args (car kwargs))
+(cl-defun agent-shell-prompt-dispatch (id &rest kwargs &key args target submit context-dir)
+  "Instantiate the prompt workflow ID and dispatch it.
+ARGS is a plist supplying template values; any required args declared on
+the spec but absent from ARGS are prompted interactively.
+TARGET overrides the spec's declared target.
+SUBMIT non-nil forces prompt submission regardless of the spec default.
+CONTEXT-DIR sets `default-directory' for pre-op execution.
+Re-entrant pre-ops (chaining) pass kwargs as a single plist argument."
+  (let* ((plist (if (and (= (length kwargs) 1) (listp (car kwargs)) (keywordp (caar kwargs)))
+                    (car kwargs)
                   kwargs))
          (args (plist-get plist :args))
          (target (plist-get plist :target))
-         (submit-supplied-p (plist-member plist :submit))
          (submit (plist-get plist :submit))
+         (context-dir (or (plist-get plist :context-dir) default-directory))
          (spec (or (agent-shell-prompt-get id)
-                   (error "Agent-shell-prompt: unknown prompt %s" id)))
-         (context-repo (or (plist-get args :repo)
-                           (ignore-errors
-                             (and (fboundp 'magit-dash--repo-at-point)
-                                  (when-let* ((r (magit-dash--repo-at-point)))
-                                    (magit-dash-repo-name r))))
-                           (and (fboundp 'project-current)
-                                (when-let* ((proj (project-current)))
-                                  (file-name-nondirectory (directory-file-name (project-root proj)))))))
-         (context-dir (or (ignore-errors
-                            (and (fboundp 'magit-dash--repo-at-point)
-                                 (when-let* ((r (magit-dash--repo-at-point)))
-                                   (file-name-as-directory (magit-dash-repo-path r)))))
-                          default-directory))
-         (args (if (and context-repo (not (plist-member args :repo)))
-                   (plist-put (copy-sequence args) :repo context-repo)
-                 args))
-         (full-args (agent-shell-prompt--collect-args spec args))
-         (ctx (list :prompt-id id
-                    :args full-args
-                    :directory context-dir
-                    :target (or target (agent-shell-prompt-spec-target spec))
-                    :submit (if submit-supplied-p
-                                submit
-                              (agent-shell-prompt-spec-submit spec)))))
+                   (error "Agent-shell-prompt: no prompt registered with id `%s'" id)))
+         (collected-args (agent-shell-prompt--collect-args spec args))
+         (initial-ctx (list :args collected-args :target target :submit submit :context-dir context-dir)))
     (let ((default-directory context-dir))
       (agent-shell-prompt-exec-pre
-       spec ctx
+       spec initial-ctx
        (lambda (updated-ctx)
-         (let* ((rendered (agent-shell-prompt-render
-                           (agent-shell-prompt-spec-template spec) updated-ctx))
-                (final-ctx (plist-put (copy-sequence updated-ctx) :rendered-prompt rendered)))
-           (agent-shell-prompt--dispatch-rendered spec final-ctx)))))))
+         (let* ((rendered (agent-shell-prompt-render (agent-shell-prompt-spec-template spec) updated-ctx))
+                (ctx-with-rendered (plist-put updated-ctx :rendered rendered)))
+           (agent-shell-prompt--dispatch-rendered spec ctx-with-rendered target submit)))))))
 
-;;;###autoload
-(defalias 'agent-shell-prompt-exec #'agent-shell-prompt-dispatch)
-;; Queue integration
+;; Integration with agent-shell-queue
 
-(defun agent-shell-prompt--dispatch-queue-item (item buf-name)
-  "Dispatch a queued prompt-library ITEM to BUF-NAME.
-ITEM's args is a printed plist with :prompt-id and :rendered."
-  (let* ((payload (read (agent-shell-queue-item-args item)))
-         (rendered (plist-get payload :rendered)))
-    (agent-shell-insert :text rendered :submit t :no-focus t
-                        :shell-buffer (get-buffer buf-name))))
+(defun agent-shell-prompt--dispatch-queue-item (item target-buffer)
+  "Execute a queued prompt-library ITEM into TARGET-BUFFER."
+  (let* ((plist (read (agent-shell-queue-item-args item)))
+         (rendered (plist-get plist :rendered))
+         (submit (if (plist-member plist :submit)
+                     (plist-get plist :submit)
+                   t))
+         (buf (if (stringp target-buffer)
+                  (get-buffer target-buffer)
+                target-buffer)))
+    (agent-shell-insert :text rendered
+                        :shell-buffer buf
+                        :submit submit)))
 
 (agent-shell-queue-register-item-type
  :kind 'prompt-library
  :label "prompt-library"
  :buffer-pred #'agent-shell-queue--agent-shell-buffer-p
  :dispatch-fn #'agent-shell-prompt--dispatch-queue-item
- :input-spec '(:kind none))
+ :input-spec '(:kind capture))
 
 (provide 'agent-shell-prompt)
 

@@ -2095,7 +2095,7 @@ Capture the current org heading’s subtree text into the agent-shell-queue. Ope
 :CUSTOM_ID: agent-shell-prompt-registry
 :END:
 
-Hash table of symbol id to ‘agent-shell-prompt-spec’. Populate via ~agent-shell-prompt-def~.
+Hash table of symbol id to ‘agent-shell-prompt-spec’. Populate via ~register-agent-shell-prompt~.
 
 *** [[file:../agent-shell-prompt.el::69][agent-shell-prompt-get]]
 :PROPERTIES:
@@ -2120,9 +2120,9 @@ Return all registered ‘agent-shell-prompt-spec’ values.
 
 Register a prompt spec built from /ID/, /DOC/, /CATEGORY/, /ARGS/, /PRE-OP/. /TEMPLATE/, /SUBMIT/, /TARGET/, and /POST-OP/.  Re-registering an existing /ID/ replaces the entry.
 
-*** [[file:../agent-shell-prompt.el::92][agent-shell-prompt-def]]
+*** [[file:../agent-shell-prompt.el::92][register-agent-shell-prompt]]
 :PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-def
+:CUSTOM_ID: register-agent-shell-prompt
 :END:
 
 Define and register a prompt workflow named ID. KEYS is a plist accepting the same keys as ~agent-shell-prompt-register~ (:doc :category :args :pre-op :template :submit :target :post-op). :args is data (an arg-spec list), not code, and is quoted automatically.

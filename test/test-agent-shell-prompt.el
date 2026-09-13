@@ -43,7 +43,7 @@
 (ert-deftest agent-shell-prompt/def-registers-spec ()
   "agent-shell-prompt-def registers a retrievable spec."
   (asp-test/isolate
-   (agent-shell-prompt-def sample
+   (register-agent-shell-prompt sample
      :doc "A sample prompt"
      :category "Testing"
      :args ((thing :prompt "Thing: "))
@@ -55,10 +55,19 @@
      (should (equal (agent-shell-prompt-spec-category spec) "Testing"))
      (should (eq (agent-shell-prompt-spec-target spec) :session-reuse)))))
 
+(ert-deftest agent-shell-prompt/def-alias-works ()
+  "agent-shell-prompt-def alias works for backward compatibility."
+  (asp-test/isolate
+   (agent-shell-prompt-def sample-alias
+     :template "test alias")
+   (let ((spec (agent-shell-prompt-get 'sample-alias)))
+     (should spec)
+     (should (equal (agent-shell-prompt-spec-template spec) "test alias")))))
+
 (ert-deftest agent-shell-prompt/def-defaults-category-and-target ()
   "Category defaults to General and target defaults to :ask when omitted."
   (asp-test/isolate
-   (agent-shell-prompt-def bare :template "hi")
+   (register-agent-shell-prompt bare :template "hi")
    (let ((spec (agent-shell-prompt-get 'bare)))
      (should (equal (agent-shell-prompt-spec-category spec) "General"))
      (should (eq (agent-shell-prompt-spec-target spec) :ask)))))
@@ -71,16 +80,16 @@
 (ert-deftest agent-shell-prompt/redefine-replaces-entry ()
   "Re-registering an existing id replaces rather than duplicates it."
   (asp-test/isolate
-   (agent-shell-prompt-def dup :template "one")
-   (agent-shell-prompt-def dup :template "two")
+   (register-agent-shell-prompt dup :template "one")
+   (register-agent-shell-prompt dup :template "two")
    (should (= 1 (hash-table-count agent-shell-prompt-registry)))
    (should (equal (agent-shell-prompt-spec-template (agent-shell-prompt-get 'dup)) "two"))))
 
 (ert-deftest agent-shell-prompt/list-returns-all-specs ()
   "agent-shell-prompt-list returns every registered spec."
   (asp-test/isolate
-   (agent-shell-prompt-def a :template "a")
-   (agent-shell-prompt-def b :template "b")
+   (register-agent-shell-prompt a :template "a")
+   (register-agent-shell-prompt b :template "b")
    (should (= 2 (length (agent-shell-prompt-list))))))
 
 ;;; ─────────────────────────────────────────────────────────────
@@ -120,7 +129,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/collect-args-skips-provided ()
   "Arguments already present in the provided plist are not re-read."
   (asp-test/isolate
-   (agent-shell-prompt-def needs-arg
+   (register-agent-shell-prompt needs-arg
      :args ((thing :prompt "Thing: "))
      :template "{{args.thing}}")
    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) (error "should not prompt"))))
@@ -131,7 +140,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/collect-args-reads-missing ()
   "A missing argument is read interactively via its declared prompt."
   (asp-test/isolate
-   (agent-shell-prompt-def needs-arg
+   (register-agent-shell-prompt needs-arg
      :args ((thing :prompt "Thing: "))
      :template "{{args.thing}}")
    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "typed")))
@@ -170,7 +179,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/exec-pre-noop-without-pre-op ()
   "With no pre-op, exec-pre calls back with ctx unchanged."
   (asp-test/isolate
-   (agent-shell-prompt-def no-pre :template "x")
+   (register-agent-shell-prompt no-pre :template "x")
    (let (result)
      (agent-shell-prompt-exec-pre (agent-shell-prompt-get 'no-pre) '(:a 1)
                                   (lambda (ctx) (setq result ctx)))
@@ -179,7 +188,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/exec-pre-synchronous ()
   "A one-argument pre-op runs synchronously and its return value is passed on."
   (asp-test/isolate
-   (agent-shell-prompt-def sync-pre
+   (register-agent-shell-prompt sync-pre
      :pre-op (lambda (ctx) (plist-put ctx :extra "added"))
      :template "x")
    (let (result)
@@ -190,7 +199,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/exec-pre-asynchronous ()
   "A two-argument pre-op is treated as async and must invoke its own callback."
   (asp-test/isolate
-   (agent-shell-prompt-def async-pre
+   (register-agent-shell-prompt async-pre
      :pre-op (lambda (ctx callback) (funcall callback (plist-put ctx :extra "async")))
      :template "x")
    (let (result)
@@ -201,7 +210,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/exec-post-defaults-to-done ()
   "With no post-op, exec-post returns :done."
   (asp-test/isolate
-   (agent-shell-prompt-def no-post :template "x")
+   (register-agent-shell-prompt no-post :template "x")
    (should (eq (agent-shell-prompt-exec-post (agent-shell-prompt-get 'no-post) nil nil "resp")
               :done))))
 
@@ -209,7 +218,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
   "The post-op is called with shell-buffer, ctx, and response text."
   (asp-test/isolate
    (let (seen)
-     (agent-shell-prompt-def with-post
+     (register-agent-shell-prompt with-post
        :post-op (lambda (buf ctx resp) (setq seen (list buf ctx resp)) :close)
        :template "x")
      (should (eq (agent-shell-prompt-exec-post (agent-shell-prompt-get 'with-post) 'buf '(:a 1) "resp")
@@ -273,7 +282,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/dispatch-queue-target-enqueues ()
   "A :queue target enqueues a prompt-library item instead of inserting."
   (asp-test/isolate
-   (agent-shell-prompt-def queued
+   (register-agent-shell-prompt queued
      :args ((thing :prompt "Thing: "))
      :template "do {{args.thing}}"
      :target :queue)
@@ -288,13 +297,13 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/dispatch-session-inserts-rendered-text ()
   "A session target renders the template and inserts it via agent-shell-insert."
   (asp-test/isolate
-   (agent-shell-prompt-def direct
+   (register-agent-shell-prompt direct
      :args ((thing :prompt "Thing: "))
      :template "do {{args.thing}}"
      :target :session-new
      :submit t)
    (let (inserted)
-     (cl-letf (((symbol-function 'agent-shell-new-shell) (lambda () 'new-buf))
+     (cl-letf (((symbol-function 'agent-shell-new-shell) (lambda (&rest _) 'new-buf))
                ((symbol-function 'agent-shell-insert)
                 (lambda (&rest keys) (setq inserted keys))))
        (agent-shell-prompt-dispatch 'direct :args (list :thing "x"))
@@ -305,12 +314,13 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/dispatch-session-reuse-prefers-existing-buffer ()
   ":session-reuse picks an existing directory-scoped buffer over creating one."
   (asp-test/isolate
-   (agent-shell-prompt-def reuse-target :template "hi" :target :session-reuse :submit t)
+   (register-agent-shell-prompt reuse-target :template "hi" :target :session-reuse :submit t)
    (let* ((buf (generate-new-buffer "asp-test-reuse"))
           new-shell-called)
      (unwind-protect
          (cl-letf (((symbol-function 'agent-shell-prompt--project-buffers) (lambda (_dir) (list buf)))
-                   ((symbol-function 'agent-shell-new-shell) (lambda () (setq new-shell-called t)))
+                   ((symbol-function 'agent-shell-new-shell) (lambda (&rest _) (setq new-shell-called t)))
+                   ((symbol-function 'y-or-n-p) (lambda (&rest _) t))
                    ((symbol-function 'agent-shell-insert) #'ignore))
            (agent-shell-prompt-dispatch 'reuse-target)
            (should-not new-shell-called))
@@ -320,12 +330,12 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
   "When a spec has a post-op, dispatch subscribes to turn-complete with a
 :response-start position taken from agent-shell-insert's return value."
   (asp-test/isolate
-   (agent-shell-prompt-def with-post
+   (register-agent-shell-prompt with-post
      :template "hi"
      :target :session-new
      :post-op (lambda (_buf _ctx _resp) :done))
    (let (subscribed-args)
-     (cl-letf (((symbol-function 'agent-shell-new-shell) (lambda () 'new-buf))
+     (cl-letf (((symbol-function 'agent-shell-new-shell) (lambda (&rest _) 'new-buf))
                ((symbol-function 'agent-shell-insert) (lambda (&rest _) (list (cons :end 42))))
                ((symbol-function 'agent-shell-subscribe-to)
                 (lambda (&rest keys) (setq subscribed-args keys) 'token)))
@@ -336,9 +346,9 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/dispatch-without-post-op-does-not-subscribe ()
   "When a spec has no post-op, dispatch never calls agent-shell-subscribe-to."
   (asp-test/isolate
-   (agent-shell-prompt-def no-post-dispatch :template "hi" :target :session-new)
+   (register-agent-shell-prompt no-post-dispatch :template "hi" :target :session-new)
    (let (subscribe-called)
-     (cl-letf (((symbol-function 'agent-shell-new-shell) (lambda () 'new-buf))
+     (cl-letf (((symbol-function 'agent-shell-new-shell) (lambda (&rest _) 'new-buf))
                ((symbol-function 'agent-shell-insert) (lambda (&rest _) (list (cons :end 1))))
                ((symbol-function 'agent-shell-subscribe-to)
                 (lambda (&rest _) (setq subscribe-called t))))
@@ -390,7 +400,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 
 (ert-deftest agent-shell-prompt/library-registers-built-ins ()
   "The example prompt library registers all four built-in workflows."
-  (dolist (id '(fix-ci pr-review-patch expand-coverage refactor-module))
+  (dolist (id '(create-commit fix-ci pr-review-patch expand-coverage refactor-module))
     (should (agent-shell-prompt-get id))))
 
 (ert-deftest agent-shell-prompt/library-fix-ci-pre-op-populates-ctx ()
@@ -460,13 +470,49 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
                 (list :args (list :file "foo.el")))))
       (should (string-match-p "log --oneline -n 10 -- foo.el" (plist-get ctx :recent-history))))))
 
+(ert-deftest agent-shell-prompt/library-git-output-delegates-to-magit ()
+  "agent-shell-prompt-library--git-output uses magit-git-output when available."
+  (let (called-with)
+    (cl-letf (((symbol-function 'magit-git-output)
+               (lambda (&rest args) (setq called-with args) " magit-result \n")))
+      (should (equal (agent-shell-prompt-library--git-output "status" "--short") "magit-result"))
+      (should (equal called-with '("status" "--short"))))))
+
+(ert-deftest agent-shell-prompt/library-git-output-falls-back-to-shell ()
+  "agent-shell-prompt-library--git-output falls back to shell when magit is absent."
+  (let (called-with)
+    (cl-letf (((symbol-function 'magit-git-output) nil)
+              ((symbol-function 'agent-shell-prompt-library--shell)
+               (lambda (&rest args) (setq called-with args) "shell-result")))
+      (should (equal (agent-shell-prompt-library--git-output "status" "--short") "shell-result"))
+      (should (equal called-with '("git" "status" "--short"))))))
+
+(ert-deftest agent-shell-prompt/library-create-commit-pre-op-without-files ()
+  "create-commit pre-op gathers status, diff HEAD, and recent log without files arg."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
+             (lambda (&rest args) (mapconcat #'identity args " "))))
+    (let ((ctx (agent-shell-prompt-library--create-commit-pre-op nil)))
+      (should (string-match-p "status --short" (plist-get ctx :git-status)))
+      (should (string-match-p "diff HEAD" (plist-get ctx :git-diff)))
+      (should (string-match-p "log --oneline -n 5" (plist-get ctx :recent-log))))))
+
+(ert-deftest agent-shell-prompt/library-create-commit-pre-op-with-files ()
+  "create-commit pre-op scopes status and diff to specified files."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
+             (lambda (&rest args) (mapconcat #'identity args " "))))
+    (let ((ctx (agent-shell-prompt-library--create-commit-pre-op
+                (list :args (list :files "src/lib.el")))))
+      (should (string-match-p "status --short -- src/lib.el" (plist-get ctx :git-status)))
+      (should (string-match-p "diff HEAD -- src/lib.el" (plist-get ctx :git-diff)))
+      (should (string-match-p "log --oneline -n 5" (plist-get ctx :recent-log))))))
+
 ;;; ─────────────────────────────────────────────────────────────
 ;;; ACR menu
 
 (ert-deftest agent-shell-prompt/select-dispatches-chosen-prompt ()
   "agent-shell-prompt-select dispatches whichever spec the picker returns."
   (asp-test/isolate
-   (agent-shell-prompt-def choosable :template "hi")
+   (register-agent-shell-prompt choosable :template "hi")
    (let (dispatched)
      (cl-letf (((symbol-function 'annotated-completing-read)
                 (lambda (table &rest _) (cddr (assoc "choosable" table))))
@@ -483,8 +529,8 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 (ert-deftest agent-shell-prompt/select-filters-by-category ()
   "Passing a category to agent-shell-prompt-select narrows the candidates."
   (asp-test/isolate
-   (agent-shell-prompt-def in-cat :category "CI/CD" :template "hi")
-   (agent-shell-prompt-def other-cat :category "Testing" :template "hi")
+   (register-agent-shell-prompt in-cat :category "CI/CD" :template "hi")
+   (register-agent-shell-prompt other-cat :category "Testing" :template "hi")
    (should (= 1 (length (agent-shell-prompt--candidates "CI/CD"))))))
 
 (ert-deftest agent-shell-prompt/dispatch-menu-key-integrity ()

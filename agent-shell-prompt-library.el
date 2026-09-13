@@ -24,14 +24,22 @@
 
 ;;; Commentary:
 
-;; Standard `agent-shell-prompt-def' registrations: CI failure
-;; remediation, PR review patching, coverage expansion, and refactor
-;; cleanup.  Each pre-op is deterministic Elisp gathering exact context
-;; via `gh' or `git' rather than letting the agent hallucinate it.
+;; Standard `register-agent-shell-prompt' registrations: CI failure
+;; remediation, PR review patching, coverage expansion, refactor
+;; cleanup, and git commit authoring.  Each pre-op is deterministic Elisp
+;; gathering exact context via `gh' or `git' (using Magit when available)
+;; rather than letting the agent hallucinate it.
 
 ;;; Code:
 
 (require 'agent-shell-prompt)
+
+(declare-function magit-git-output "magit-git" (&rest args))
+(declare-function magit-get-current-branch "magit-git" ())
+(declare-function magit-dash-gh--repo-info "magit-dash" ())
+(declare-function magit-dash--repo-at-point "magit-dash" ())
+(declare-function magit-dash-repo-name "magit-dash" (repo))
+(declare-function annotated-completing-read "annotated-completing-read")
 
 (defun agent-shell-prompt-library--shell (&rest args)
   "Run ARGS as a shell command in `default-directory' and return its output.
@@ -43,14 +51,20 @@ instead of aborting the workflow."
      (with-current-buffer standard-output
        (apply #'call-process (car args) nil t nil (cdr args))))))
 
+(defun agent-shell-prompt-library--git-output (&rest args)
+  "Run git with ARGS in `default-directory' and return trimmed output.
+Uses `magit-git-output' when available, falling back to
+`agent-shell-prompt-library--shell'."
+  (if (fboundp 'magit-git-output)
+      (string-trim (or (apply #'magit-git-output args) ""))
+    (apply #'agent-shell-prompt-library--shell "git" args)))
+
 (defun agent-shell-prompt-library--gather (ctx pairs)
   "Populate CTX with the output of each shell command in PAIRS.
 PAIRS is a list of (CTX-KEY COMMAND ARG...) entries; each COMMAND is run
 via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
   (dolist (pair pairs ctx)
     (plist-put ctx (car pair) (apply #'agent-shell-prompt-library--shell (cdr pair)))))
-
-(declare-function annotated-completing-read "annotated-completing-read")
 
 (defun agent-shell-prompt-library--iso-to-seconds (iso-str)
   "Convert ISO-STR timestamp string to float seconds."
@@ -63,8 +77,8 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
   (let ((s (agent-shell-prompt-library--iso-to-seconds start-iso))
         (e (agent-shell-prompt-library--iso-to-seconds end-iso)))
     (if (and s e)
-        (let ((diff (max 0 (floor (- e s)))))
-          (cond ((< diff 60) (format "%ds" diff))
+        (let ((diff (max 0 (floor (- e s)))))(cond ((< diff 60)
+           (format "%ds" diff))
                 ((< diff 3600) (format "%dm %ds" (/ diff 60) (% diff 60)))
                 (t (format "%dh %dm" (/ diff 3600) (% (% diff 3600) 60)))))
       "n/a")))
@@ -73,8 +87,8 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
   "Format ISO-TIME string as relative time ago."
   (let ((t-sec (agent-shell-prompt-library--iso-to-seconds iso-time)))
     (if t-sec
-        (let ((diff (max 0 (floor (- (float-time) t-sec)))))
-          (cond ((< diff 60) "just now")
+        (let ((diff (max 0 (floor (- (float-time) t-sec)))))(cond ((< diff 60)
+           "just now")
                 ((< diff 3600) (format "%dm ago" (/ diff 60)))
                 ((< diff 86400) (format "%dh ago" (/ diff 3600)))
                 (t (format "%dd ago" (/ diff 86400)))))
@@ -190,7 +204,7 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
                (list :ci-log "gh" "run" "view" run-id-str "--repo" repo-slug "--log-failed")))
       updated-ctx)))
 
-(agent-shell-prompt-def fix-ci
+(register-agent-shell-prompt fix-ci
   :doc "Download CI artifacts and prompt agent to fix build failure"
   :category "CI/CD"
   :args ((repo :prompt "Repository: " :optional t)
@@ -209,7 +223,7 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
     (agent-shell-prompt-library--gather
      ctx (list (list :pr-comments "gh" "pr" "view" pr-number "--comments")))))
 
-(agent-shell-prompt-def pr-review-patch
+(register-agent-shell-prompt pr-review-patch
   :doc "Fetch PR review comments and draft remediation patch"
   :category "Code Review"
   :args ((pr-number :prompt "PR number: " :type integer))
@@ -227,7 +241,7 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
     (agent-shell-prompt-library--gather
      ctx (list (list :file-diff "git" "diff" "HEAD" "--" file)))))
 
-(agent-shell-prompt-def expand-coverage
+(register-agent-shell-prompt expand-coverage
   :doc "Analyze uncovered lines and author missing unit tests"
   :category "Testing"
   :args ((file :prompt "File: "))
@@ -245,12 +259,65 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
     (agent-shell-prompt-library--gather
      ctx (list (list :recent-history "git" "log" "--oneline" "-n" "10" "--" file)))))
 
-(agent-shell-prompt-def refactor-module
+(register-agent-shell-prompt refactor-module
   :doc "Clean up dead code and migrate legacy macro forms"
   :category "Refactoring"
   :args ((file :prompt "File: "))
   :pre-op #'agent-shell-prompt-library--refactor-pre-op
   :template "Refactor {{args.file}}: remove dead code and migrate legacy forms to current conventions.\n\nRecent history:\n{{recent-history}}"
+  :submit t
+  :target :session-reuse)
+
+;; Git commit authoring
+
+(defun agent-shell-prompt-library--create-commit-pre-op (ctx)
+  "Gather git status, diff against HEAD, and recent log history for CTX using Magit/Git."
+  (let* ((args (plist-get ctx :args))
+         (files (plist-get args :files))
+         (has-files (and (stringp files) (not (string-empty-p files))))
+         (file-args (when has-files (list "--" files)))
+         (status (apply #'agent-shell-prompt-library--git-output
+                        (append '("status" "--short") file-args)))
+         (diff (apply #'agent-shell-prompt-library--git-output
+                      (append '("diff" "HEAD") file-args)))
+         (log (agent-shell-prompt-library--git-output "log" "--oneline" "-n" "5"))
+         (updated-ctx (copy-sequence ctx)))
+    (setq updated-ctx (plist-put updated-ctx :git-status status))
+    (setq updated-ctx (plist-put updated-ctx :git-diff diff))
+    (setq updated-ctx (plist-put updated-ctx :recent-log log))
+    updated-ctx))
+
+(register-agent-shell-prompt create-commit
+  :doc "Draft and create a git commit with concise message and attribution"
+  :category "Git"
+  :args ((files :prompt "Files to commit (optional): " :optional t)
+         (instructions :prompt "Additional instructions (optional): " :optional t))
+  :pre-op #'agent-shell-prompt-library--create-commit-pre-op
+  :template "Review the working tree changes and create a git commit following these guidelines:
+
+## Commit Message Style
+- **Subject line**: One short, direct sentence stating what changed (imperative mood, concise, matching repository conventions).
+- **Body** (when needed): Focus exclusively on design decisions and motivations — the *why* behind the patch, not a re-description of what the diff already shows.
+- **Omit body when self-explanatory**: If the subject line is sufficient, omit the body entirely.
+- **Keep body terse**: When included, keep it to 2-3 sentences (under 100 words), covering motivation and potential impact (what could break, behavior changes for users/callers).
+- **Style consistency**: Match the formatting, prefixing, and casing conventions shown in recent commit history.
+
+## Attribution & Author Identity
+- The commit author must be the human directing the session (their configured git identity).
+- Include a `Co-authored-by:` trailer identifying the AI assistant, separated from the body by a blank line.
+
+## Working Tree Status:
+{{git-status}}
+
+## Current Diff:
+{{git-diff}}
+
+## Recent Commit History (for style reference):
+{{recent-log}}
+
+{{args.instructions}}
+
+Stage the appropriate changes and create the commit."
   :submit t
   :target :session-reuse)
 
