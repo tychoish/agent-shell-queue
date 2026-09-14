@@ -24,11 +24,13 @@
 
 ;;; Commentary:
 
-;; Standard `register-agent-shell-prompt' registrations: CI failure
+;; Standard `register-agent-shell-prompt` registrations: CI failure
 ;; remediation, PR review patching, coverage expansion, refactor
 ;; cleanup, and git commit authoring.  Each pre-op is deterministic Elisp
-;; gathering exact context via `gh' or `git' (using Magit when available)
-;; rather than letting the agent hallucinate it.
+;; gathering exact context via `gh` or `git` (using Magit when available)
+;; rather than letting the agent hallucinate it.  Large artifacts (logs,
+;; diffs > 5 lines, review dumps) are saved to disk or summarized via
+;; diffstat rather than inlining excessive context directly into prompt turns.
 
 ;;; Code:
 
@@ -43,7 +45,7 @@
 (declare-function annotated-completing-read "annotated-completing-read")
 
 (defun agent-shell-prompt-library--shell (&rest args)
-  "Run ARGS as a shell command in `default-directory' and return its output.
+  "Run ARGS as a shell command in `default-directory` and return its output.
 Trailing newline is trimmed.  Errors are captured inline in the result
 rather than signaled, so a pre-op can surface tool failures to the agent
 instead of aborting the workflow."
@@ -53,17 +55,42 @@ instead of aborting the workflow."
        (apply #'call-process (car args) nil t nil (cdr args))))))
 
 (defun agent-shell-prompt-library--git-output (&rest args)
-  "Run git with ARGS in `default-directory' and return trimmed output.
-Uses `magit-git-output' when available, falling back to
-`agent-shell-prompt-library--shell'."
+  "Run git with ARGS in `default-directory` and return trimmed output.
+Uses `magit-git-output` when available, falling back to
+`agent-shell-prompt-library--shell`."
   (if (fboundp 'magit-git-output)
       (string-trim (or (apply #'magit-git-output args) ""))
     (apply #'agent-shell-prompt-library--shell "git" args)))
 
+(defun agent-shell-prompt-library--diff-summary (args &optional max-lines)
+  "Return git diff for ARGS, truncating to `--stat` if lines exceed MAX-LINES.
+MAX-LINES defaults to 5.  When diff has <= MAX-LINES lines, returns the full diff.
+When diff exceeds MAX-LINES lines, returns `git diff --stat` output with a note."
+  (let* ((limit (or max-lines 5))
+         (full-diff (apply #'agent-shell-prompt-library--git-output (append '("diff") args)))
+         (trimmed (string-trim full-diff))
+         (lines (if (string-empty-p trimmed)
+                    '()
+                  (split-string trimmed "\n" t))))
+    (cond
+     ((null lines)
+      "(no changes)")
+     ((<= (length lines) limit)
+      trimmed)
+     (t
+      (let* ((stat (apply #'agent-shell-prompt-library--git-output (append '("diff" "--stat") args)))
+             (trimmed-stat (string-trim (or stat ""))))
+        (if (not (string-empty-p trimmed-stat))
+            (format "%s\n(Diff exceeds %d lines — run `git diff%s` to view full diff)"
+                    trimmed-stat limit
+                    (if args (concat " " (mapconcat #'identity args " ")) ""))
+          (format "%s\n...\n(Truncated — run `git diff` to view full diff)"
+                  (mapconcat #'identity (seq-take lines limit) "\n"))))))))
+
 (defun agent-shell-prompt-library--gather (ctx pairs)
   "Populate CTX with the output of each shell command in PAIRS.
 PAIRS is a list of (CTX-KEY COMMAND ARG...) entries; each COMMAND is run
-via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
+via `agent-shell-prompt-library--shell` and stored under CTX-KEY."
   (dolist (pair pairs ctx)
     (plist-put ctx (car pair) (apply #'agent-shell-prompt-library--shell (cdr pair)))))
 
@@ -78,8 +105,8 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
   (let ((s (agent-shell-prompt-library--iso-to-seconds start-iso))
         (e (agent-shell-prompt-library--iso-to-seconds end-iso)))
     (if (and s e)
-        (let ((diff (max 0 (floor (- e s)))))(cond ((< diff 60)
-           (format "%ds" diff))
+        (let ((diff (max 0 (floor (- e s)))))
+          (cond ((< diff 60) (format "%ds" diff))
                 ((< diff 3600) (format "%dm %ds" (/ diff 60) (% diff 60)))
                 (t (format "%dh %dm" (/ diff 3600) (% (% diff 3600) 60)))))
       "n/a")))
@@ -88,8 +115,8 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
   "Format ISO-TIME string as relative time ago."
   (let ((t-sec (agent-shell-prompt-library--iso-to-seconds iso-time)))
     (if t-sec
-        (let ((diff (max 0 (floor (- (float-time) t-sec)))))(cond ((< diff 60)
-           "just now")
+        (let ((diff (max 0 (floor (- (float-time) t-sec)))))
+          (cond ((< diff 60) "just now")
                 ((< diff 3600) (format "%dm ago" (/ diff 60)))
                 ((< diff 86400) (format "%dh ago" (/ diff 3600)))
                 (t (format "%dd ago" (/ diff 86400)))))
@@ -126,7 +153,7 @@ via `agent-shell-prompt-library--shell' and stored under CTX-KEY."
       (when (listp parsed) parsed))))
 
 (defun agent-shell-prompt-library--current-branch ()
-  "Return current git branch name or `main'."
+  "Return current git branch name or `main`."
   (or (ignore-errors
         (and (fboundp 'magit-get-current-branch)
              (magit-get-current-branch)))
@@ -204,9 +231,9 @@ Otherwise, prompt the user with an ACR picker showing recent runs with duration 
 (defun agent-shell-prompt-library--format-pr-comments-markdown (repo pr-num view-obj inline-comments raw-comments)
   "Format PR review comments into Markdown.
 REPO is the repository slug string.  PR-NUM is the PR number string.
-VIEW-OBJ is the parsed hash-table from `gh pr view --json ...'.
-INLINE-COMMENTS is the parsed vector of hash-tables from `gh api ...'.
-RAW-COMMENTS is fallback plain text from `gh pr view --comments'."
+VIEW-OBJ is the parsed hash-table from `gh pr view --json ...`.
+INLINE-COMMENTS is the parsed vector of hash-tables from `gh api ...`.
+RAW-COMMENTS is fallback plain text from `gh pr view --comments`."
   (with-temp-buffer
     (let* ((title (if (hash-table-p view-obj) (or (gethash "title" view-obj) "") ""))
            (author-val (if (hash-table-p view-obj) (gethash "author" view-obj) nil))
@@ -384,33 +411,18 @@ under <project-root>/.agent/fix-ci/ so the agent can inspect them as files."
   :pre-op #'agent-shell-prompt-library--fix-ci-pre-op
   :template "Investigate and fix the CI failure in {{args.repo}} (run #{{args.run-id}}).
 
-## Run Summary:
-{{ci-summary}}
-
-## CI Artifacts Saved Locally:
+## CI Artifacts:
 - Failed step log: `{{ci-log-file}}`
 - Failing jobs metadata: `{{ci-jobs-file}}`
 - CI triage index: `{{ci-index-file}}`
 
-Do NOT read the entire log file into context. Inspect the logs as files using search or reading from the end first (failures typically appear in the last 150-200 lines).
+Do NOT read the entire log file into context. Inspect the logs as files using search or tail inspection (failures typically appear in the last 150-200 lines).
 
-## Triage Instructions:
-1. **Analyze Failure**:
-   - Inspect `{{ci-log-file}}` starting with the final lines, or search for `FAIL`, `panic:`, compiler errors (`syntax error`, `undefined:`), lint failures, or stale generated code.
-   - Cross-reference with `{{ci-jobs-file}}` for job names and URLs.
-2. **Draft a Fix Plan**:
-   - Write a structured fix plan to `.agent/fix-ci/fix-plan.md` detailing:
-     - Summary of failures and root cause
-     - Table of failing checks and error classifications
-     - Action items (files affected, concrete changes needed, log line references)
-     - Verification steps (narrow compilation and tests)
-     - Open questions (if any)
-3. **Present and Confirm**:
-   - Present the fix plan to the user with the proposed action items.
-   - Ask for explicit confirmation before modifying source files.
-   - NEVER attempt to fix secrets, credentials, or infrastructure issues—flag these immediately.
-4. **Implement and Verify**:
-   - Once confirmed, make targeted edits and verify narrowly before running broader tests."
+## Instructions:
+1. Analyze failure in `{{ci-log-file}}` (search FAIL, errors, panics, or lint failures).
+2. Write structured fix plan to `.agent/fix-ci/fix-plan.md` (root cause, action items, verification).
+3. Present fix plan to user and ask confirmation before modifying source files.
+4. Implement targeted fix and verify with narrow tests."
   :submit t
   :target :session-reuse)
 
@@ -533,33 +545,17 @@ Markdown summary and JSON export are saved under <project-root>/.agent/pr-commen
 ## PR Summary:
 {{pr-summary}}
 
-## Review Comments Saved Locally:
+## Review Comments:
 - Markdown summary: `{{pr-comments-file}}`
 - Structured JSON: `{{pr-comments-json-file}}`
 
-Do NOT read all raw comment data into context at once. Review the comments in `{{pr-comments-file}}` (and `{{pr-comments-json-file}}` if detailed metadata is needed) using search or file viewing.
+Do NOT read all raw comment data into context at once. Review comments in `{{pr-comments-file}}` using search or file viewing.
 
-## Review Instructions:
-1. **Categorize Comments**:
-   Read through `{{pr-comments-file}}` and categorize each comment into:
-   - `change-required`: Reviewer explicitly asks for a code or design change
-   - `question`: Reviewer asks a question requiring an author reply
-   - `nit`: Minor style or syntax preference
-   - `praise`: Positive feedback (no action needed)
-   - `discussion`: Open-ended discussion requiring clarification
-   - `resolved`: Already addressed in subsequent commits
-2. **Draft Review Plan**:
-   - Write a structured plan to `.agent/pr-comments/review-plan.md` containing:
-     - High-level summary of reviewer sentiment and themes
-     - Proposed Changes (grouped by file and line)
-     - Questions Requiring a Response (table with reviewer, comment quote/link, suggested reply)
-     - Items to Discuss with the User (focused questions)
-3. **Present and Confirm**:
-   - Present a concise summary of comment counts by category.
-   - For questions and discussion items, ask the user directly with numbered items so they can answer.
-   - Ask for confirmation before modifying code.
-4. **Implement Remediation**:
-   - Once confirmed, apply the requested changes, verify tests pass, and keep changes minimal."
+## Instructions:
+1. Categorize comments in `{{pr-comments-file}}` (change-required, question, nit, praise, discussion, resolved).
+2. Write review plan to `.agent/pr-comments/review-plan.md` (proposed changes, reviewer replies, user questions).
+3. Present summary counts and discussion items to user for confirmation.
+4. Apply confirmed changes and verify tests pass."
   :submit t
   :target :session-reuse)
 
@@ -568,16 +564,19 @@ Do NOT read all raw comment data into context at once. Review the comments in `{
 (defun agent-shell-prompt-library--coverage-pre-op (ctx)
   "Diff :file in CTX against HEAD to scope untested edits."
   (let* ((args (plist-get ctx :args))
-         (file (plist-get args :file)))
-    (agent-shell-prompt-library--gather
-     ctx (list (list :file-diff "git" "diff" "HEAD" "--" file)))))
+         (file (plist-get args :file))
+         (diff (agent-shell-prompt-library--diff-summary (list "HEAD" "--" file) 5)))
+    (plist-put (copy-sequence ctx) :file-diff diff)))
 
 (register-agent-shell-prompt expand-coverage
   :doc "Analyze uncovered lines and author missing unit tests"
   :category "Testing"
   :args ((file :prompt "File: "))
   :pre-op #'agent-shell-prompt-library--coverage-pre-op
-  :template "Review {{args.file}} for untested logic and add missing unit tests.\n\nUncommitted diff for context:\n{{file-diff}}"
+  :template "Review {{args.file}} for untested logic and author missing unit tests.
+
+Diff:
+{{file-diff}}"
   :submit t
   :target :session-reuse)
 
@@ -586,16 +585,19 @@ Do NOT read all raw comment data into context at once. Review the comments in `{
 (defun agent-shell-prompt-library--refactor-pre-op (ctx)
   "Gather git log summary for :file in CTX to scope stale/legacy code."
   (let* ((args (plist-get ctx :args))
-         (file (plist-get args :file)))
-    (agent-shell-prompt-library--gather
-     ctx (list (list :recent-history "git" "log" "--oneline" "-n" "10" "--" file)))))
+         (file (plist-get args :file))
+         (log (agent-shell-prompt-library--git-output "log" "--oneline" "-n" "5" "--" file)))
+    (plist-put (copy-sequence ctx) :recent-history (if (string-empty-p log) "(no history)" log))))
 
 (register-agent-shell-prompt refactor-module
   :doc "Clean up dead code and migrate legacy macro forms"
   :category "Refactoring"
   :args ((file :prompt "File: "))
   :pre-op #'agent-shell-prompt-library--refactor-pre-op
-  :template "Refactor {{args.file}}: remove dead code and migrate legacy forms to current conventions.\n\nRecent history:\n{{recent-history}}"
+  :template "Refactor {{args.file}}: remove dead code and migrate legacy forms to current conventions.
+
+Recent history:
+{{recent-history}}"
   :submit t
   :target :session-reuse)
 
@@ -609,13 +611,13 @@ Do NOT read all raw comment data into context at once. Review the comments in `{
          (file-args (when has-files (list "--" files)))
          (status (apply #'agent-shell-prompt-library--git-output
                         (append '("status" "--short") file-args)))
-         (diff (apply #'agent-shell-prompt-library--git-output
-                      (append '("diff" "HEAD") file-args)))
+         (diff (agent-shell-prompt-library--diff-summary
+                (append '("HEAD") file-args) 5))
          (log (agent-shell-prompt-library--git-output "log" "--oneline" "-n" "5"))
          (updated-ctx (copy-sequence ctx)))
-    (setq updated-ctx (plist-put updated-ctx :git-status status))
+    (setq updated-ctx (plist-put updated-ctx :git-status (if (string-empty-p status) "(clean)" status)))
     (setq updated-ctx (plist-put updated-ctx :git-diff diff))
-    (setq updated-ctx (plist-put updated-ctx :recent-log log))
+    (setq updated-ctx (plist-put updated-ctx :recent-log (if (string-empty-p log) "(no history)" log)))
     updated-ctx))
 
 (register-agent-shell-prompt create-commit
@@ -624,18 +626,7 @@ Do NOT read all raw comment data into context at once. Review the comments in `{
   :args ((files :prompt "Files to commit (optional): " :optional t)
          (instructions :prompt "Additional instructions (optional): " :optional t))
   :pre-op #'agent-shell-prompt-library--create-commit-pre-op
-  :template "Review the working tree changes and create a git commit following these guidelines:
-
-## Commit Message Style
-- **Subject line**: One short, direct sentence stating what changed (imperative mood, concise, matching repository conventions).
-- **Body** (when needed): Focus exclusively on design decisions and motivations — the *why* behind the patch, not a re-description of what the diff already shows.
-- **Omit body when self-explanatory**: If the subject line is sufficient, omit the body entirely.
-- **Keep body terse**: When included, keep it to 2-3 sentences (under 100 words), covering motivation and potential impact (what could break, behavior changes for users/callers).
-- **Style consistency**: Match the formatting, prefixing, and casing conventions shown in recent commit history.
-
-## Attribution & Author Identity
-- The commit author must be the human directing the session (their configured git identity).
-- Include a `Co-authored-by:` trailer identifying the AI assistant, separated from the body by a blank line.
+  :template "Create a git commit for the current changes:
 
 ## Working Tree Status:
 {{git-status}}
@@ -643,12 +634,16 @@ Do NOT read all raw comment data into context at once. Review the comments in `{
 ## Current Diff:
 {{git-diff}}
 
-## Recent Commit History (for style reference):
+## Recent Commits (for style reference):
 {{recent-log}}
 
 {{args.instructions}}
 
-Stage the appropriate changes and create the commit."
+## Guidelines:
+- Subject: Imperative, concise sentence matching repository conventions.
+- Body: 2-3 sentences explaining motivation/impact (omit if self-explanatory).
+- Attribution: Include `Co-authored-by:` trailer identifying the AI assistant.
+- Stage appropriate changes and commit."
   :submit t
   :target :session-reuse)
 

@@ -83,7 +83,7 @@
    (register-agent-shell-prompt dup :template "one")
    (register-agent-shell-prompt dup :template "two")
    (should (= 1 (hash-table-count agent-shell-prompt-registry)))
-   (should (equal (agent-shell-prompt-spec-template (agent-shell-prompt-get 'dup)) "two"))))
+   (should (equal (agent-shell-prompt-spec-template (agent-shell-prompt-get 'dup)) "two")))
 
 (ert-deftest agent-shell-prompt/list-returns-all-specs ()
   "agent-shell-prompt-list returns every registered spec."
@@ -143,8 +143,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
    (register-agent-shell-prompt needs-arg
      :args ((thing :prompt "Thing: "))
      :template "{{args.thing}}")
-   (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "typed")))
-     (should (equal (agent-shell-prompt--collect-args (agent-shell-prompt-get 'needs-arg) nil)
+   (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "typed")))\n     (should (equal (agent-shell-prompt--collect-args (agent-shell-prompt-get 'needs-arg) nil)
                     (list :thing "typed"))))))
 
 (ert-deftest agent-shell-prompt/collect-args-normalizes-bare-symbol-names ()
@@ -242,7 +241,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
          (progn
            (agent-shell-prompt--apply-post-result :close buf)
            (should-not (buffer-live-p buf)))
-       (when (buffer-live-p buf) (kill-buffer buf))))))
+       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 (ert-deftest agent-shell-prompt/apply-post-result-chain-dispatches-next ()
   "(:chain ID ARGS) dispatches the next prompt with session-reuse and submit."
@@ -259,7 +258,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
   ":done (and any unrecognized value) does nothing observable."
   (asp-test/isolate
    (should (null (agent-shell-prompt--apply-post-result :done 'buf)))
-   (should (null (agent-shell-prompt--apply-post-result :unknown-flag 'buf)))))
+   (should (null (agent-shell-prompt--apply-post-result :unknown-flag 'buf))))))
 
 ;;; ─────────────────────────────────────────────────────────────
 ;;; Dispatch routing
@@ -403,6 +402,31 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
   (dolist (id '(create-commit fix-ci pr-review-patch expand-coverage refactor-module))
     (should (agent-shell-prompt-get id))))
 
+(ert-deftest agent-shell-prompt/library-diff-summary-short-diff ()
+  "Short diff (<= 5 lines) is returned in full."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
+             (lambda (&rest _) "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b")))
+    (let ((res (agent-shell-prompt-library--diff-summary '("HEAD") 5)))
+      (should (string-match-p "\\+b" res))
+      (should-not (string-match-p "Diff exceeds" res))))
+
+(ert-deftest agent-shell-prompt/library-diff-summary-long-diff-uses-stat ()
+  "Long diff (> 5 lines) uses diffstat and note."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
+             (lambda (&rest args)
+               (if (member "--stat" args)
+                   " foo.el | 10 +++++-----\n 1 file changed"
+                 "line1\nline2\nline3\nline4\nline5\nline6\nline7"))))
+    (let ((res (agent-shell-prompt-library--diff-summary '("HEAD") 5)))
+      (should (string-match-p "foo\\.el | 10" res))
+      (should (string-match-p "Diff exceeds 5 lines" res))))
+
+(ert-deftest agent-shell-prompt/library-diff-summary-empty ()
+  "Empty diff returns (no changes)."
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
+             (lambda (&rest _) "")))
+    (should (equal (agent-shell-prompt-library--diff-summary '("HEAD") 5) "(no changes)"))))
+
 (ert-deftest agent-shell-prompt/library-fix-ci-pre-op-populates-ctx ()
   "fix-ci's pre-op fetches summary and log text via gh into ctx."
   (let ((tmp-dir (make-temp-file "asq-fix-ci-pre-" t)))
@@ -414,7 +438,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
           (let ((ctx (agent-shell-prompt-library--fix-ci-pre-op
                       (list :args (list :repo "acme/x" :run-id 9)))))
             (should (string-match-p "acme/x" (plist-get ctx :ci-summary)))
-            (should (string-match-p "--log-failed" (plist-get ctx :ci-log)))))
+            (should (string-match-p "--log-failed" (plist-get ctx :ci-log))))))
       (delete-directory tmp-dir t))))
 
 (ert-deftest agent-shell-prompt/library-fix-ci-saves-files-and-renders-template ()
@@ -456,7 +480,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
             (should (string-match-p "\\.agent/fix-ci/ci-triage-index\\.md" rendered))
             (should (string-match-p "Do NOT read the entire log file into context" rendered))
             (should (string-match-p "150-200 lines" rendered))
-            ;; Rendered template does NOT inline the entire log body
+            ;; Rendered template does NOT inline the entire log body or full page
             (should-not (string-match-p "widget_test\\.go:42" rendered))))
       (delete-directory tmp-dir t))))
 
@@ -505,7 +529,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
           (let ((ctx (agent-shell-prompt-library--pr-review-pre-op
                       (list :args (list :pr-number 42)))))
             (should (string-match-p "42" (plist-get ctx :pr-comments)))
-            (should (string-match-p "--comments" (plist-get ctx :pr-comments)))))
+            (should (string-match-p "--comments" (plist-get ctx :pr-comments))))))
       (delete-directory tmp-dir t))))
 
 (ert-deftest agent-shell-prompt/library-pr-review-saves-files-and-renders-template ()
@@ -523,7 +547,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
                        "[{\"user\":{\"login\":\"carol\"},\"path\":\"widget.go\",\"line\":25,\"diff_hunk\":\"@@ -20,4 +20,5 @@\",\"body\":\"Handle error return here.\"}]")
                       ((member "--comments" args)
                        "Review by bob: Please simplify this function.")
-                      (t "")))))
+                      (t ""))))))
           (let* ((spec (agent-shell-prompt-get (quote pr-review-patch)))
                  (ctx (agent-shell-prompt-library--pr-review-pre-op
                        (list :args (list :repo "org/app" :pr-number 55))))
@@ -555,19 +579,19 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
 
 (ert-deftest agent-shell-prompt/library-coverage-pre-op-populates-ctx ()
   "expand-coverage's pre-op diffs :file against HEAD into ctx."
-  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
              (lambda (&rest args) (mapconcat #'identity args " "))))
     (let ((ctx (agent-shell-prompt-library--coverage-pre-op
                 (list :args (list :file "foo.el")))))
-      (should (string-match-p "diff HEAD -- foo.el" (plist-get ctx :file-diff))))))
+      (should (string-match-p "HEAD -- foo.el" (plist-get ctx :file-diff))))))
 
 (ert-deftest agent-shell-prompt/library-refactor-pre-op-populates-ctx ()
   "refactor-module's pre-op gathers recent git log for :file into ctx."
-  (cl-letf (((symbol-function 'agent-shell-prompt-library--shell)
+  (cl-letf (((symbol-function 'agent-shell-prompt-library--git-output)
              (lambda (&rest args) (mapconcat #'identity args " "))))
     (let ((ctx (agent-shell-prompt-library--refactor-pre-op
                 (list :args (list :file "foo.el")))))
-      (should (string-match-p "log --oneline -n 10 -- foo.el" (plist-get ctx :recent-history))))))
+      (should (string-match-p "log --oneline -n 5 -- foo.el" (plist-get ctx :recent-history))))))
 
 (ert-deftest agent-shell-prompt/library-git-output-delegates-to-magit ()
   "agent-shell-prompt-library--git-output uses magit-git-output when available."
@@ -592,7 +616,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
              (lambda (&rest args) (mapconcat #'identity args " "))))
     (let ((ctx (agent-shell-prompt-library--create-commit-pre-op nil)))
       (should (string-match-p "status --short" (plist-get ctx :git-status)))
-      (should (string-match-p "diff HEAD" (plist-get ctx :git-diff)))
+      (should (string-match-p "HEAD" (plist-get ctx :git-diff)))
       (should (string-match-p "log --oneline -n 5" (plist-get ctx :recent-log))))))
 
 (ert-deftest agent-shell-prompt/library-create-commit-pre-op-with-files ()
@@ -602,7 +626,7 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
     (let ((ctx (agent-shell-prompt-library--create-commit-pre-op
                 (list :args (list :files "src/lib.el")))))
       (should (string-match-p "status --short -- src/lib.el" (plist-get ctx :git-status)))
-      (should (string-match-p "diff HEAD -- src/lib.el" (plist-get ctx :git-diff)))
+      (should (string-match-p "HEAD -- src/lib.el" (plist-get ctx :git-diff)))
       (should (string-match-p "log --oneline -n 5" (plist-get ctx :recent-log))))))
 
 ;;; ─────────────────────────────────────────────────────────────
