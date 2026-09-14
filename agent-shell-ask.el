@@ -8,7 +8,7 @@
 ;;; Commentary:
 
 ;; Implements a Human-in-the-Loop (HITL) prompt and question queue subsystem
-;; integrated into agent-shell-queue. Supports single-choice, multi-choice
+;; integrated into agent-shell-queue.  Supports single-choice, multi-choice
 ;; (via acr-multi), free-text, boolean, file, and form questions with
 ;; declarative follow-up actions, cursor-driven queue iteration, MCP tool
 ;; exposure, and shell resurrection.
@@ -81,12 +81,28 @@
     (&key prompt (kind 'single-choice) options default-value target-shell
           directory timeout followup-action metadata id)
   "Create and register a new `agent-shell-ask-question'.
-PROMPT is the text shown to the user.
-KIND is one of 'single-choice, 'multi-choice, 'text, 'boolean, 'file, 'form.
+PROMPT is the prompt text shown to the user.
+KIND is one of `single-choice', `multi-choice', `text', `boolean',
+`file', or `form'.
 OPTIONS is a list of choices or alist.
-RETURNS the created question struct."
+DEFAULT-VALUE is the preselected fallback value.
+TARGET-SHELL is the destination shell buffer or name.
+DIRECTORY is the working directory for shell interactions.
+TIMEOUT is an optional lifespan in seconds.
+FOLLOWUP-ACTION is an action plist triggered on answer.
+METADATA is an optional metadata plist.
+ID optionally overrides the generated question ID.
+Returns the created question struct."
   (let* ((qid (or id (agent-shell-ask-generate-id)))
-         (dir (or directory (when target-shell (ignore-errors (with-current-buffer target-shell default-directory))) default-directory))
+         (dir (or directory
+                  (when target-shell
+                    (ignore-errors
+                      (with-current-buffer target-shell default-directory)))
+                  default-directory))
+         (shell-name (when target-shell
+                       (if (bufferp target-shell)
+                           (buffer-name target-shell)
+                         target-shell)))
          (q (agent-shell-ask-question--make
              :id qid
              :prompt prompt
@@ -95,7 +111,7 @@ RETURNS the created question struct."
              :default-value default-value
              :status 'pending
              :response nil
-             :target-shell (when target-shell (if (bufferp target-shell) (buffer-name target-shell) target-shell))
+             :target-shell shell-name
              :directory dir
              :created (float-time)
              :answered-at nil
@@ -113,7 +129,8 @@ RETURNS the created question struct."
   (gethash id agent-shell-ask-store))
 
 (defun agent-shell-ask-list-pending (&optional target-shell)
-  "List all pending `agent-shell-ask-question' structs, optionally filtered by TARGET-SHELL."
+  "List all pending `agent-shell-ask-question' structs.
+When TARGET-SHELL is non-nil, only questions targeting that shell are returned."
   (let ((items nil))
     (maphash
      (lambda (_id q)
@@ -137,21 +154,20 @@ RETURNS the created question struct."
 (defun agent-shell-ask-cursor-next (&optional cursor-id target-shell)
   "Return the next pending `agent-shell-ask-question' for CURSOR-ID.
 If CURSOR-ID is nil, defaults to \"default\".
+When TARGET-SHELL is non-nil, filter pending questions to that shell.
 Maintains last-seen position and advances the cursor to the returned item."
   (let* ((cid (or cursor-id "default"))
          (last-id (gethash cid agent-shell-ask-cursors))
          (pending (agent-shell-ask-list-pending target-shell))
-         (next-q nil))
-    (if (null last-id)
-        (setq next-q (car pending))
-      (let ((after-last nil))
-        (dolist (q pending)
-          (if after-last
-              (unless next-q (setq next-q q))
-            (when (equal (agent-shell-ask-question-id q) last-id)
-              (setq after-last t))))
-        (unless next-q
-          (setq next-q (car pending)))))
+         (next-q (cond
+                  ((null pending) nil)
+                  ((null last-id) (car pending))
+                  (t
+                   ;; Find the first item after last-id, or wrap around to the first item
+                   (let ((tail (member (agent-shell-ask-get last-id) pending)))
+                     (if (and tail (cdr tail))
+                         (cadr tail)
+                       (car pending)))))))
     (when next-q
       (puthash cid (agent-shell-ask-question-id next-q) agent-shell-ask-cursors))
     next-q))
@@ -179,7 +195,7 @@ Maintains last-seen position and advances the cursor to the returned item."
     q))
 
 (defun agent-shell-ask-cancel (id &optional reason)
-  "Mark question ID as cancelled."
+  "Mark question ID as cancelled with optional REASON."
   (let ((q (agent-shell-ask-get id)))
     (when q
       (setf (agent-shell-ask-question-status q) 'cancelled)
@@ -191,42 +207,41 @@ Maintains last-seen position and advances the cursor to the returned item."
 
 (defun agent-shell-ask-execute-followup (q response)
   "Execute post-answer follow-up action for question Q with RESPONSE."
-  (let ((action (agent-shell-ask-question-followup-action q)))
-    (when action
-      (let ((type (plist-get action :type)))
-        (pcase type
-          (:function
-           (let ((fn (plist-get action :function))
-                 (args (plist-get action :args)))
-             (when (fboundp fn)
-               (apply fn response args))))
-          (:enqueue
-           (let ((prompt-fmt (plist-get action :prompt))
-                 (bucket (plist-get action :bucket))
-                 (target-shell (agent-shell-ask-question-target-shell q)))
-             (when (fboundp 'agent-shell-queue-enqueue)
-               (let ((prompt-str (if prompt-fmt (format prompt-fmt response) (format "%s" response))))
-                 (funcall 'agent-shell-queue-enqueue prompt-str :bucket bucket :shell target-shell)))))
-          (:send-shell
-           (let* ((shell-name (or (plist-get action :shell-name)
-                                  (agent-shell-ask-question-target-shell q)))
-                  (text-fmt (or (plist-get action :text) "%s\n"))
-                  (text (format text-fmt response))
-                  (dir (agent-shell-ask-question-directory q))
-                  (buf (when shell-name (get-buffer shell-name))))
-             (unless (and buf (buffer-live-p buf))
-               (when (fboundp 'agent-shell-queue--resurrect-shell)
-                 (setq buf (funcall 'agent-shell-queue--resurrect-shell shell-name dir))))
-             (when (and buf (buffer-live-p buf))
-               (with-current-buffer buf
-                 (goto-char (point-max))
-                 (insert text)
-                 (when (fboundp 'comint-send-input)
-                   (comint-send-input))))))
-          (:sprite
-           (let ((task-spec (plist-get action :task-spec)))
-             (when (fboundp 'sprite-direct)
-               (funcall 'sprite-direct task-spec)))))))))
+  (when-let* ((action (agent-shell-ask-question-followup-action q))
+              (type (plist-get action :type)))
+    (pcase type
+      (:function
+       (let ((fn (plist-get action :function))
+             (args (plist-get action :args)))
+         (when (fboundp fn)
+           (apply fn response args))))
+      (:enqueue
+       (let ((prompt-fmt (plist-get action :prompt))
+             (bucket (plist-get action :bucket))
+             (target-shell (agent-shell-ask-question-target-shell q)))
+         (when (fboundp 'agent-shell-queue-enqueue)
+           (let ((prompt-str (if prompt-fmt (format prompt-fmt response) (format "%s" response))))
+             (funcall 'agent-shell-queue-enqueue prompt-str :bucket bucket :shell target-shell)))))
+      (:send-shell
+       (let* ((shell-name (or (plist-get action :shell-name)
+                              (agent-shell-ask-question-target-shell q)))
+              (text-fmt (or (plist-get action :text) "%s\n"))
+              (text (format text-fmt response))
+              (dir (agent-shell-ask-question-directory q))
+              (buf (when shell-name (get-buffer shell-name))))
+         (unless (and buf (buffer-live-p buf))
+           (when (fboundp 'agent-shell-queue--resurrect-shell)
+             (setq buf (funcall 'agent-shell-queue--resurrect-shell shell-name dir))))
+         (when (and buf (buffer-live-p buf))
+           (with-current-buffer buf
+             (goto-char (point-max))
+             (insert text)
+             (when (fboundp 'comint-send-input)
+               (comint-send-input))))))
+      (:sprite
+       (let ((task-spec (plist-get action :task-spec)))
+         (when (fboundp 'sprite-direct)
+           (funcall 'sprite-direct task-spec)))))))
 
 ;;; Minibuffer & Interactive UI Widgets
 
@@ -249,8 +264,6 @@ Maintains last-seen position and advances the cursor to the returned item."
          (completing-read-multiple prompt options nil t nil nil def)))
       ('file
        (read-file-name prompt (or def default-directory)))
-      ('text
-       (read-string prompt def))
       (_
        (read-string prompt def)))))
 
@@ -258,21 +271,20 @@ Maintains last-seen position and advances the cursor to the returned item."
   "Interactively prompt user to answer a pending question.
 If QUESTION-ID is provided, answer that question; otherwise select from pending."
   (interactive)
-  (let ((q (if question-id
-               (agent-shell-ask-get question-id)
-             (let ((pending (agent-shell-ask-list-pending)))
-               (unless pending
-                 (user-error "No pending HITL questions"))
-               (if (= (length pending) 1)
-                   (car pending)
-                 (let* ((table (mapcar (lambda (item)
-                                         (cons (format "[%s] %s"
-                                                       (agent-shell-ask-question-id item)
-                                                       (agent-shell-ask-question-prompt item))
-                                               item))
-                                       pending))
-                        (choice (completing-read "Select question to answer: " table nil t)))
-                   (cdr (assoc choice table))))))))
+  (let* ((pending (unless question-id (agent-shell-ask-list-pending)))
+         (q (cond
+             (question-id (agent-shell-ask-get question-id))
+             ((null pending) (user-error "No pending HITL questions"))
+             ((= (length pending) 1) (car pending))
+             (t
+              (let* ((table (mapcar (lambda (item)
+                                      (cons (format "[%s] %s"
+                                                    (agent-shell-ask-question-id item)
+                                                    (agent-shell-ask-question-prompt item))
+                                            item))
+                                    pending))
+                     (choice (completing-read "Select question to answer: " table nil t)))
+                (cdr (assoc choice table)))))))
     (when q
       (let ((resp (agent-shell-ask-prompt-question q)))
         (agent-shell-ask-answer (agent-shell-ask-question-id q) resp)

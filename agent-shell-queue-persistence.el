@@ -20,6 +20,8 @@
 (require 'map)
 (require 'seq)
 
+(defvar agent-shell-queue--items)
+
 (declare-function agent-shell-queue--current-store "agent-shell-queue")
 (declare-function agent-shell-queue--ensure-loaded "agent-shell-queue")
 (declare-function agent-shell-queue--make-store "agent-shell-queue")
@@ -59,6 +61,11 @@
 (declare-function agent-shell-queue--gen-id "agent-shell-queue")
 (declare-function agent-shell-queue--item-by-id "agent-shell-queue")
 (declare-function tabulated-list-get-id "tabulated-list")
+(declare-function agent-shell-queue-item-delay-before "agent-shell-queue")
+(declare-function agent-shell-queue-item-delay-after "agent-shell-queue")
+(declare-function agent-shell-queue--alert "agent-shell-queue")
+(declare-function agent-shell-queue-queue-halted-sessions "agent-shell-queue")
+(declare-function agent-shell-queue-buffer-refresh "agent-shell-queue")
 
 
 (eval-when-compile
@@ -212,7 +219,7 @@ executor as its registry name string or JSON null."
 
 (defun agent-shell-queue--item-from-json (obj)
   "Reconstruct a queue item from JSON-parsed plist OBJ.
-Status is interned; background truthy only when exactly `t';
+Status is interned; background truthy only when non-nil;
 executor resolved from the registry (nil when absent or unknown)."
   (agent-shell-queue-item--make
    :id (plist-get obj :id)
@@ -304,7 +311,7 @@ Status is stored as a string; background as t or nil."
 (defun agent-shell-queue--serialize-yaml (items)
   "Serialize ITEMS to a YAML string via `yaml-encode'."
   (unless (fboundp 'yaml-encode)
-    (error "yaml-encode not available; install the `yaml' package"))
+    (error "Yaml-encode not available; install the `yaml' package"))
   (yaml-encode
    (vconcat
     (seq-map (lambda (pair)
@@ -317,7 +324,7 @@ Status is stored as a string; background as t or nil."
 (defun agent-shell-queue--deserialize-yaml (str)
   "Deserialize STR (YAML format) into an items alist via `yaml-parse-string'."
   (unless (fboundp 'yaml-parse-string)
-    (error "yaml-parse-string not available; install the `yaml' package"))
+    (error "Yaml-parse-string not available; install the `yaml' package"))
   (thread-last (yaml-parse-string str
                                   :object-type 'hash-table
                                   :sequence-type 'list
@@ -343,30 +350,39 @@ Signals an error for unknown formats.")
   ".el")
 
 (cl-defmethod agent-shell-queue--serialize-items ((_format (eql plist)) items)
+  "Serialize ITEMS using plist format."
   (agent-shell-queue--serialize-plist items))
 
 (cl-defmethod agent-shell-queue--deserialize-items ((_format (eql plist)) string)
+  "Deserialize STRING using plist format."
   (agent-shell-queue--deserialize-plist string))
 
 (cl-defmethod agent-shell-queue-format-file-extension ((_format (eql plist)))
+  "Return file extension for plist format."
   ".el")
 
 (cl-defmethod agent-shell-queue--serialize-items ((_format (eql json)) items)
+  "Serialize ITEMS using json format."
   (agent-shell-queue--serialize-json items))
 
 (cl-defmethod agent-shell-queue--deserialize-items ((_format (eql json)) string)
+  "Deserialize STRING using json format."
   (agent-shell-queue--deserialize-json string))
 
 (cl-defmethod agent-shell-queue-format-file-extension ((_format (eql json)))
+  "Return file extension for json format."
   ".json")
 
 (cl-defmethod agent-shell-queue--serialize-items ((_format (eql yaml)) items)
+  "Serialize ITEMS using yaml format."
   (agent-shell-queue--serialize-yaml items))
 
 (cl-defmethod agent-shell-queue--deserialize-items ((_format (eql yaml)) string)
+  "Deserialize STRING using yaml format."
   (agent-shell-queue--deserialize-yaml string))
 
 (cl-defmethod agent-shell-queue-format-file-extension ((_format (eql yaml)))
+  "Return file extension for yaml format."
   ".yaml")
 
 (defun agent-shell-queue-register-format (fmt serialize-fn deserialize-fn)
@@ -397,7 +413,7 @@ Installs cl-generic methods for `agent-shell-queue--serialize-items' and
 (defun agent-shell-queue--safe-save-directory ()
   "Return the directory for safe-save backups.
 Uses `agent-shell-queue-safe-save-directory' when set, otherwise
-a subdirectory of `temporary-file-directory' named emacs-<instance>."
+a subdirectory of variable `temporary-file-directory' named emacs-<instance>."
   (or agent-shell-queue-safe-save-directory
       (expand-file-name
        (format "emacs-%s"

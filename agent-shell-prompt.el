@@ -141,7 +141,8 @@ the :args plist key."
     (cons key raw)))
 
 (defun agent-shell-prompt--collect-args (spec provided)
-  "Return a complete args plist for SPEC, reading any missing required keys from PROVIDED."
+  "Return a complete args plist for SPEC.
+Reads any missing required keys not found in PROVIDED."
   (seq-reduce
    (lambda (acc arg-spec)
      (let ((key (agent-shell-prompt--arg-key (car arg-spec)))
@@ -248,32 +249,37 @@ agent-shell-menu in turn would be circular."
                                     (agent-shell-queue--canonicalize-dir default-directory))))
               (agent-shell-buffers)))
 
+(defun agent-shell-prompt--create-shell (&optional dir)
+  "Create and return a new `agent-shell' buffer in DIR."
+  (let ((default-directory (or dir default-directory)))
+    (agent-shell-new-shell)))
+
 (defun agent-shell-prompt--session-buffer (target)
   "Return a live `agent-shell' buffer for TARGET, creating or prompting if needed.
-When TARGET is not `:session-new', search for open agent-shell buffers matching
-`default-directory' (or project). If matching buffers exist, prompt the user
-whether to reuse an existing shell buffer or open a new one. Otherwise, launch a
-new shell with `:session-strategy 'new'."
+When TARGET is `:session-new', always create a new shell buffer.
+When matching open buffers exist for `default-directory', prompt the user
+whether to reuse an existing shell buffer or create a new one.
+Otherwise, create a new shell buffer."
   (if (eq target :session-new)
-      (agent-shell-new-shell :session-strategy 'new :location default-directory)
+      (agent-shell-prompt--create-shell)
     (let* ((buffers (agent-shell-prompt--project-buffers default-directory))
            (dir-name (file-name-nondirectory (directory-file-name default-directory))))
       (cond
        ((null buffers)
-        (agent-shell-new-shell :session-strategy 'new :location default-directory))
+        (agent-shell-prompt--create-shell))
        ((= (length buffers) 1)
         (let ((buf (car buffers)))
           (if (y-or-n-p (format "Reuse open agent-shell %s for %s? "
                                 (buffer-name buf) dir-name))
               buf
-            (agent-shell-new-shell :session-strategy 'new :location default-directory))))
+            (agent-shell-prompt--create-shell))))
        (t
         (let* ((new-option "[New agent-shell]")
                (choices (cons new-option (mapcar #'buffer-name buffers)))
                (choice (completing-read (format "Select agent-shell for %s: " dir-name)
                                         choices nil t)))
           (if (string-equal choice new-option)
-              (agent-shell-new-shell :session-strategy 'new :location default-directory)
+              (agent-shell-prompt--create-shell)
             (get-buffer choice))))))))
 
 (defun agent-shell-prompt--dispatch-rendered (spec ctx target submit)
@@ -318,26 +324,21 @@ Returns nil when START-POS is nil.  Reuses the visibility walker from
     (agent-shell-queue--collect-visible-response-text shell-buffer start-pos)))
 
 ;;;###autoload
-(cl-defun agent-shell-prompt-dispatch (id &rest kwargs &key args target submit context-dir)
+;;;###autoload
+(cl-defun agent-shell-prompt-dispatch (id &key args target submit (context-dir default-directory) &allow-other-keys)
   "Instantiate the prompt workflow ID and dispatch it.
-ARGS is a plist supplying template values; any required args declared on
-the spec but absent from ARGS are prompted interactively.
-TARGET overrides the spec's declared target.
-SUBMIT non-nil forces prompt submission regardless of the spec default.
-CONTEXT-DIR sets `default-directory' for pre-op execution.
-Re-entrant pre-ops (chaining) pass kwargs as a single plist argument."
-  (let* ((plist (if (and (= (length kwargs) 1) (listp (car kwargs)) (keywordp (caar kwargs)))
-                    (car kwargs)
-                  kwargs))
-         (args (plist-get plist :args))
-         (target (plist-get plist :target))
-         (submit (plist-get plist :submit))
-         (context-dir (or (plist-get plist :context-dir) default-directory))
-         (spec (or (agent-shell-prompt-get id)
+ARGS is a plist supplying template values; missing required args
+are read interactively.
+TARGET overrides the spec's declared target (`:session-reuse',
+`:session-new', `:queue', `:ask').
+SUBMIT non-nil forces prompt submission regardless of spec default.
+CONTEXT-DIR sets `default-directory' for pre-op execution."
+  (let* ((spec (or (agent-shell-prompt-get id)
                    (error "Agent-shell-prompt: no prompt registered with id `%s'" id)))
+         (dir (or context-dir default-directory))
          (collected-args (agent-shell-prompt--collect-args spec args))
-         (initial-ctx (list :args collected-args :target target :submit submit :context-dir context-dir)))
-    (let ((default-directory context-dir))
+         (initial-ctx (list :args collected-args :target target :submit submit :context-dir dir)))
+    (let ((default-directory dir))
       (agent-shell-prompt-exec-pre
        spec initial-ctx
        (lambda (updated-ctx)

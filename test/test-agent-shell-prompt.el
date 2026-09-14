@@ -667,6 +667,58 @@ match-data `replace-regexp-in-string' relies on for subsequent matches."
   (should (get 'agent-shell-prompt-dispatch-menu 'transient--layout))
   (should (commandp 'agent-shell-prompt-select)))
 
+(ert-deftest agent-shell-prompt/create-shell-binds-default-directory ()
+  "agent-shell-prompt--create-shell calls agent-shell-new-shell with default-directory set."
+  (let ((seen-dir nil))
+    (cl-letf (((symbol-function 'agent-shell-new-shell)
+               (lambda () (setq seen-dir default-directory) 'new-shell-buffer)))
+      (let ((res (agent-shell-prompt--create-shell "/tmp/test-dir/")))
+        (should (eq res 'new-shell-buffer))
+        (should (equal seen-dir "/tmp/test-dir/"))))))
+
+(ert-deftest agent-shell-prompt/session-buffer-session-new ()
+  "agent-shell-prompt--session-buffer creates new shell buffer for :session-new."
+  (cl-letf (((symbol-function 'agent-shell-prompt--create-shell)
+             (lambda (&optional _dir) 'created-shell)))
+    (should (eq (agent-shell-prompt--session-buffer :session-new) 'created-shell))))
+
+(ert-deftest agent-shell-prompt/session-buffer-session-reuse-fallback ()
+  "agent-shell-prompt--session-buffer falls back to creating shell when no project buffers exist."
+  (cl-letf (((symbol-function 'agent-shell-prompt--project-buffers)
+             (lambda (_dir) nil))
+            ((symbol-function 'agent-shell-prompt--create-shell)
+             (lambda (&optional _dir) 'fallback-shell)))
+    (should (eq (agent-shell-prompt--session-buffer :session-reuse) 'fallback-shell))))
+
+(ert-deftest agent-shell-prompt/session-buffer-session-reuse-declined ()
+  "agent-shell-prompt--session-buffer creates shell when user declines reuse."
+  (let ((buf (generate-new-buffer "asp-reuse-declined")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-prompt--project-buffers)
+                   (lambda (_dir) (list buf)))
+                  ((symbol-function 'y-or-n-p) (lambda (_prompt) nil))
+                  ((symbol-function 'agent-shell-prompt--create-shell)
+                   (lambda (&optional _dir) 'declined-shell)))
+          (should (eq (agent-shell-prompt--session-buffer :session-reuse) 'declined-shell)))
+      (kill-buffer buf))))
+
+(ert-deftest agent-shell-prompt/session-buffer-session-reuse-multiple-prompts ()
+  "agent-shell-prompt--session-buffer prompts with completing-read when multiple buffers exist."
+  (let ((b1 (generate-new-buffer "asp-reuse-b1"))
+        (b2 (generate-new-buffer "asp-reuse-b2"))
+        picked)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-prompt--project-buffers)
+                   (lambda (_dir) (list b1 b2)))
+                  ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
+                  ((symbol-function 'completing-read)
+                   (lambda (_prompt table &rest _) (setq picked (buffer-name b1)) (buffer-name b1))))
+          (let ((res (agent-shell-prompt--session-buffer :session-reuse)))
+            (should (eq res b1))
+            (should (equal picked (buffer-name b1)))))
+      (kill-buffer b1)
+      (kill-buffer b2))))
+
 (provide 'test-agent-shell-prompt)
 
 ;;; test-agent-shell-prompt.el ends here

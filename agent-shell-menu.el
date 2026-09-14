@@ -250,7 +250,7 @@ omitted from the menu when the predicate returns nil.")
 (defun agent-shell-menu--action-entry-command (entry)
   "Return the command for ENTRY.
 ENTRY cdr may be a plain COMMAND symbol, a function, or a
-(COMMAND . PREDICATE) cons."
+\(COMMAND . PREDICATE) cons."
   (let ((val (cdr entry)))
     (if (and (consp val) (not (functionp val))) (car val) val)))
 
@@ -358,11 +358,11 @@ POSITION is buffer position of the button's start."
   (let* ((shell (or (cond
 		     ((derived-mode-p 'agent-shell-mode) (current-buffer))
 		     ((agent-shell-viewport--shell-buffer)))
-		    (user-error "not in an agent-shell or viewport buffer")))
+		    (user-error "Not in an agent-shell or viewport buffer")))
 	 (commands (with-current-buffer shell
 		     (map-elt agent-shell--state :available-commands))))
     (unless commands
-      (user-error "no agent slash-commands advertised in %s" (buffer-name shell)))
+      (user-error "No agent slash-commands advertised in %s" (buffer-name shell)))
     (agent-shell-insert :text (concat "/" (annotated-completing-read
 					   (seq-map (lambda (c)
 						     (cons (map-elt c 'name)
@@ -687,7 +687,7 @@ the underlying shell process uptime for the current agent-shell buffer."
   "Define `agent-shell-menu-output-key-KEY' and bind it in `agent-shell-mode-map'.
 In the output area, or while the shell is busy, calls FN interactively.
 Self-inserts KEY only when at the idle prompt, unless queue-only mode is active
-(in which case routes to `agent-shell-queue-ready-capture' instead).
+ (in which case routes to `agent-shell-queue-ready-capture' instead).
 Also binds FN directly in `agent-shell-viewport-view-mode-map'."
   (let* ((key-str (if (stringp key) key (symbol-name key)))
          (name (intern (concat "agent-shell-menu-output-key-" key-str)))

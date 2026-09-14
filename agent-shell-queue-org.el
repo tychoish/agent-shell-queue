@@ -33,6 +33,8 @@
 (require 'org)
 (require 'org-element)
 
+(defvar agent-shell-queue--items)
+
 ;; Status / keyword mapping
 
 (defconst agent-shell-queue-org--status-keyword
@@ -108,7 +110,7 @@ Constructs the subtree using `org-element-create' and `org-element-interpret-dat
   (insert (org-element-interpret-data (agent-shell-queue-org--item-to-ast item))))
 
 (defun agent-shell-queue-org--serialize ()
-  "Serialize `agent-shell-queue--items' to an org-mode string using `org-element' AST."
+  "Serialize `agent-shell-queue--items' to an `org-mode' string using `org-element' AST."
   (let* ((keywords (list (org-element-create 'keyword '(:key "TITLE" :value "Agent Shell Queue"))
                          (org-element-create 'keyword '(:key "STARTUP" :value "overview"))
                          (org-element-create 'keyword '(:key "TODO" :value "TODO DOING WAIT HOLD DRAFT | DONE ABORTED"))))
@@ -210,13 +212,16 @@ string-in-paragraph-contents issues during tree walking."
 ;; Registration
 
 (cl-defmethod agent-shell-queue--serialize-items ((_format (eql org)) items)
+  "Serialize ITEMS to an org format string."
   (let ((agent-shell-queue--items items))
     (agent-shell-queue-org--serialize)))
 
 (cl-defmethod agent-shell-queue--deserialize-items ((_format (eql org)) string)
+  "Deserialize STRING from org format into an items alist."
   (agent-shell-queue-org--deserialize string))
 
 (cl-defmethod agent-shell-queue-format-file-extension ((_format (eql org)))
+  "Return file extension for org format."
   ".org")
 
 ;;; Org Mode Integration

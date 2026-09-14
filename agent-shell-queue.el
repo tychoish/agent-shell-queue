@@ -6149,11 +6149,13 @@ Installed as :before advice on `shell-maker-submit'."
 (advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept)
 
 (defun agent-shell-queue--intercept-clear ()
+  "Remove the input-intercept prompt overlay in current buffer."
   (when (overlayp agent-shell-queue--intercept-overlay)
     (delete-overlay agent-shell-queue--intercept-overlay)
     (setq agent-shell-queue--intercept-overlay nil)))
 
 (defun agent-shell-queue--intercept-show (_event)
+  "Display the input-intercept prompt overlay for _EVENT."
   (when (and (eq agent-shell-queue-input-mode 'queue-intercept)
              (derived-mode-p 'agent-shell-mode))
     (agent-shell-queue--intercept-clear)
@@ -6337,11 +6339,13 @@ All live `agent-shell' buffers are immediately updated to the new default."
 (defvar-local agent-shell-queue--ready-sub-submit nil)
 
 (defun agent-shell-queue--ready-clear ()
+  "Remove the ready prompt overlay in current buffer."
   (when (overlayp agent-shell-queue--ready-overlay)
     (delete-overlay agent-shell-queue--ready-overlay)
     (setq agent-shell-queue--ready-overlay nil)))
 
 (defun agent-shell-queue--ready-show (_event)
+  "Display the ready prompt overlay for _EVENT."
   (when (and agent-shell-queue-only-mode
              (derived-mode-p 'agent-shell-mode))
     (agent-shell-queue--ready-clear)
@@ -6356,6 +6360,7 @@ All live `agent-shell' buffers are immediately updated to the new default."
       (setq agent-shell-queue--ready-overlay ov))))
 
 (defun agent-shell-queue--ready-hide (_event)
+  "Hide the ready prompt overlay for _EVENT."
   (agent-shell-queue--ready-clear))
 
 ;;;###autoload

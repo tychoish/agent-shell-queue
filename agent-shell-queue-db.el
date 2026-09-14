@@ -100,7 +100,7 @@ to store the database at a custom location.")
 (defun agent-shell-queue-db--ensure-connection ()
   "Return the open sqlite connection, opening and initialising it if necessary."
   (unless (fboundp 'sqlite-open)
-    (error "agent-shell-queue-db requires Emacs 29+ (built-in sqlite support)"))
+    (error "Agent-shell-queue-db requires Emacs 29+ (built-in sqlite support)"))
   (when (or (null agent-shell-queue-db--connection)
             (not (sqlitep agent-shell-queue-db--connection)))
     (let ((file (agent-shell-queue-db--file)))
@@ -160,7 +160,7 @@ Called as `agent-shell-queue-save-function' when the DB backend is active."
           (sqlite-execute conn "COMMIT"))
       (error
        (ignore-errors (sqlite-execute conn "ROLLBACK"))
-       (error "agent-shell-queue-db: save failed: %s" err))))
+       (error "Agent-shell-queue-db: save failed: %s" err))))
   (setq agent-shell-queue--last-flush-time (float-time))
   (when (bound-and-true-p agent-shell-queue-auto-flush-interval)
     (setq agent-shell-queue--next-flush-time
@@ -214,7 +214,7 @@ Saves the previous values so `agent-shell-queue-db-disable' can restore them."
                        (read-file-name "SQLite database file: " user-emacs-directory
                                        nil nil "agent-shell-queue.db"))))
   (unless (fboundp 'sqlite-open)
-    (error "agent-shell-queue-db requires Emacs 29+ (built-in sqlite support)"))
+    (error "Agent-shell-queue-db requires Emacs 29+ (built-in sqlite support)"))
   (when db-file
     (setq agent-shell-queue-db-file db-file))
   (setq agent-shell-queue-db--saved-state-file-function
@@ -303,7 +303,7 @@ Shows per-bucket item counts and a tabular dump of all persisted rows."
 Loads current state from the DB then delegates to `agent-shell-queue-export'."
   (interactive)
   (unless (fboundp 'yaml-encode)
-    (error "agent-shell-queue-db-export requires the `yaml' package"))
+    (error "Agent-shell-queue-db-export requires the `yaml' package"))
   (agent-shell-queue--ensure-loaded)
   (agent-shell-queue-export))
 
@@ -318,7 +318,7 @@ After importing, the DB is flushed immediately."
   (interactive (list (if current-prefix-arg 'file 'clipboard)))
   (agent-shell-queue-import source)
   (agent-shell-queue-db--save)
-  (message "agent-shell-queue-db: import complete and flushed to database"))
+  (message "Agent-shell-queue-db: import complete and flushed to database"))
 
 ;; Done-log hook (optional: record completed items in a separate DB table)
 
@@ -369,7 +369,7 @@ Call after `agent-shell-queue-db-enable'."
                  (agent-shell-queue-item-completed item)
                  (float-time)
                  instance)))
-      (error (message "agent-shell-queue-db: done-log write failed: %s" err)))))
+      (error (message "Agent-shell-queue-db: done-log write failed: %s" err)))))
 
 (provide 'agent-shell-queue-db)
 

@@ -43,6 +43,7 @@
 (declare-function magit-dash--repo-at-point "magit-dash" ())
 (declare-function magit-dash-repo-name "magit-dash" (repo))
 (declare-function annotated-completing-read "annotated-completing-read")
+(declare-function vc-git-branches "vc-git" ())
 
 (defun agent-shell-prompt-library--shell (&rest args)
   "Run ARGS as a shell command in `default-directory` and return its output.
@@ -64,28 +65,24 @@ Uses `magit-git-output` when available, falling back to
 
 (defun agent-shell-prompt-library--diff-summary (args &optional max-lines)
   "Return git diff for ARGS, truncating to `--stat` if lines exceed MAX-LINES.
-MAX-LINES defaults to 5.  When diff has <= MAX-LINES lines, returns the full diff.
+MAX-LINES defaults to 5.  When diff has <= MAX-LINES lines, returns full diff.
 When diff exceeds MAX-LINES lines, returns `git diff --stat` output with a note."
   (let* ((limit (or max-lines 5))
          (full-diff (apply #'agent-shell-prompt-library--git-output (append '("diff") args)))
-         (trimmed (string-trim full-diff))
-         (lines (if (string-empty-p trimmed)
-                    '()
-                  (split-string trimmed "\n" t))))
-    (cond
-     ((null lines)
-      "(no changes)")
-     ((<= (length lines) limit)
-      trimmed)
-     (t
-      (let* ((stat (apply #'agent-shell-prompt-library--git-output (append '("diff" "--stat") args)))
-             (trimmed-stat (string-trim (or stat ""))))
-        (if (not (string-empty-p trimmed-stat))
-            (format "%s\n(Diff exceeds %d lines — run `git diff%s` to view full diff)"
-                    trimmed-stat limit
-                    (if args (concat " " (mapconcat #'identity args " ")) ""))
-          (format "%s\n...\n(Truncated — run `git diff` to view full diff)"
-                  (mapconcat #'identity (seq-take lines limit) "\n"))))))))
+         (trimmed (string-trim full-diff)))
+    (if (string-empty-p trimmed)
+        "(no changes)"
+      (let ((lines (split-string trimmed "\n" t)))
+        (if (<= (length lines) limit)
+            trimmed
+          (let* ((stat (apply #'agent-shell-prompt-library--git-output (append '("diff" "--stat") args)))
+                 (trimmed-stat (string-trim (or stat ""))))
+            (if (not (string-empty-p trimmed-stat))
+                (format "%s\n(Diff exceeds %d lines — run `git diff%s` to view full diff)"
+                        trimmed-stat limit
+                        (if args (concat " " (mapconcat #'identity args " ")) ""))
+              (format "%s\n...\n(Truncated — run `git diff` to view full diff)"
+                      (mapconcat #'identity (seq-take lines limit) "\n")))))))))
 
 (defun agent-shell-prompt-library--gather (ctx pairs)
   "Populate CTX with the output of each shell command in PAIRS.
@@ -139,7 +136,8 @@ via `agent-shell-prompt-library--shell` and stored under CTX-KEY."
         repo)))
 
 (defun agent-shell-prompt-library--fetch-runs (repo &optional limit)
-  "Fetch recent GitHub Action runs for REPO as a list of alists."
+  "Fetch recent GitHub Actions run records for REPO as a list of alists.
+Optional LIMIT sets maximum runs to fetch (defaults to 20)."
   (when-let* ((slug (agent-shell-prompt-library--resolve-repo-slug repo))
               ((executable-find "gh" t)))
     (let* ((lim (number-to-string (or limit 20)))
@@ -166,7 +164,7 @@ via `agent-shell-prompt-library--shell` and stored under CTX-KEY."
 (defun agent-shell-prompt-library--resolve-ci-run (repo &optional target-branch)
   "Return a run-id for REPO and TARGET-BRANCH.
 If the latest run on TARGET-BRANCH is failing, return its run-id automatically.
-Otherwise, prompt the user with an ACR picker showing recent runs with duration and time ago."
+Otherwise, prompt the user with an ACR picker showing recent runs."
   (let* ((branch (or target-branch (agent-shell-prompt-library--current-branch)))
          (runs (agent-shell-prompt-library--fetch-runs repo 20))
          (branch-runs (seq-filter (lambda (r) (equal (map-elt r 'headBranch) branch)) runs))
@@ -430,7 +428,8 @@ Do NOT read the entire log file into context. Inspect the logs as files using se
 
 (defun agent-shell-prompt-library--pr-review-pre-op (ctx)
   "Fetch PR review comments for :pr-number in CTX and save them locally.
-Markdown summary and JSON export are saved under <project-root>/.agent/pr-comments/."
+Markdown summary and JSON export are saved under
+<project-root>/.agent/pr-comments/."
   (let* ((args (plist-get ctx :args))
          (raw-repo (or (plist-get args :repo)
                        (ignore-errors
@@ -604,7 +603,8 @@ Recent history:
 ;; Git commit authoring
 
 (defun agent-shell-prompt-library--create-commit-pre-op (ctx)
-  "Gather git status, diff against HEAD, and recent log history for CTX using Magit/Git."
+  "Gather git status, diff against HEAD, and recent log history for CTX.
+Uses Magit or Git directly to gather state."
   (let* ((args (plist-get ctx :args))
          (files (plist-get args :files))
          (has-files (and (stringp files) (not (string-empty-p files))))
