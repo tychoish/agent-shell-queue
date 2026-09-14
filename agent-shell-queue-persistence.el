@@ -243,8 +243,6 @@ executor resolved from the registry (nil when absent or unknown)."
 
 (defun agent-shell-queue--serialize-json (items)
   "Serialize ITEMS to a JSON string."
-  (unless (fboundp 'json-serialize)
-    (error "json-serialize not available (requires Emacs 27+)"))
   (json-serialize
    (vconcat
     (seq-map (lambda (it)
@@ -254,8 +252,6 @@ executor resolved from the registry (nil when absent or unknown)."
 
 (defun agent-shell-queue--deserialize-json (str)
   "Deserialize STR (JSON format) into an items alist."
-  (unless (fboundp 'json-parse-string)
-    (error "json-parse-string not available (requires Emacs 27+)"))
   (thread-last (json-parse-string str
                                   :object-type 'plist
                                   :array-type 'list

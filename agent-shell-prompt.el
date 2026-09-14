@@ -111,8 +111,6 @@ KEYS is a plist accepting the same keys as `agent-shell-prompt-register'
                 keys)))
     `(agent-shell-prompt-register :id ',id ,@keys)))
 
-(defalias 'agent-shell-prompt-def #'register-agent-shell-prompt)
-
 ;; Argument collection
 
 (defun agent-shell-prompt--arg-key (name)
@@ -323,7 +321,6 @@ Returns nil when START-POS is nil.  Reuses the visibility walker from
   (when (and shell-buffer (buffer-live-p shell-buffer) start-pos)
     (agent-shell-queue--collect-visible-response-text shell-buffer start-pos)))
 
-;;;###autoload
 ;;;###autoload
 (cl-defun agent-shell-prompt-dispatch (id &key args target submit (context-dir default-directory) &allow-other-keys)
   "Instantiate the prompt workflow ID and dispatch it.

@@ -19,8 +19,10 @@
 (require 'subr-x)
 (require 'annotated-completing-read nil t)
 
+(declare-function agent-shell-queue-persistence-request-save "agent-shell-queue-persistence")
+
 (defgroup agent-shell-ask nil
-  "Human-in-the-loop question queue for agent-shell."
+  "Human-in-the-loop question queue for `agent-shell'."
   :group 'agent-shell-queue)
 
 (defface agent-shell-ask-pending-face
@@ -68,6 +70,18 @@
 
 (defvar agent-shell-ask-on-question-answered-functions nil
   "Hook functions called with (QUESTION RESPONSE) when a question is answered.")
+
+(defvar agent-shell-ask-on-question-cancelled-functions nil
+  "Hook functions called with (QUESTION REASON) when a question is cancelled.")
+
+(defun agent-shell-ask--request-persistence-save (&rest _args)
+  "Request queue persistence save if available."
+  (when (fboundp 'agent-shell-queue-persistence-request-save)
+    (agent-shell-queue-persistence-request-save)))
+
+(add-hook 'agent-shell-ask-on-question-created-functions #'agent-shell-ask--request-persistence-save)
+(add-hook 'agent-shell-ask-on-question-answered-functions #'agent-shell-ask--request-persistence-save)
+(add-hook 'agent-shell-ask-on-question-cancelled-functions #'agent-shell-ask--request-persistence-save)
 
 ;;; Question Lifecycle API
 
@@ -120,8 +134,6 @@ Returns the created question struct."
              :metadata metadata)))
     (puthash qid q agent-shell-ask-store)
     (run-hook-with-args 'agent-shell-ask-on-question-created-functions q)
-    (when (fboundp 'agent-shell-queue-persistence-request-save)
-      (funcall 'agent-shell-queue-persistence-request-save))
     q))
 
 (defun agent-shell-ask-get (id)
@@ -190,8 +202,6 @@ Maintains last-seen position and advances the cursor to the returned item."
     (setf (agent-shell-ask-question-answered-at q) (float-time))
     (run-hook-with-args 'agent-shell-ask-on-question-answered-functions q response)
     (agent-shell-ask-execute-followup q response)
-    (when (fboundp 'agent-shell-queue-persistence-request-save)
-      (funcall 'agent-shell-queue-persistence-request-save))
     q))
 
 (defun agent-shell-ask-cancel (id &optional reason)
@@ -201,8 +211,7 @@ Maintains last-seen position and advances the cursor to the returned item."
       (setf (agent-shell-ask-question-status q) 'cancelled)
       (when reason
         (setf (agent-shell-ask-question-response q) (format "Cancelled: %s" reason)))
-      (when (fboundp 'agent-shell-queue-persistence-request-save)
-        (funcall 'agent-shell-queue-persistence-request-save))
+      (run-hook-with-args 'agent-shell-ask-on-question-cancelled-functions q reason)
       q)))
 
 (defun agent-shell-ask-execute-followup (q response)
@@ -236,12 +245,7 @@ Maintains last-seen position and advances the cursor to the returned item."
            (with-current-buffer buf
              (goto-char (point-max))
              (insert text)
-             (when (fboundp 'comint-send-input)
-               (comint-send-input))))))
-      (:sprite
-       (let ((task-spec (plist-get action :task-spec)))
-         (when (fboundp 'sprite-direct)
-           (funcall 'sprite-direct task-spec)))))))
+             (comint-send-input))))))))
 
 ;;; Minibuffer & Interactive UI Widgets
 

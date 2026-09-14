@@ -41,7 +41,7 @@
 ;;; Registry
 
 (ert-deftest agent-shell-prompt/def-registers-spec ()
-  "agent-shell-prompt-def registers a retrievable spec."
+  "register-agent-shell-prompt registers a retrievable spec."
   (asp-test/isolate
    (register-agent-shell-prompt sample
      :doc "A sample prompt"
@@ -54,15 +54,6 @@
      (should (equal (agent-shell-prompt-spec-doc spec) "A sample prompt"))
      (should (equal (agent-shell-prompt-spec-category spec) "Testing"))
      (should (eq (agent-shell-prompt-spec-target spec) :session-reuse)))))
-
-(ert-deftest agent-shell-prompt/def-alias-works ()
-  "agent-shell-prompt-def alias works for backward compatibility."
-  (asp-test/isolate
-   (agent-shell-prompt-def sample-alias
-     :template "test alias")
-   (let ((spec (agent-shell-prompt-get 'sample-alias)))
-     (should spec)
-     (should (equal (agent-shell-prompt-spec-template spec) "test alias")))))
 
 (ert-deftest agent-shell-prompt/def-defaults-category-and-target ()
   "Category defaults to General and target defaults to :ask when omitted."

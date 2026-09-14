@@ -341,7 +341,7 @@ nil BUF-OR-NIL (unassigned) always accepts any kind.  Returns t on success."
 
 (agent-shell-queue--defstruct agent-shell-queue-item
   id
-  (args :alias :prompt)
+  args
   status
   kind
   background
@@ -362,8 +362,8 @@ nil BUF-OR-NIL (unassigned) always accepts any kind.  Returns t on success."
   ;; cloned from; reenqueued-as is a list of IDs created by re-enqueueing this.
   reenqueued-from
   reenqueued-as
-  (delay-before :alias :delay-before-dispatch)
-  (delay-after :alias :delay-after-complete))
+  delay-before
+  delay-after)
 
 (defun agent-shell-queue--item-well-formed-p (item)
   "Return non-nil when ITEM has the minimum shape the queue UI requires.
@@ -1290,7 +1290,7 @@ Affected buffer queues are paused and the queue state is saved."
         (set-visited-file-name nil t)
         (rename-buffer "*agent-shell-queue-disk*" t)
         (pcase (file-name-extension file)
-          ("el" (when (fboundp 'emacs-lisp-mode) (emacs-lisp-mode)))
+          ("el" (emacs-lisp-mode))
           ("json" (when (fboundp 'json-mode) (json-mode)))
           ((or "yaml" "yml") (when (fboundp 'yaml-mode) (yaml-mode))))
         (read-only-mode 1)
@@ -4014,8 +4014,6 @@ Binds p/j/y to switch formats, g to refresh, q to quit."
            (current-buffer))
        (buffer-string)))
     ('json
-     (unless (fboundp 'json-serialize)
-       (user-error "json-serialize not available (requires Emacs 27+)"))
      (with-temp-buffer
        (insert (json-serialize (list :buffer target
                                      :item (agent-shell-queue--item-to-json item))))

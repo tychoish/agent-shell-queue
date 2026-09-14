@@ -1802,20 +1802,9 @@ is void: https://... when the command was invoked on an aborted item."
     (should (eq    (agent-shell-queue-item-background orig) (agent-shell-queue-item-background item)))
     (should (=     (agent-shell-queue-item-created    orig) (agent-shell-queue-item-created    item)))))
 
-(ert-deftest agent-shell-queue/item-from-plist-old-prompt-alias ()
-  "from-plist accepts old-style :prompt key for backward compatibility."
-  (let* ((old-plist (list :id "q-alias" :prompt "backward-compat" :status 'active
-                          :kind 'prompt :background nil :created 1000.0
-                          :dispatched nil :completed nil :response nil :outcome nil
-                          :directory nil))
-         (item (agent-shell-queue-item-from-plist old-plist)))
-    (should (equal "backward-compat" (agent-shell-queue-item-args item)))
-    (should (equal "q-alias" (agent-shell-queue-item-id item)))))
-
 ;;; Serialization: JSON format
 
 (ert-deftest agent-shell-queue/serialize-json-roundtrip ()
-  (skip-unless (fboundp 'json-serialize))
   (agent-shell-queue-test/isolate
     (setf (agent-shell-queue-store-format agent-shell-queue--store) 'json)
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
@@ -1831,7 +1820,6 @@ is void: https://... when the command was invoked on an aborted item."
       (should (agent-shell-queue-item-background item)))))
 
 (ert-deftest agent-shell-queue/serialize-json-status-is-symbol ()
-  (skip-unless (fboundp 'json-serialize))
   (agent-shell-queue-test/isolate
     (setf (agent-shell-queue-store-format agent-shell-queue--store) 'json)
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
@@ -1847,7 +1835,6 @@ is void: https://... when the command was invoked on an aborted item."
 
 (ert-deftest agent-shell-queue/write-archive-appends-jsonl ()
   "Write archive writes a valid JSON line to the file."
-  (skip-unless (fboundp 'json-serialize))
   (let* ((tmp (make-temp-file "asq-archive"))
          (agent-shell-queue-archive-enabled t)
          (agent-shell-queue-archive-file-function (lambda () tmp))
@@ -1886,7 +1873,6 @@ is void: https://... when the command was invoked on an aborted item."
 
 (ert-deftest agent-shell-queue/write-archive-ran-false-when-not-dispatched ()
   "Items never dispatched have :ran false in archive."
-  (skip-unless (fboundp 'json-serialize))
   (let* ((tmp (make-temp-file "asq-archive-ran"))
          (agent-shell-queue-archive-enabled t)
          (agent-shell-queue-archive-file-function (lambda () tmp))
@@ -3074,7 +3060,6 @@ Applies to all capture paths, not just insert-after."
 
 (ert-deftest agent-shell-queue/write-archive-outcome-nil-stored-as-null ()
   "A nil outcome is serialised as JSON null in the archive record."
-  (skip-unless (fboundp 'json-serialize))
   (let* ((tmp (make-temp-file "asq-arch-outcome"))
          (agent-shell-queue-archive-enabled t)
          (agent-shell-queue-archive-file-function (lambda () tmp))
@@ -3096,7 +3081,6 @@ Applies to all capture paths, not just insert-after."
 
 (ert-deftest agent-shell-queue/write-archive-outcome-symbol-stored-as-string ()
   "A symbol outcome is serialised as its name string in the archive record."
-  (skip-unless (fboundp 'json-serialize))
   (let* ((tmp (make-temp-file "asq-arch-outcome-sym"))
          (agent-shell-queue-archive-enabled t)
          (agent-shell-queue-archive-file-function (lambda () tmp))
