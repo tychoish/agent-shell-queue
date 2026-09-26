@@ -27,7 +27,8 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'agent-shell-queue)
+(require 'agent-shell-queue-core)
+(require 'agent-shell-queue-persistence)
 
 
 ;;; SQLite Storage Backend

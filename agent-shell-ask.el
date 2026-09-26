@@ -1,25 +1,28 @@
-;;; agent-shell-ask.el --- Human-in-the-loop question queue for agent-shell -*- lexical-binding: t -*-
+;;; agent-shell-ask.el --- Human-in-the-loop question adapter for agent-shell -*- lexical-binding: t -*-
 
 ;; Author: tycho garen
 ;; Maintainer: tychoish
 ;; Keywords: tools, agent-shell, hitl
-;; Package-Requires: ((emacs "29.1") (agent-shell "0.1") (annotated-completing-read "0.1"))
+;; Package-Requires: ((emacs "29.1") (hitl "0.1.0") (agent-shell "0.1") (annotated-completing-read "0.1"))
 
 ;;; Commentary:
 
-;; Implements a Human-in-the-Loop (HITL) prompt and question queue subsystem
-;; integrated into agent-shell-queue.  Supports single-choice, multi-choice
-;; (via acr-multi), free-text, boolean, file, and form questions with
-;; declarative follow-up actions, cursor-driven queue iteration, MCP tool
-;; exposure, and shell resurrection.
+;; Compatibility adapter providing the legacy `agent-shell-ask' API
+;; backed by the universal `hitl' engine.  All question queuing, lifecycle
+;; tracking, cursor iteration, and interactive prompters delegate to `hitl.el'.
+;; Follow-up actions (:function, :enqueue, :send-shell) and shell resurrection
+;; remain available for agent-shell integration.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'hitl)
 (require 'annotated-completing-read nil t)
 
 (declare-function agent-shell-queue-persistence-request-save "agent-shell-queue-persistence")
+(declare-function agent-shell-queue-enqueue "agent-shell-queue")
+(declare-function comint-send-input "comint")
 
 (defgroup agent-shell-ask nil
   "Human-in-the-loop question queue for `agent-shell'."
@@ -37,41 +40,21 @@
   '((t :foreground "gray50" :slant italic))
   "Face for cancelled or expired human questions.")
 
-;;; Data Structure
+;;; Aliased Store, Cursors & Hooks
 
-(cl-defstruct (agent-shell-ask-question
-               (:constructor agent-shell-ask-question--make)
-               (:copier nil))
-  id              ; String UUID/hash identifier
-  prompt          ; String prompt text shown to user
-  kind            ; Symbol: 'single-choice, 'multi-choice, 'text, 'boolean, 'file, 'form
-  options         ; List of strings or alist of (key . label) or (:key "K" :label "L" :value "V")
-  default-value   ; Default choice or string
-  status          ; Symbol: 'pending, 'answered, 'rejected, 'expired, 'cancelled
-  response        ; Human response payload (string, list of strings, boolean, etc.)
-  target-shell    ; Target buffer name or directory bucket string
-  directory       ; Target default-directory string
-  created         ; Float timestamp
-  answered-at     ; Float timestamp
-  timeout         ; Optional timeout in seconds
-  followup-action ; Plist describing action on answer
-  metadata)       ; Extra key-value metadata plist
+(defvaralias 'agent-shell-ask-store 'hitl--store
+  "Hash table mapping question ID strings to question structs.")
 
-;;; Memory Store & Cursors
-
-(defvar agent-shell-ask-store (make-hash-table :test #'equal)
-  "Hash table mapping question ID strings to `agent-shell-ask-question' structs.")
-
-(defvar agent-shell-ask-cursors (make-hash-table :test #'equal)
+(defvaralias 'agent-shell-ask-cursors 'hitl--cursors
   "Hash table mapping cursor ID strings to last-seen question ID strings.")
 
-(defvar agent-shell-ask-on-question-created-functions nil
+(defvaralias 'agent-shell-ask-on-question-created-functions 'hitl-on-question-created-functions
   "Hook functions called with (QUESTION) when a new question is created.")
 
-(defvar agent-shell-ask-on-question-answered-functions nil
+(defvaralias 'agent-shell-ask-on-question-answered-functions 'hitl-on-question-answered-functions
   "Hook functions called with (QUESTION RESPONSE) when a question is answered.")
 
-(defvar agent-shell-ask-on-question-cancelled-functions nil
+(defvaralias 'agent-shell-ask-on-question-cancelled-functions 'hitl-on-question-cancelled-functions
   "Hook functions called with (QUESTION REASON) when a question is cancelled.")
 
 (defun agent-shell-ask--request-persistence-save (&rest _args)
@@ -83,136 +66,166 @@
 (add-hook 'agent-shell-ask-on-question-answered-functions #'agent-shell-ask--request-persistence-save)
 (add-hook 'agent-shell-ask-on-question-cancelled-functions #'agent-shell-ask--request-persistence-save)
 
+;;; Question Struct Accessors & Setters (Backed by hitl-question)
+
+(defalias 'agent-shell-ask-question-p #'hitl-question-p)
+
+(defsubst agent-shell-ask-question-id (q)
+  (hitl-question-id q))
+(gv-define-setter agent-shell-ask-question-id (v q)
+  `(setf (hitl-question-id ,q) ,v))
+
+(defsubst agent-shell-ask-question-prompt (q)
+  (hitl-question-prompt q))
+(gv-define-setter agent-shell-ask-question-prompt (v q)
+  `(setf (hitl-question-prompt ,q) ,v))
+
+(defsubst agent-shell-ask-question-kind (q)
+  (let ((k (hitl-question-kind q)))
+    (if (keywordp k)
+        (intern (string-remove-prefix ":" (symbol-name k)))
+      k)))
+(gv-define-setter agent-shell-ask-question-kind (v q)
+  `(setf (hitl-question-kind ,q) (hitl--normalize-kind ,v)))
+
+(defsubst agent-shell-ask-question-options (q)
+  (hitl-question-options q))
+(gv-define-setter agent-shell-ask-question-options (v q)
+  `(setf (hitl-question-options ,q) ,v))
+
+(defsubst agent-shell-ask-question-default-value (q)
+  (hitl-question-default-value q))
+(gv-define-setter agent-shell-ask-question-default-value (v q)
+  `(setf (hitl-question-default-value ,q) ,v))
+
+(defsubst agent-shell-ask-question-status (q)
+  (hitl-question-status q))
+(gv-define-setter agent-shell-ask-question-status (v q)
+  `(setf (hitl-question-status ,q) ,v))
+
+(defsubst agent-shell-ask-question-response (q)
+  (hitl-question-response q))
+(gv-define-setter agent-shell-ask-question-response (v q)
+  `(setf (hitl-question-response ,q) ,v))
+
+(defsubst agent-shell-ask-question-target-shell (q)
+  (hitl-question-target q))
+(gv-define-setter agent-shell-ask-question-target-shell (v q)
+  `(setf (hitl-question-target ,q) ,v))
+
+(defsubst agent-shell-ask-question-directory (q)
+  (hitl-question-directory q))
+(gv-define-setter agent-shell-ask-question-directory (v q)
+  `(setf (hitl-question-directory ,q) ,v))
+
+(defsubst agent-shell-ask-question-created (q)
+  (hitl-question-created-at q))
+(gv-define-setter agent-shell-ask-question-created (v q)
+  `(setf (hitl-question-created-at ,q) ,v))
+
+(defsubst agent-shell-ask-question-answered-at (q)
+  (hitl-question-answered-at q))
+(gv-define-setter agent-shell-ask-question-answered-at (v q)
+  `(setf (hitl-question-answered-at ,q) ,v))
+
+(defsubst agent-shell-ask-question-timeout (q)
+  (hitl-question-timeout q))
+(gv-define-setter agent-shell-ask-question-timeout (v q)
+  `(setf (hitl-question-timeout ,q) ,v))
+
+(defsubst agent-shell-ask-question-metadata (q)
+  (hitl-question-metadata q))
+(gv-define-setter agent-shell-ask-question-metadata (v q)
+  `(setf (hitl-question-metadata ,q) ,v))
+
+(defsubst agent-shell-ask-question-followup-action (q)
+  (plist-get (hitl-question-metadata q) :followup-action))
+(gv-define-setter agent-shell-ask-question-followup-action (v q)
+  `(setf (hitl-question-metadata ,q)
+         (plist-put (copy-sequence (hitl-question-metadata ,q))
+                    :followup-action ,v)))
+
+(cl-defun agent-shell-ask-question--make
+    (&key id prompt kind options default-value status response target-shell
+          directory created answered-at timeout followup-action metadata)
+  "Construct a question backed by `hitl-question'."
+  (let ((meta (if followup-action
+                  (plist-put (copy-sequence metadata) :followup-action followup-action)
+                metadata)))
+    (hitl-question--make
+     :id (or id (hitl-generate-id))
+     :prompt prompt
+     :kind (hitl--normalize-kind kind)
+     :options options
+     :default-value default-value
+     :status (or status 'pending)
+     :response response
+     :target target-shell
+     :directory directory
+     :created-at (or created (float-time))
+     :answered-at answered-at
+     :timeout timeout
+     :metadata meta)))
+
 ;;; Question Lifecycle API
 
-(defun agent-shell-ask-generate-id ()
-  "Generate a unique question ID string."
-  (format "ask-%s-%x"
-          (format-time-string "%s")
-          (random #xffff)))
+(defalias 'agent-shell-ask-generate-id #'hitl-generate-id)
 
 (cl-defun agent-shell-ask-create
     (&key prompt (kind 'single-choice) options default-value target-shell
           directory timeout followup-action metadata id)
-  "Create and register a new `agent-shell-ask-question'.
-PROMPT is the prompt text shown to the user.
-KIND is one of `single-choice', `multi-choice', `text', `boolean',
-`file', or `form'.
-OPTIONS is a list of choices or alist.
-DEFAULT-VALUE is the preselected fallback value.
-TARGET-SHELL is the destination shell buffer or name.
-DIRECTORY is the working directory for shell interactions.
-TIMEOUT is an optional lifespan in seconds.
-FOLLOWUP-ACTION is an action plist triggered on answer.
-METADATA is an optional metadata plist.
-ID optionally overrides the generated question ID.
-Returns the created question struct."
-  (let* ((qid (or id (agent-shell-ask-generate-id)))
+  "Create and register a new question delegating to `hitl-ask'."
+  (let* ((shell-name (when target-shell
+                       (if (bufferp target-shell)
+                           (buffer-name target-shell)
+                         target-shell)))
          (dir (or directory
                   (when target-shell
                     (ignore-errors
                       (with-current-buffer target-shell default-directory)))
                   default-directory))
-         (shell-name (when target-shell
-                       (if (bufferp target-shell)
-                           (buffer-name target-shell)
-                         target-shell)))
-         (q (agent-shell-ask-question--make
-             :id qid
+         (meta (if followup-action
+                   (plist-put (copy-sequence metadata) :followup-action followup-action)
+                 metadata))
+         (q (hitl-ask
+             :id id
              :prompt prompt
-             :kind kind
+             :kind (hitl--normalize-kind kind)
              :options options
              :default-value default-value
-             :status 'pending
-             :response nil
-             :target-shell shell-name
+             :target shell-name
              :directory dir
-             :created (float-time)
-             :answered-at nil
              :timeout timeout
-             :followup-action followup-action
-             :metadata metadata)))
-    (puthash qid q agent-shell-ask-store)
-    (run-hook-with-args 'agent-shell-ask-on-question-created-functions q)
+             :metadata meta)))
     q))
 
-(defun agent-shell-ask-get (id)
-  "Retrieve question by ID."
-  (gethash id agent-shell-ask-store))
+(defalias 'agent-shell-ask-get #'hitl-get)
 
 (defun agent-shell-ask-list-pending (&optional target-shell)
-  "List all pending `agent-shell-ask-question' structs.
-When TARGET-SHELL is non-nil, only questions targeting that shell are returned."
-  (let ((items nil))
-    (maphash
-     (lambda (_id q)
-       (when (and (eq (agent-shell-ask-question-status q) 'pending)
-                  (or (null target-shell)
-                      (equal (agent-shell-ask-question-target-shell q) target-shell)))
-         (push q items)))
-     agent-shell-ask-store)
-    (sort items (lambda (a b) (< (agent-shell-ask-question-created a)
-                                (agent-shell-ask-question-created b))))))
+  "List pending questions, optionally filtered by TARGET-SHELL."
+  (hitl-list-pending target-shell))
 
-(defun agent-shell-ask-list-all ()
-  "List all `agent-shell-ask-question' structs in chronological order."
-  (let ((items nil))
-    (maphash (lambda (_id q) (push q items)) agent-shell-ask-store)
-    (sort items (lambda (a b) (< (agent-shell-ask-question-created a)
-                                (agent-shell-ask-question-created b))))))
+(defalias 'agent-shell-ask-list-all #'hitl-list-all)
 
-;;; Cursor-driven Queue Iteration
+;;; Cursor Iteration
 
 (defun agent-shell-ask-cursor-next (&optional cursor-id target-shell)
-  "Return the next pending `agent-shell-ask-question' for CURSOR-ID.
-If CURSOR-ID is nil, defaults to \"default\".
-When TARGET-SHELL is non-nil, filter pending questions to that shell.
-Maintains last-seen position and advances the cursor to the returned item."
-  (let* ((cid (or cursor-id "default"))
-         (last-id (gethash cid agent-shell-ask-cursors))
-         (pending (agent-shell-ask-list-pending target-shell))
-         (next-q (cond
-                  ((null pending) nil)
-                  ((null last-id) (car pending))
-                  (t
-                   ;; Find the first item after last-id, or wrap around to the first item
-                   (let ((tail (member (agent-shell-ask-get last-id) pending)))
-                     (if (and tail (cdr tail))
-                         (cadr tail)
-                       (car pending)))))))
-    (when next-q
-      (puthash cid (agent-shell-ask-question-id next-q) agent-shell-ask-cursors))
-    next-q))
+  "Return next pending question for CURSOR-ID delegating to `hitl-cursor-next'."
+  (hitl-cursor-next cursor-id target-shell))
 
-(defun agent-shell-ask-cursor-reset (&optional cursor-id)
-  "Reset cursor CURSOR-ID."
-  (remhash (or cursor-id "default") agent-shell-ask-cursors))
+(defalias 'agent-shell-ask-cursor-reset #'hitl-cursor-reset)
 
-;;; Answering & Follow-up Dispatch
+;;; Shell Resurrection & Follow-up Execution
 
-(defun agent-shell-ask-answer (id response)
-  "Mark question ID as answered with RESPONSE payload and trigger follow-up action."
-  (let ((q (agent-shell-ask-get id)))
-    (unless q
-      (user-error "Question %s not found" id))
-    (unless (eq (agent-shell-ask-question-status q) 'pending)
-      (user-error "Question %s is not pending (status: %s)" id (agent-shell-ask-question-status q)))
-    (setf (agent-shell-ask-question-status q) 'answered)
-    (setf (agent-shell-ask-question-response q) response)
-    (setf (agent-shell-ask-question-answered-at q) (float-time))
-    (run-hook-with-args 'agent-shell-ask-on-question-answered-functions q response)
-    (agent-shell-ask-execute-followup q response)
-    q))
-
-(defun agent-shell-ask-cancel (id &optional reason)
-  "Mark question ID as cancelled with optional REASON."
-  (let ((q (agent-shell-ask-get id)))
-    (when q
-      (setf (agent-shell-ask-question-status q) 'cancelled)
-      (when reason
-        (setf (agent-shell-ask-question-response q) (format "Cancelled: %s" reason)))
-      (run-hook-with-args 'agent-shell-ask-on-question-cancelled-functions q reason)
-      q)))
+(defun agent-shell-queue--resurrect-shell (shell-name &optional default-dir)
+  "Return a live buffer for SHELL-NAME, resurrecting it via `agent-shell' if dead.
+DEFAULT-DIR, when provided, sets `default-directory' in the spawned shell."
+  (let ((buf (when shell-name (get-buffer shell-name))))
+    (if (and buf (buffer-live-p buf))
+        buf
+      (when (fboundp 'agent-shell-new-shell)
+        (let ((default-directory (or default-dir default-directory)))
+          (agent-shell-new-shell))))))
 
 (defun agent-shell-ask-execute-followup (q response)
   "Execute post-answer follow-up action for question Q with RESPONSE."
@@ -220,10 +233,8 @@ Maintains last-seen position and advances the cursor to the returned item."
               (type (plist-get action :type)))
     (pcase type
       (:function
-       (let ((fn (plist-get action :function))
-             (args (plist-get action :args)))
-         (when (fboundp fn)
-           (apply fn response args))))
+       (when-let* ((fn (plist-get action :function)))
+         (funcall fn response q)))
       (:enqueue
        (let ((prompt-fmt (plist-get action :prompt))
              (bucket (plist-get action :bucket))
@@ -247,52 +258,18 @@ Maintains last-seen position and advances the cursor to the returned item."
              (insert text)
              (comint-send-input))))))))
 
+(defun agent-shell-ask-answer (id response)
+  "Mark question ID as answered with RESPONSE payload and trigger follow-up action."
+  (let ((q (hitl-answer id response)))
+    (agent-shell-ask-execute-followup q response)
+    q))
+
+(defalias 'agent-shell-ask-cancel #'hitl-cancel)
+
 ;;; Minibuffer & Interactive UI Widgets
 
-(defun agent-shell-ask-prompt-question (q)
-  "Prompt the user interactively for question Q and return response."
-  (let* ((kind (agent-shell-ask-question-kind q))
-         (prompt (format "[HITL Question] %s " (agent-shell-ask-question-prompt q)))
-         (options (agent-shell-ask-question-options q))
-         (def (agent-shell-ask-question-default-value q)))
-    (pcase kind
-      ('boolean
-       (y-or-n-p prompt))
-      ('single-choice
-       (if (and (fboundp 'annotated-completing-read) options)
-           (annotated-completing-read options :prompt prompt :default def)
-         (completing-read prompt options nil t nil nil def)))
-      ('multi-choice
-       (if (and (fboundp 'annotated-completing-read) options)
-           (annotated-completing-read options :prompt prompt :multiple t :default def)
-         (completing-read-multiple prompt options nil t nil nil def)))
-      ('file
-       (read-file-name prompt (or def default-directory)))
-      (_
-       (read-string prompt def)))))
-
-(defun agent-shell-ask-prompt (&optional question-id)
-  "Interactively prompt user to answer a pending question.
-If QUESTION-ID is provided, answer that question; otherwise select from pending."
-  (interactive)
-  (let* ((pending (unless question-id (agent-shell-ask-list-pending)))
-         (q (cond
-             (question-id (agent-shell-ask-get question-id))
-             ((null pending) (user-error "No pending HITL questions"))
-             ((= (length pending) 1) (car pending))
-             (t
-              (let* ((table (mapcar (lambda (item)
-                                      (cons (format "[%s] %s"
-                                                    (agent-shell-ask-question-id item)
-                                                    (agent-shell-ask-question-prompt item))
-                                            item))
-                                    pending))
-                     (choice (completing-read "Select question to answer: " table nil t)))
-                (cdr (assoc choice table)))))))
-    (when q
-      (let ((resp (agent-shell-ask-prompt-question q)))
-        (agent-shell-ask-answer (agent-shell-ask-question-id q) resp)
-        (message "Question %s answered." (agent-shell-ask-question-id q))))))
+(defalias 'agent-shell-ask-prompt-question #'hitl-prompt-question)
+(defalias 'agent-shell-ask-prompt #'hitl-prompt)
 
 ;;; Tabulated List Buffer UI (*agent-shell-ask*)
 
@@ -399,10 +376,10 @@ If QUESTION-ID is provided, answer that question; otherwise select from pending.
 
 (defun agent-shell-ask-deserialize-store (data)
   "Populate question store from list of question plists DATA."
-  (clrhash agent-shell-ask-store)
+  (hitl-clear-store)
   (dolist (item data)
     (let ((q (agent-shell-ask-question-from-plist item)))
-      (puthash (agent-shell-ask-question-id q) q agent-shell-ask-store))))
+      (puthash (agent-shell-ask-question-id q) q hitl--store))))
 
 (provide 'agent-shell-ask)
 

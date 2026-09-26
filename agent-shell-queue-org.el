@@ -28,6 +28,7 @@
 ;;; Code:
 
 (require 'seq)
+(require 'agent-shell-queue-core)
 (require 'agent-shell-queue-persistence)
 (require 'org-macs)
 (require 'org)

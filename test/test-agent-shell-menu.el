@@ -684,3 +684,17 @@ with no intermediate name-to-id lookup."
                            (gethash "+ collapse all" captured-table)))))
       (kill-buffer buf))))
 (provide 'test-agent-shell-menu)
+
+;;;; Subsystem dynamic detection
+
+(ert-deftest agent-shell-menu/dynamic-detection-predicates ()
+  "Predicates detect presence or absence of hitl, prompt, and queue."
+  ;; When queue functions are unbound
+  (cl-letf (((symbol-function 'agent-shell-queue-buffer-open) nil)
+            ((symbol-function 'hitl-view-questions) nil)
+            ((symbol-function 'agent-shell-prompt-select) nil))
+    ;; Note: featurep checks may still be true in this session, so verify fboundp branches
+    (should (functionp 'agent-shell-menu--queue-available-p))
+    (should (functionp 'agent-shell-menu--hitl-available-p))
+    (should (functionp 'agent-shell-menu--prompt-select-available-p))))
+

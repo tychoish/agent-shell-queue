@@ -37,7 +37,49 @@
 (require 'transient)
 (require 'sprite-future nil t)
 (require 'agent-shell)
-(require 'agent-shell-queue)
+(require 'agent-shell-queue nil t)
+(require 'agent-shell-prompt nil t)
+(require 'hitl nil t)
+
+(defvar agent-shell-queue-input-mode-default)
+
+(declare-function hitl-view-questions "hitl-ui")
+(declare-function agent-shell-prompt-select "agent-shell-prompt")
+(declare-function agent-shell-queue-buffer-open "agent-shell-queue-ui")
+(declare-function agent-shell-queue-buffer-switch "agent-shell-queue-ui")
+(declare-function agent-shell-queue-enqueue "agent-shell-queue-ui")
+(declare-function agent-shell-queue-edit-task "agent-shell-queue-ui")
+(declare-function agent-shell-queue-pause "agent-shell-queue-core")
+(declare-function agent-shell-queue-resume "agent-shell-queue-core")
+(declare-function agent-shell-queue-unpause-all-sessions "agent-shell-queue-core")
+(declare-function agent-shell-queue-capture "agent-shell-queue-ui")
+(declare-function agent-shell-queue-capture-unassigned "agent-shell-queue-ui")
+(declare-function agent-shell-queue-capture-from-region "agent-shell-queue-ui")
+(declare-function agent-shell-queue-capture-from-clipboard "agent-shell-queue-ui")
+(declare-function agent-shell-queue-capture-from-context "agent-shell-queue-ui")
+(declare-function agent-shell-queue-session-pause "agent-shell-queue-core")
+(declare-function agent-shell-queue-session-resume "agent-shell-queue-core")
+(declare-function agent-shell-queue-session-paused-p "agent-shell-queue-core")
+(declare-function agent-shell-queue-toggle-input-mode "agent-shell-queue-ui")
+(declare-function agent-shell-queue-input-mode-value "agent-shell-queue-ui")
+(declare-function agent-shell-queue-reset-all-input-modes "agent-shell-queue-ui")
+(declare-function agent-shell-queue-set-input-mode-default "agent-shell-queue-ui")
+(declare-function agent-shell-queue-interject "agent-shell-queue-ui")
+(declare-function agent-shell-queue-interject-available-p "agent-shell-queue-ui")
+(declare-function agent-shell-queue-interjection-send "agent-shell-queue-ui")
+(declare-function agent-shell-queue-interjection-close "agent-shell-queue-ui")
+(declare-function agent-shell-queue-fork-session "agent-shell-queue-core")
+(declare-function agent-shell-queue-insert-fork-before "agent-shell-queue-ui")
+(declare-function agent-shell-queue-insert-fork-after "agent-shell-queue-ui")
+(declare-function agent-shell-queue-release-pending-fork "agent-shell-queue-ui")
+(declare-function agent-shell-queue-enqueue-emacs "agent-shell-queue-ui")
+(declare-function agent-shell-queue-enqueue-emacs-command "agent-shell-queue-ui")
+(declare-function agent-shell-queue-enqueue-shell-eshell "agent-shell-queue-ui")
+(declare-function agent-shell-queue-enqueue-shell-eat "agent-shell-queue-ui")
+(declare-function agent-shell-queue-insert-pause "agent-shell-queue-core")
+(declare-function agent-shell-queue-insert-clear-context "agent-shell-queue-core")
+(declare-function agent-shell-queue-insert-compact "agent-shell-queue-core")
+(declare-function agent-shell-queue-insert-wait "agent-shell-queue-core")
 (declare-function agent-shell-viewport--shell-buffer "agent-shell-viewport")
 (declare-function agent-shell-ui--toggle-fragment-at-point "agent-shell-ui")
 (declare-function agent-shell--config-icon "agent-shell")
@@ -725,9 +767,27 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
 (defun agent-shell-menu--prompt-select-available-p ()
   "Return non-nil when `agent-shell-prompt-select' is available."
   (fboundp 'agent-shell-prompt-select))
+
+(defun agent-shell-menu--queue-available-p ()
+  "Return non-nil when `agent-shell-queue' is loaded."
+  (or (featurep 'agent-shell-queue)
+      (featurep 'agent-shell-queue-ui)
+      (fboundp 'agent-shell-queue-buffer-open)))
+
+(defun agent-shell-menu--hitl-available-p ()
+  "Return non-nil when `hitl' is loaded."
+  (or (featurep 'hitl)
+      (fboundp 'hitl-view-questions)))
+
+(defun agent-shell-menu--interject-available-p ()
+  "Return non-nil when queue interjection is available."
+  (and (fboundp 'agent-shell-queue-interject-available-p)
+       (agent-shell-queue-interject-available-p)))
+
 (defun agent-shell-menu--interjection-p ()
   "Return non-nil when in an active interjection buffer."
-  (derived-mode-p 'agent-shell-queue-interjection-mode))
+  (and (fboundp 'agent-shell-queue-interjection-mode)
+       (derived-mode-p 'agent-shell-queue-interjection-mode)))
 
 (defun agent-shell-menu--session-shell-buffer ()
   "Return the agent-shell buffer for the current window context.
@@ -806,9 +866,12 @@ Keys are assigned as 1, 2, 3… in button order."
     ("ac" "Command menu" agent-shell-menu-select-command)
     ("ap" "Prompt library" agent-shell-prompt-select
      :if agent-shell-menu--prompt-select-available-p)
+    ("hq" "HITL questions" hitl-view-questions
+     :if agent-shell-menu--hitl-available-p)
     ("ax" "Collapse menu" agent-shell-menu-select-collapse)
     ("ij" "Interject" agent-shell-queue-interject
-     :inapt-if-not agent-shell-queue-interject-available-p)
+     :if agent-shell-menu--queue-available-p
+     :inapt-if-not agent-shell-menu--interject-available-p)
     ("is" "Send interjection" agent-shell-queue-interjection-send
      :if agent-shell-menu--interjection-p)
     ("ic" "Close/Abort interjection" agent-shell-queue-interjection-close
@@ -822,10 +885,14 @@ Keys are assigned as 1, 2, 3… in button order."
    ["Fork" :if agent-shell-menu--in-session-p
     ("ff" "Fork session" agent-shell-fork)
     ("fo" "Other (project)" agent-shell-menu-switch-project-session)
-    ("fq" "Fork queue" agent-shell-queue-fork-session)
-    ("fb" "Insert fork before" agent-shell-queue-insert-fork-before)
-    ("fa" "Insert fork after" agent-shell-queue-insert-fork-after)
-    ("fr" "Release pending fork" agent-shell-queue-release-pending-fork)]]
+    ("fq" "Fork queue" agent-shell-queue-fork-session
+     :if agent-shell-menu--queue-available-p)
+    ("fb" "Insert fork before" agent-shell-queue-insert-fork-before
+     :if agent-shell-menu--queue-available-p)
+    ("fa" "Insert fork after" agent-shell-queue-insert-fork-after
+     :if agent-shell-menu--queue-available-p)
+    ("fr" "Release pending fork" agent-shell-queue-release-pending-fork
+     :if agent-shell-menu--queue-available-p)]]
   ;; Queue row: global queue ops, intercept config, and capture
   [["Send"
     ("wb" "Send buffer" agent-shell-menu-send-buffer)
@@ -835,7 +902,7 @@ Keys are assigned as 1, 2, 3… in button order."
     ("wc" "Send screenshot to…" agent-shell-send-screenshot-to)
     ("wi" "Send clipboard image to…" agent-shell-send-clipboard-image-to)
     ("ws" "Send dwim" agent-shell-send-dwim)]
-   ["Queue"
+   ["Queue" :if agent-shell-menu--queue-available-p
     ("qq" "Open queue" agent-shell-queue-buffer-open)
     ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
     ("qe" "Enqueue" agent-shell-queue-enqueue)
@@ -843,25 +910,30 @@ Keys are assigned as 1, 2, 3… in button order."
     ("qp" "Suspend all dispatch" agent-shell-queue-pause)
     ("qr" "Resume all dispatch" agent-shell-queue-resume)
     ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
-   ["Capture"
+   ["Capture" :if agent-shell-menu--queue-available-p
     ("cw" "Compose (write)" agent-shell-queue-capture)
     ("cu" "Unassigned" agent-shell-queue-capture-unassigned)
     ("cr" "From region" agent-shell-queue-capture-from-region)
     ("cy" "From clipboard" agent-shell-queue-capture-from-clipboard)
     ("cc" "From context" agent-shell-queue-capture-from-context)]
   ;; Per-session queue controls
-   ["Session Queue" :if agent-shell-menu--in-session-p
+   ["Session Queue" :if (lambda () (and (agent-shell-menu--in-session-p)
+                                        (agent-shell-menu--queue-available-p)))
     ("qsp" "Suspend this session" agent-shell-queue-session-pause
      :inapt-if agent-shell-queue-session-paused-p)
     ("qsr" "Resume this session" agent-shell-queue-session-resume
      :inapt-if-not agent-shell-queue-session-paused-p)
     ("qim" agent-shell-queue-toggle-input-mode
      :description (lambda ()
-                    (format "Input mode: [%s]" (agent-shell-queue-input-mode-value))))
+                    (format "Input mode: [%s]"
+                            (if (fboundp 'agent-shell-queue-input-mode-value)
+                                (agent-shell-queue-input-mode-value)
+                              "default"))))
     ("qix" "Reset all to default" agent-shell-queue-reset-all-input-modes)
     ("qid" agent-shell-queue-set-input-mode-default
      :description (lambda ()
-                    (format "Default: [%s]" agent-shell-queue-input-mode-default))
+                    (format "Default: [%s]"
+                            (bound-and-true-p agent-shell-queue-input-mode-default)))
      :if agent-shell-menu--in-shell-p)]
    ])
 
