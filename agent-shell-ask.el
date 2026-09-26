@@ -9,7 +9,7 @@
 
 ;; Compatibility adapter providing the legacy `agent-shell-ask' API
 ;; backed by the universal `hitl' engine.  All question queuing, lifecycle
-;; tracking, cursor iteration, and interactive prompters delegate to `hitl.el'.
+;; tracking, cursor iteration, and interactive prompters delegate to `hitl`.
 ;; Follow-up actions (:function, :enqueue, :send-shell) and shell resurrection
 ;; remain available for agent-shell integration.
 
