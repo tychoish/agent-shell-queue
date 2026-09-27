@@ -23,6 +23,9 @@
 (require 'agent-shell-queue-core)
 (require 'agent-shell-queue-ui)
 
+(autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
+  "Global minor mode to route inbuilt agent-shell prompt queue into agent-shell-queue." t)
+
 (provide 'agent-shell-queue)
 
 ;;; agent-shell-queue.el ends here
