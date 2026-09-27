@@ -29,6 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Lint Source Code
+        uses: tychoish/elisp-ci/lint@v0.1.0
+        with:
+          fail-on-warning: "false"
+
       - name: Run Tests
         uses: tychoish/elisp-ci@v0.1.0
         with:
