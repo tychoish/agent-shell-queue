@@ -38,13 +38,13 @@
 (require 'sprite-future nil t)
 (require 'agent-shell)
 (require 'agent-shell-queue nil t)
-(require 'agent-shell-prompt nil t)
+(require 'agent-shell-workflow nil t)
 (require 'hitl nil t)
 
 (defvar agent-shell-queue-input-mode-default)
 
 (declare-function hitl-view-questions "hitl-ui")
-(declare-function agent-shell-prompt-select "agent-shell-prompt")
+(declare-function agent-shell-workflow-select "agent-shell-workflow-menu")
 (declare-function agent-shell-queue-buffer-open "agent-shell-queue-ui")
 (declare-function agent-shell-queue-buffer-switch "agent-shell-queue-ui")
 (declare-function agent-shell-queue-enqueue "agent-shell-queue-ui")
@@ -764,9 +764,9 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
 (defun agent-shell-menu--agent-review-available-p ()
   "Return non-nil when `agent-review' is loaded."
   (featurep 'agent-review))
-(defun agent-shell-menu--prompt-select-available-p ()
-  "Return non-nil when `agent-shell-prompt-select' is available."
-  (fboundp 'agent-shell-prompt-select))
+(defun agent-shell-menu--workflow-select-available-p ()
+  "Return non-nil when `agent-shell-workflow-select' is available."
+  (fboundp 'agent-shell-workflow-select))
 
 (defun agent-shell-menu--queue-available-p ()
   "Return non-nil when `agent-shell-queue' is loaded."
@@ -864,8 +864,8 @@ Keys are assigned as 1, 2, 3… in button order."
     ("ai" "Interrupt" agent-shell-interrupt)
     ("ar" "Resolve permission" agent-shell-menu-resolve-permission)
     ("ac" "Command menu" agent-shell-menu-select-command)
-    ("ap" "Prompt library" agent-shell-prompt-select
-     :if agent-shell-menu--prompt-select-available-p)
+    ("ap" "Workflows" agent-shell-workflow-select
+     :if agent-shell-menu--workflow-select-available-p)
     ("hq" "HITL questions" hitl-view-questions
      :if agent-shell-menu--hitl-available-p)
     ("ax" "Collapse menu" agent-shell-menu-select-collapse)

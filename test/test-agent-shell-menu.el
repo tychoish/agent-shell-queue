@@ -692,9 +692,9 @@ with no intermediate name-to-id lookup."
   ;; When queue functions are unbound
   (cl-letf (((symbol-function 'agent-shell-queue-buffer-open) nil)
             ((symbol-function 'hitl-view-questions) nil)
-            ((symbol-function 'agent-shell-prompt-select) nil))
+            ((symbol-function 'agent-shell-workflow-select) nil))
     ;; Note: featurep checks may still be true in this session, so verify fboundp branches
     (should (functionp 'agent-shell-menu--queue-available-p))
     (should (functionp 'agent-shell-menu--hitl-available-p))
-    (should (functionp 'agent-shell-menu--prompt-select-available-p))))
+    (should (functionp 'agent-shell-menu--workflow-select-available-p))))
 

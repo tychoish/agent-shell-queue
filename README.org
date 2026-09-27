@@ -93,18 +93,11 @@ Below is an example ~use-package~ configuration block mirroring typical producti
   :after agent-shell
   :defer t
   :commands (agent-shell-queue-buffer-open
-             agent-shell-queue-capture
-             agent-shell-prompt-menu
-             agent-shell-prompt-select
-             agent-shell-prompt-dispatch)
+             agent-shell-queue-capture)
   :bind (("C-c q q" . agent-shell-queue-buffer-open)
          ("C-c q c" . agent-shell-queue-capture)
          ("C-c q m" . agent-shell-menu-dispatch))
   :config
-  ;; Load prompt extensions
-  (require 'agent-shell-prompt)
-  (require 'agent-shell-prompt-menu)
-  (require 'agent-shell-prompt-library)
   (require 'agent-shell-queue-org)
 
   ;; Serialization format ('org, 'json, 'yaml, or 'plist)
