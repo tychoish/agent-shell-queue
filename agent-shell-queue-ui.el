@@ -5,7 +5,7 @@
 ;; Keywords: tools, agent-shell
 ;; Version: 0.1.0
 ;; URL: https://github.com/tychoish/agent-shell-queue
-;; Package-Requires: ((emacs "29.1") (agent-shell "0.1") (agent-shell-queue-core "0.1.0") (transient "0.4.0") (annotated-completing-read "0.1"))
+;; Package-Requires: ((emacs "29.1") (agent-shell "0.1") (transient "0.4.0") (annotated-completing-read "0.1"))
 
 ;;; Commentary:
 
@@ -16,6 +16,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'tabulated-list)
 (require 'agent-shell-queue-core)
 (require 'transient nil t)

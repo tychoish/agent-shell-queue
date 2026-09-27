@@ -17,6 +17,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'sprite-future nil t)
 (require 'agent-shell)
 (require 'alert nil t)
