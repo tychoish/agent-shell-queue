@@ -17,7 +17,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(defvar hitl--store)
 (require 'hitl nil t)
 (require 'annotated-completing-read nil t)
 
