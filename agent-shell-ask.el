@@ -42,11 +42,11 @@
 
 ;;; Aliased Store, Cursors & Hooks
 
-(defvaralias 'agent-shell-ask-store 'hitl--store
-  "Hash table mapping question ID strings to question structs.")
+(defvar agent-shell-ask-store nil
+  "Legacy variable for backward compatibility; storage is managed by `hitl'.")
 
-(defvaralias 'agent-shell-ask-cursors 'hitl--cursors
-  "Hash table mapping cursor ID strings to last-seen question ID strings.")
+(defvar agent-shell-ask-cursors nil
+  "Legacy variable for backward compatibility; cursors are managed by `hitl'.")
 
 (defvaralias 'agent-shell-ask-on-question-created-functions 'hitl-on-question-created-functions
   "Hook functions called with (QUESTION) when a new question is created.")
@@ -86,7 +86,10 @@
         (intern (string-remove-prefix ":" (symbol-name k)))
       k)))
 (gv-define-setter agent-shell-ask-question-kind (v q)
-  `(setf (hitl-question-kind ,q) (hitl--normalize-kind ,v)))
+  `(setf (hitl-question-kind ,q)
+         (if (keywordp ,v)
+             ,v
+           (intern (format ":%s" (string-remove-prefix ":" (symbol-name ,v)))))))
 
 (defsubst agent-shell-ask-question-options (q)
   (hitl-question-options q))
@@ -155,7 +158,7 @@
     (hitl-question--make
      :id (or id (hitl-generate-id))
      :prompt prompt
-     :kind (hitl--normalize-kind kind)
+     :kind (if (keywordp kind) kind (intern (format ":%s" (string-remove-prefix ":" (symbol-name kind)))))
      :options options
      :default-value default-value
      :status (or status 'pending)
@@ -190,7 +193,7 @@
          (q (hitl-ask
              :id id
              :prompt prompt
-             :kind (hitl--normalize-kind kind)
+             :kind kind
              :options options
              :default-value default-value
              :target shell-name
@@ -379,7 +382,15 @@ DEFAULT-DIR, when provided, sets `default-directory' in the spawned shell."
   (hitl-clear-store)
   (dolist (item data)
     (let ((q (agent-shell-ask-question-from-plist item)))
-      (puthash (agent-shell-ask-question-id q) q hitl--store))))
+      (hitl-ask :id (agent-shell-ask-question-id q)
+                :prompt (agent-shell-ask-question-prompt q)
+                :kind (agent-shell-ask-question-kind q)
+                :options (agent-shell-ask-question-options q)
+                :default-value (agent-shell-ask-question-default-value q)
+                :target (agent-shell-ask-question-target-shell q)
+                :directory (agent-shell-ask-question-directory q)
+                :timeout (agent-shell-ask-question-timeout q)
+                :metadata (agent-shell-ask-question-metadata q)))))
 
 (provide 'agent-shell-ask)
 

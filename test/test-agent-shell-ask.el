@@ -1,3 +1,4 @@
+(require 'hitl nil t)
 ;;; test-agent-shell-ask.el --- ERT unit tests for agent-shell-ask -*- lexical-binding: t; -*-\n
 (require 'ert)
 (require 'cl-lib)
@@ -11,7 +12,7 @@
 
 (ert-deftest agent-shell-ask-test-create-and-get ()
   "Test creating and retrieving questions in agent-shell-ask store."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q (agent-shell-ask-create
               :prompt "Proceed with deployment?"
               :kind 'boolean
@@ -23,8 +24,7 @@
 
 (ert-deftest agent-shell-ask-test-cursor-iteration ()
   "Test cursor-driven queue iteration (agent-shell-ask-cursor-next)."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal))
-        (agent-shell-ask-cursors (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q1 (agent-shell-ask-create :prompt "Question 1" :id "q1"))
           (q2 (agent-shell-ask-create :prompt "Question 2" :id "q2")))
       ;; First cursor call should yield q1
@@ -44,8 +44,8 @@
 
 (ert-deftest agent-shell-ask-test-answering-and-followup ()
   "Test answering a question and executing follow-up function callback."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal))
-        (called-arg nil))
+  (let ((called-arg nil))
+    (when (fboundp 'hitl-clear-store) (hitl-clear-store))
     (defalias 'test-ask-callback (lambda (resp &rest _args) (setq called-arg resp)))
     (let ((q (agent-shell-ask-create
               :prompt "Choose target:"
@@ -60,7 +60,7 @@
 
 (ert-deftest agent-shell-ask-test-multi-choice-support ()
   "Test multi-choice question kind and response handling."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q (agent-shell-ask-create
               :prompt "Select features to enable:"
               :kind 'multi-choice
@@ -72,12 +72,12 @@
 
 (ert-deftest agent-shell-ask-test-serialization ()
   "Test question store serialization and deserialization."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (agent-shell-ask-create :prompt "P1" :id "q1" :kind 'text)
     (agent-shell-ask-create :prompt "P2" :id "q2" :kind 'boolean)
     (let ((serialized (agent-shell-ask-serialize-store)))
       (should (= (length serialized) 2))
-      (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+      (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
         (agent-shell-ask-deserialize-store serialized)
         (should (agent-shell-ask-get "q1"))
         (should (agent-shell-ask-get "q2"))
@@ -94,7 +94,7 @@
 
 (ert-deftest agent-shell-ask-test-cancel ()
   "Test cancelling a question marks its status as cancelled."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q (agent-shell-ask-create :prompt "Cancel me" :id "q-cancel")))
       (should (eq (agent-shell-ask-question-status q) 'pending))
       (agent-shell-ask-cancel "q-cancel" "user requested abort")
@@ -105,7 +105,7 @@
 
 (ert-deftest agent-shell-ask-test-pending-and-list-filtering ()
   "Test listing questions and filtering pending questions by target shell."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q1 (agent-shell-ask-create :prompt "Q1" :id "q1" :target-shell "shell-a"))
           (q2 (agent-shell-ask-create :prompt "Q2" :id "q2" :target-shell "shell-b"))
           (q3 (agent-shell-ask-create :prompt "Q3" :id "q3" :target-shell "shell-a")))
@@ -119,8 +119,8 @@
 
 (ert-deftest agent-shell-ask-test-followup-dispatch-and-enqueue ()
   "Test followup actions for :enqueue."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal))
-        enqueued-args)
+  (let (enqueued-args)
+    (when (fboundp 'hitl-clear-store) (hitl-clear-store))
     (cl-letf (((symbol-function 'agent-shell-queue-enqueue)
                (lambda (prompt &rest rest)
                  (setq enqueued-args (cons prompt rest)))))
@@ -136,7 +136,7 @@
 
 (ert-deftest agent-shell-ask-test-prompt-interactive-boolean ()
   "Test agent-shell-ask-prompt for boolean questions."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q (agent-shell-ask-create :prompt "Confirm?" :kind 'boolean :id "q-bool")))
       (cl-letf (((symbol-function 'y-or-n-p) (lambda (_prompt) t)))
         (should (eq (agent-shell-ask-prompt-question q) t))
@@ -146,7 +146,7 @@
 
 (ert-deftest agent-shell-ask-test-prompt-interactive-text ()
   "Test agent-shell-ask-prompt for text questions."
-  (let ((agent-shell-ask-store (make-hash-table :test #'equal)))
+  (progn (when (fboundp 'hitl-clear-store) (hitl-clear-store)) (when (fboundp 'hitl-cursor-reset) (hitl-cursor-reset "c1") (hitl-cursor-reset "c2"))
     (let ((q (agent-shell-ask-create :prompt "Enter name:" :kind 'text :id "q-text")))
       (cl-letf (((symbol-function 'read-string) (lambda (_prompt &optional def) (or def "Alice"))))
         (should (equal (agent-shell-ask-prompt-question q) "Alice"))
