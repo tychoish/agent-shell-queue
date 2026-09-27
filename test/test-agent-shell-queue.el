@@ -2132,10 +2132,13 @@ is void: https://... when the command was invoked on an aborted item."
             (setf (agent-shell-queue-store-items agent-shell-queue--store)
                   (list (list (buffer-name buf)
                               (agent-shell-queue-test/make-item "q-live" "hello" 'active nil))))
-            (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-live"))
-                      ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
-              (agent-shell-queue-buffer-open-shell)
-              (should (eq popped buf))))
+            (with-temp-buffer
+              (insert "dummy")
+              (put-text-property (point-min) (point-max) 'tabulated-list-id "q-live")
+              (goto-char (point-min))
+              (cl-letf (((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
+                (agent-shell-queue-buffer-open-shell)
+                (should (eq popped buf)))))
         (kill-buffer buf)))))
 
 (ert-deftest agent-shell-queue/buffer-open-shell-errors-when-dead-no-create ()
@@ -2143,9 +2146,12 @@ is void: https://... when the command was invoked on an aborted item."
   (agent-shell-queue-test/isolate
     (setf (agent-shell-queue-store-items agent-shell-queue--store)
           (agent-shell-queue-test/populate '("dead-buf" ("q-dead" "hello" active nil))))
-    (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-dead"))
-              ((symbol-function 'get-buffer) (lambda (_) nil)))
-      (should-error (agent-shell-queue-buffer-open-shell) :type 'user-error))))
+    (with-temp-buffer
+      (insert "dummy")
+      (put-text-property (point-min) (point-max) 'tabulated-list-id "q-dead")
+      (goto-char (point-min))
+      (cl-letf (((symbol-function 'get-buffer) (lambda (_) nil)))
+        (should-error (agent-shell-queue-buffer-open-shell) :type 'user-error)))))
 
 (ert-deftest agent-shell-queue/buffer-open-shell-creates-when-dead-and-user-confirms ()
   "Calls create-fn and pops to the result when buffer is dead and user answers yes."
@@ -2161,12 +2167,15 @@ is void: https://... when the command was invoked on an aborted item."
               (setf (agent-shell-queue-item-executor item) exec-fn)
               (setf (agent-shell-queue-store-items agent-shell-queue--store)
                     (list (list "dead-buf" item))))
-            (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-create"))
-                      ((symbol-function 'get-buffer) (lambda (_) nil))
-                      ((symbol-function 'y-or-n-p) (lambda (_) t))
-                      ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
-              (agent-shell-queue-buffer-open-shell)
-              (should (eq popped new-buf))))
+            (with-temp-buffer
+              (insert "dummy")
+              (put-text-property (point-min) (point-max) 'tabulated-list-id "q-create")
+              (goto-char (point-min))
+              (cl-letf (((symbol-function 'get-buffer) (lambda (_) nil))
+                        ((symbol-function 'y-or-n-p) (lambda (_) t))
+                        ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
+                (agent-shell-queue-buffer-open-shell)
+                (should (eq popped new-buf)))))
         (kill-buffer new-buf)))))
 
 (ert-deftest agent-shell-queue/buffer-open-shell-noop-when-dead-and-user-declines ()
@@ -2183,13 +2192,16 @@ is void: https://... when the command was invoked on an aborted item."
         (setf (agent-shell-queue-item-executor item) exec-fn)
         (setf (agent-shell-queue-store-items agent-shell-queue--store)
               (list (list "dead-buf" item))))
-      (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-decline"))
-                ((symbol-function 'get-buffer) (lambda (_) nil))
-                ((symbol-function 'y-or-n-p) (lambda (_) nil))
-                ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
-        (agent-shell-queue-buffer-open-shell)
-        (should-not created)
-        (should-not popped)))))
+      (with-temp-buffer
+        (insert "dummy")
+        (put-text-property (point-min) (point-max) 'tabulated-list-id "q-decline")
+        (goto-char (point-min))
+        (cl-letf (((symbol-function 'get-buffer) (lambda (_) nil))
+                  ((symbol-function 'y-or-n-p) (lambda (_) nil))
+                  ((symbol-function 'pop-to-buffer) (lambda (b) (setq popped b))))
+          (agent-shell-queue-buffer-open-shell)
+          (should-not created)
+          (should-not popped))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-queue-defer — unknown id is noop
