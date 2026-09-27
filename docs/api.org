@@ -12,9 +12,6 @@ docstrings.
                (mapcar (lambda (f) (expand-file-name f base))
                        '("agent-shell-menu.el"
                          "agent-shell-queue.el"
-  		       "agent-shell-prompt.el"
-  		       "agent-shell-prompt-menu.el"
-  		       "agent-shell-prompt-library.el"
                          "agent-shell-queue-db.el"
                          "agent-shell-queue-org.el"
                          "agent-shell-queue-persistence.el")))
@@ -27,10 +24,6 @@ docstrings.
                ("agent-shell-queue-persistence"
   	      "agent-shell-queue-db")
                "agent-shell-queue-org"
-  	     ("agent-shell-prompt"
-  	      "agent-shell-prompt"
-  	      "agent-shell-prompt-library"
-  	      "agent-shell-prompt-menu")))
 #+END_SRC
 
 
@@ -2087,110 +2080,4 @@ Return the file extension string (with leading dot) for /FORMAT/.
 :END:
 
 Capture the current org heading’s subtree text into the agent-shell-queue. Opens a queue capture buffer pre-seeded with the heading content. With prefix arg REMOVE-ORIGINAL, delete the original subtree immediately after opening the capture buffer.
-
-** agent-shell-prompt
-
-*** [[file:../agent-shell-prompt.el::65][agent-shell-prompt-registry]] :variable:
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-registry
-:END:
-
-Hash table of symbol id to ‘agent-shell-prompt-spec’. Populate via ~register-agent-shell-prompt~.
-
-*** [[file:../agent-shell-prompt.el::69][agent-shell-prompt-get]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-get
-:END:
-
-Return the ‘agent-shell-prompt-spec’ registered under ID, or nil.
-
-*** [[file:../agent-shell-prompt.el::73][agent-shell-prompt-list]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-list
-:END:
-
-Return all registered ‘agent-shell-prompt-spec’ values.
-
-*** [[file:../agent-shell-prompt.el::77][agent-shell-prompt-register]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-register
-:END:
-
-: (fn &key ID DOC CATEGORY ARGS PRE-OP TEMPLATE SUBMIT TARGET POST-OP)
-
-Register a prompt spec built from /ID/, /DOC/, /CATEGORY/, /ARGS/, /PRE-OP/. /TEMPLATE/, /SUBMIT/, /TARGET/, and /POST-OP/.  Re-registering an existing /ID/ replaces the entry.
-
-*** [[file:../agent-shell-prompt.el::92][register-agent-shell-prompt]]
-:PROPERTIES:
-:CUSTOM_ID: register-agent-shell-prompt
-:END:
-
-Define and register a prompt workflow named ID. KEYS is a plist accepting the same keys as ~agent-shell-prompt-register~ (:doc :category :args :pre-op :template :submit :target :post-op). :args is data (an arg-spec list), not code, and is quoted automatically.
-
-*** [[file:../agent-shell-prompt.el::153][agent-shell-prompt-render]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-render
-:END:
-
-Render TEMPLATE, substituting {{key}} placeholders from CTX. CTX is a plist; {{args.KEY}} looks inside the :args sub-plist, any other {{key}} looks up the top-level :key entry.
-
-*** [[file:../agent-shell-prompt.el::174][agent-shell-prompt-exec-pre]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-exec-pre
-:END:
-
-Run SPEC’s pre-op against CTX, then call CALLBACK with the updated ctx. When SPEC has no pre-op, CALLBACK is invoked with CTX unchanged. A pre-op of arity 1 is treated as synchronous and must return the updated ctx; a pre-op of arity 2 is treated as asynchronous and must itself call its callback argument with the updated ctx.
-
-*** [[file:../agent-shell-prompt.el::187][agent-shell-prompt-exec-post]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-exec-post
-:END:
-
-Run SPEC’s post-op with SHELL-BUFFER, CTX, and RESPONSE-TEXT. Returns the post-op’s control-flag result, or ~:done~ when SPEC has no post-op.  See ‘agent-shell-prompt-spec’ for the set of recognized flags.
-
-*** [[file:../agent-shell-prompt.el::294][agent-shell-prompt-dispatch]]
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-dispatch
-:END:
-
-: (fn ID &key ARGS TARGET (SUBMIT nil SUBMIT-SUPPLIED-P))
-
-Run the prompt workflow registered as /ID/. /ARGS/ is a plist of pre-known argument values; any argument the spec declares but /ARGS/ omits is collected interactively.  /TARGET/ and SUBMIT override the spec’s defaults when supplied.
-
-*** [[file:../agent-shell-prompt-menu.el::48][agent-shell-prompt-select]] :command:
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-select
-:END:
-
-Pick a registered prompt via ~annotated-completing-read~ and dispatch it. Candidates are annotated with their category and one-line doc.  With CATEGORY non-nil, only prompts in that category are offered.
-
-*** [[file:../agent-shell-prompt-menu.el::72][agent-shell-prompt-dispatch-menu]] :command:
-:PROPERTIES:
-:CUSTOM_ID: agent-shell-prompt-dispatch-menu
-:END:
-
-Single entry point into the ~agent-shell-prompt~ ACR picker.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
