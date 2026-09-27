@@ -106,12 +106,12 @@
 
 (defun agent-shell-queue-org--insert-item (item)
   "Append a level-2 org subtree for ITEM at end of the current org buffer.
-Constructs the subtree using `org-element-create' and `org-element-interpret-data'."
+Constructs subtree using `org-element-create' and interpret-data."
   (goto-char (point-max))
   (insert (org-element-interpret-data (agent-shell-queue-org--item-to-ast item))))
 
 (defun agent-shell-queue-org--serialize ()
-  "Serialize `agent-shell-queue--items' to an `org-mode' string using `org-element' AST."
+  "Serialize `agent-shell-queue--items' to `org-mode' string via AST."
   (let* ((keywords (list (org-element-create 'keyword '(:key "TITLE" :value "Agent Shell Queue"))
                          (org-element-create 'keyword '(:key "STARTUP" :value "overview"))
                          (org-element-create 'keyword '(:key "TODO" :value "TODO DOING WAIT HOLD DRAFT | DONE ABORTED"))))

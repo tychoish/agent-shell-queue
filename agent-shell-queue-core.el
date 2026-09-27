@@ -1091,7 +1091,7 @@ the session queue is paused until the mode changes.")
    "\n"))
 
 (defun agent-shell-queue--make-item (prompt &optional background kind delay-before delay-after)
-  "Return new active item for PROMPT, BACKGROUND, KIND, DELAY-BEFORE, and DELAY-AFTER."
+  "Return new active item for PROMPT, BACKGROUND, KIND, and delays."
   (agent-shell-queue-item--make
    :id (agent-shell-queue--gen-id)
    :args (agent-shell-queue--clean-args prompt)
@@ -1999,7 +1999,7 @@ No-op when BUF's session is paused."
   (agent-shell-queue--complete-item item buf-name))
 
 (defun agent-shell-queue--dispatch-pause-compact (item buf-name)
-  "Dispatch a pause or compact ITEM for BUF-NAME: pause the queue or delay and alert."
+  "Dispatch pause or compact ITEM for BUF-NAME: pause queue or alert."
   (cl-pushnew (cons buf-name (agent-shell-queue-item-id item))
               agent-shell-queue--compact-running :test #'equal)
   (let ((duration (or (agent-shell-queue-item-delay-after item)

@@ -24,7 +24,7 @@
 (require 'agent-shell-queue-ui)
 
 (autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
-  "Global minor mode to route inbuilt agent-shell prompt queue into agent-shell-queue." t)
+  "Global minor mode routing inbuilt agent-shell queue to ASQ." t)
 
 (provide 'agent-shell-queue)
 

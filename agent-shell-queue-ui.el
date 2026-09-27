@@ -449,8 +449,9 @@ BUF is the target `agent-shell' buffer; nil adds to the unassigned queue."
 ;;;###autoload
 (defun agent-shell-queue-enqueue-emacs (buf)
   "Open an Emacs Lisp capture buffer to compose a form for BUF's queue.
-The capture buffer is in `emacs-lisp-mode'.  Confirm with \\[agent-shell-queue-capture-confirm],
-cancel with \\[agent-shell-queue-capture-cancel].  When dispatched, the form is evaluated via
+The capture buffer is in `emacs-lisp-mode'.
+Confirm with \\[agent-shell-queue-capture-confirm],
+cancel with \\[agent-shell-queue-capture-cancel].  When dispatched, evaluated via
 `eval'; errors are reported as messages and the item is marked done.
 BUF may be nil to enqueue to the unassigned bucket."
   (interactive (list (agent-shell-queue--pick-buffer-for-kind 'emacs-lisp "Target (or unassigned): ")))
@@ -472,7 +473,7 @@ BUF may be nil to enqueue to the unassigned bucket."
 ;;;###autoload
 (defun agent-shell-queue-enqueue-shell-eshell (buf)
   "Open a shell capture buffer to compose a command for eshell BUF.
-The capture buffer is in `sh-mode'.  Confirm with \\[agent-shell-queue-capture-confirm].
+The buffer is in `sh-mode'.  Confirm with \\[agent-shell-queue-capture-confirm].
 BUF may be nil to enqueue to the unassigned bucket."
   (interactive (list (agent-shell-queue--pick-buffer-for-kind 'shell-eshell "eshell buffer (or unassigned): ")))
   (agent-shell-queue--open-capture buf nil nil 'shell-eshell 'sh-mode))
@@ -489,7 +490,7 @@ BUF may be nil to enqueue to the unassigned bucket."
 
 (defun agent-shell-queue--open-elisp-capture (target-buf)
   "Open an Emacs Lisp capture buffer targeting TARGET-BUF's queue.
-The buffer is in `emacs-lisp-mode' with \\[agent-shell-queue-capture-confirm] and \\[agent-shell-queue-capture-cancel] bindings.
+The buffer is in `emacs-lisp-mode' with capture confirm/cancel bindings.
 Items created from this buffer have kind `emacs-lisp'."
   (let* ((capture-buf (get-buffer-create
                        (format "*agent-shell-queue-elisp: %s*"
@@ -3185,7 +3186,7 @@ Prompts for fork options interactively."
 (defun agent-shell-queue--ad-agent-shell-send-file-to (orig-fn &optional prompt-for-file)
   "Around advice using ORIG-FN and PROMPT-FOR-FILE to include capture buffers.
 When a capture buffer is chosen, the file context is inserted at point-max
-of that buffer instead of being sent to an `agent-shell' via `agent-shell-insert'."
+of that buffer instead of being sent via `agent-shell-insert'."
   (let* ((capture-bufs (agent-shell-queue--live-capture-buffers))
          (shell-names (seq-map #'buffer-name (agent-shell-buffers)))
          (capture-names (seq-map #'buffer-name capture-bufs))
@@ -3224,7 +3225,7 @@ of that buffer instead of being sent to an `agent-shell' via `agent-shell-insert
             #'agent-shell-queue--ad-agent-shell-send-file-to)
 
 (defvar agent-shell-queue-interjection-continuation-suffix
-  "\n\nAfter addressing the above, please resume your previous task where you left off."
+  "\n\nAfter addressing the above, please resume previous task."
   "Text appended to the interjection prompt before sending.
 Set to nil to send the user's text verbatim without a continuation instruction.")
 
@@ -3302,7 +3303,7 @@ Strips the read-only header by looking for the separator line."
     (message "agent-shell-queue: interjection sent to %s — waiting for response…" buf-name)))
 
 (defun agent-shell-queue--interjection-mark-aborted (item buf-name)
-  "Mark ITEM in BUF-NAME as aborted due to interjection abort, clear interjection-pending."
+  "Mark ITEM in BUF-NAME as aborted, clear interjection-pending."
   (setf (agent-shell-queue-item-status item) 'aborted)
   (setf (agent-shell-queue-item-completed item) (float-time))
   (setf (agent-shell-queue-item-outcome item) 'interrupted)
@@ -3416,7 +3417,7 @@ interjection buffer is already pending."
 ;;; Input Routing and Queue-Only Mode
 
 (defvar-local agent-shell-queue-intercept-mode nil
-  "When non-nil in an `agent-shell' buffer, capture user-typed turns as queue items.")
+  "When non-nil in `agent-shell' buffer, capture user-typed turns as queue items.")
 
 (defvar-local agent-shell-queue-input-mode 'default
   "Current input routing mode for this `agent-shell' buffer.

@@ -29,6 +29,8 @@
 
 ;;; Code:
 
+(declare-function agent-shell-queue-send-next "agent-shell-queue-core")
+
 (require 'subr-x)
 (require 'agent-shell-queue-core)
 (require 'agent-shell-queue-ui)
@@ -324,7 +326,7 @@ ARGS accepts `:initial'."
 When called interactively:
 - If `agent-shell-queue-overload-entry-method' is `capture-buffer', opens
   an ASQ capture buffer.
-- If `minibuffer', reads from minibuffer, with `agent-shell-queue-overload-escape-key'
+- If `minibuffer', reads from minibuffer, with escape key
   available to escape mid-typing to a capture buffer."
   (interactive
    (let* ((shell-buf (agent-shell-queue-overload--target-shell-buffer)))
@@ -361,7 +363,7 @@ When called interactively:
 
 ;;;###autoload
 (define-minor-mode agent-shell-queue-overload-mode
-  "Global minor mode to route inbuilt agent-shell prompt queue into agent-shell-queue.
+  "Global minor mode routing inbuilt agent-shell queue to ASQ.
 Provides disk persistence, queue introspection, pausing, and mid-composition
 escape to multi-line capture buffers."
   :global t
