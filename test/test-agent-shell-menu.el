@@ -698,3 +698,57 @@ with no intermediate name-to-id lookup."
     (should (functionp 'agent-shell-menu--hitl-available-p))
     (should (functionp 'agent-shell-menu--workflow-select-available-p))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; agent-shell-menu-mode-key
+
+(defvar agent-shell-menu-test--fn-called nil
+  "Set by `agent-shell-menu-test--fn' when it runs.")
+
+(defun agent-shell-menu-test--fn ()
+  "Test FN for `agent-shell-menu-mode-key' dispatch tests."
+  (interactive)
+  (setq agent-shell-menu-test--fn-called t))
+
+(agent-shell-menu-mode-key "0" agent-shell-menu-test--fn)
+
+(ert-deftest agent-shell-menu/mode-key-self-inserts-at-prompt-while-busy ()
+  "KEY self-inserts at the live prompt even while the agent is busy.
+Regression test: with `agent-shell-persistent-prompt-enabled', the prompt
+stays live and editable for the whole turn, so busy state alone must not
+route a keystroke typed there to the menu command."
+  (with-temp-buffer
+    (setq major-mode 'agent-shell-mode)
+    (setq agent-shell-menu-test--fn-called nil)
+    (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+              ((symbol-function 'shell-maker-point-at-last-prompt-p) (lambda () t)))
+      (insert "x")
+      (agent-shell-menu-output-key-0)
+      (should-not agent-shell-menu-test--fn-called)
+      (should (equal "x0" (buffer-string))))))
+
+(ert-deftest agent-shell-menu/mode-key-self-inserts-at-idle-prompt ()
+  "KEY self-inserts at the prompt while the agent is idle (prior behavior)."
+  (with-temp-buffer
+    (setq major-mode 'agent-shell-mode)
+    (setq agent-shell-menu-test--fn-called nil)
+    (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
+              ((symbol-function 'shell-maker-point-at-last-prompt-p) (lambda () t)))
+      (agent-shell-menu-output-key-0)
+      (should-not agent-shell-menu-test--fn-called)
+      (should (equal "0" (buffer-string))))))
+
+(ert-deftest agent-shell-menu/mode-key-calls-fn-outside-prompt ()
+  "KEY calls FN when point is outside the prompt, busy or idle."
+  (with-temp-buffer
+    (setq major-mode 'agent-shell-mode)
+    (setq agent-shell-menu-test--fn-called nil)
+    (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
+              ((symbol-function 'shell-maker-point-at-last-prompt-p) (lambda () nil)))
+      (agent-shell-menu-output-key-0)
+      (should agent-shell-menu-test--fn-called))
+    (setq agent-shell-menu-test--fn-called nil)
+    (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+              ((symbol-function 'shell-maker-point-at-last-prompt-p) (lambda () nil)))
+      (agent-shell-menu-output-key-0)
+      (should agent-shell-menu-test--fn-called))))
+

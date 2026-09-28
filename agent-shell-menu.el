@@ -727,9 +727,13 @@ the underlying shell process uptime for the current agent-shell buffer."
 
 (defmacro agent-shell-menu-mode-key (key fn)
   "Define `agent-shell-menu-output-key-KEY' and bind it in `agent-shell-mode-map'.
-In the output area, or while the shell is busy, calls FN interactively.
-Self-inserts KEY only when at the idle prompt, unless queue-only mode is active
- (in which case routes to `agent-shell-queue-ready-capture' instead).
+In the output area, calls FN interactively. Self-inserts KEY at the prompt,
+unless queue-only mode is active (in which case routes to
+`agent-shell-queue-ready-capture' instead).  Prompt-vs-output is decided by
+`shell-maker-point-at-last-prompt-p' alone, not busy state: with
+`agent-shell-persistent-prompt-enabled' on, the prompt stays live and
+editable for the whole turn, so typing there while the agent works must
+still self-insert rather than fire the menu command.
 Also binds FN directly in `agent-shell-viewport-view-mode-map'."
   (let* ((key-str (if (stringp key) key (symbol-name key)))
          (name (intern (concat "agent-shell-menu-output-key-" key-str)))
@@ -738,9 +742,9 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
                  ((pred (lambda (s) (= 1 (length s)))) (aref key-str 0)))))
     `(progn
        (defun ,name ()
-         ,(format "In output or busy: `%s'. Self-insert at idle prompt." fn)
+         ,(format "In output: `%s'. Self-insert at the prompt." fn)
          (interactive)
-         (if (and (not (shell-maker-busy)) (shell-maker-point-at-last-prompt-p))
+         (if (shell-maker-point-at-last-prompt-p)
              ,(if char
                   `(if (bound-and-true-p agent-shell-queue-only-mode)
                        (agent-shell-queue-ready-capture)
