@@ -1,7 +1,13 @@
 ;;; asq-mcp.el --- Agent Shell Queue (asq) MCP service integration for mcpkit -*- lexical-binding: t; -*-
 
-;; Author: Tychoish
+;; Author: tycho garen
+;; Maintainer: tychoish
+;; Version: 0.1.0
+;; Package-Requires: ((emacs "29.1") (mcpkit "0.1.0") (agent-shell-queue "0.1.0"))
 ;; Keywords: tools, mcp, agent-shell, queue
+;; URL: https://github.com/tychoish/agent-shell-queue
+
+;; This file is not part of GNU Emacs.
 
 ;;; Commentary:
 ;;
