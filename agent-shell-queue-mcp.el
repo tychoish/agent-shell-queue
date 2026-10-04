@@ -1,4 +1,4 @@
-;;; asq-mcp.el --- Agent Shell Queue (asq) MCP service integration for mcpkit -*- lexical-binding: t; -*-
+;;; agent-shell-queue-mcp.el --- Agent Shell Queue (asq) MCP service integration for mcpkit -*- lexical-binding: t; -*-
 
 ;; Author: tycho garen
 ;; Maintainer: tychoish
@@ -28,26 +28,26 @@
 (require 'mcpkit)
 (require 'agent-shell-queue nil t)
 
-(defgroup asq-mcp nil
+(defgroup agent-shell-queue-mcp nil
   "Agent Shell Queue (asq) MCP service integration."
   :group 'mcpkit
-  :prefix "asq-mcp-")
+  :prefix "agent-shell-queue-mcp-")
 
-(defcustom asq-mcp-port 8765
+(defcustom agent-shell-queue-mcp-port 8765
   "Default TCP port for the asq MCP service."
   :type 'integer
-  :group 'asq-mcp)
+  :group 'agent-shell-queue-mcp)
 
 ;;; Service Definition & Top-Level Tool Registration
 
-(defvar asq-mcp-service
+(defvar agent-shell-queue-mcp-service
   (or (mcpkit-get-service 'asq)
       (mcpkit-define-service 'asq
-        :port asq-mcp-port
+        :port agent-shell-queue-mcp-port
         :description "Agent Shell Queue (asq) Management and Inspection"))
   "The asq `mcpkit-service' instance.")
 
-(defun asq-mcp--ensure-queue ()
+(defun agent-shell-queue-mcp--ensure-queue ()
   "Ensure `agent-shell-queue' is loaded."
   (unless (fboundp 'agent-shell-queue-get-item-by-id)
     (require 'agent-shell-queue))
@@ -61,7 +61,7 @@
                   :properties (:buffer (:type "string" :description "Optional buffer name filter")
                                :status (:type "string" :description "Optional status filter (e.g. active, running, done, blocked.skip, blocked.task, aborted)"))
                   :required [])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((target-buf (plist-get args :buffer))
          (status-str (plist-get args :status))
          (status-sym (when (and status-str (not (string-empty-p status-str)))
@@ -93,7 +93,7 @@
   :input-schema '(:type "object"
                   :properties (:id (:type "string" :description "Queue item identifier"))
                   :required ["id"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((id (plist-get args :id))
          (pair (agent-shell-queue-get-item-by-id id)))
     (if (not pair)
@@ -122,7 +122,7 @@
                                :from_id (:type "string" :description "Optional parent item ID this follows up on")
                                :background (:type "boolean" :description "Run in background when non-nil"))
                   :required ["prompt" "buffer"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((prompt (plist-get args :prompt))
          (buf-name (plist-get args :buffer))
          (from-id (plist-get args :from_id))
@@ -151,7 +151,7 @@
   :input-schema '(:type "object"
                   :properties (:id (:type "string" :description "ID of the completed or aborted item to re-enqueue"))
                   :required ["id"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((id (plist-get args :id))
          (pair (agent-shell-queue-get-item-by-id id)))
     (if (not pair)
@@ -168,7 +168,7 @@
                   :properties (:prompt (:type "string" :description "Interjection guidance or instruction")
                                :id (:type "string" :description "Optional running item ID (defaults to currently running item)"))
                   :required ["prompt"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((prompt (plist-get args :prompt))
          (id (plist-get args :id))
          (running-pair (if (and id (not (string-empty-p id)))
@@ -207,7 +207,7 @@
   :input-schema '(:type "object"
                   :properties (:id (:type "string" :description "ID of item to cancel or abort"))
                   :required ["id"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((id (plist-get args :id))
          (pair (agent-shell-queue-get-item-by-id id)))
     (if (not pair)
@@ -236,7 +236,7 @@
   :input-schema '(:type "object"
                   :properties (:id (:type "string" :description "Queue item identifier"))
                   :required ["id"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((id (plist-get args :id))
          (pair (agent-shell-queue-get-item-by-id id)))
     (if (not pair)
@@ -254,7 +254,7 @@
                   :properties (:id (:type "string" :description "Queue item identifier")
                                :response (:type "string" :description "Optional final response or resolution text"))
                   :required ["id"])
-  (asq-mcp--ensure-queue)
+  (agent-shell-queue-mcp--ensure-queue)
   (let* ((id (plist-get args :id))
          (resp (plist-get args :response))
          (pair (agent-shell-queue-get-item-by-id id)))
@@ -271,12 +271,12 @@
            (list :status "error" :error (error-message-string err))))))))
 
 ;;;###autoload
-(defun asq-mcp-register ()
-  "Ensure `asq-mcp-service' is registered in `mcpkit-registry' and return it."
+(defun agent-shell-queue-mcp-register ()
+  "Register `agent-shell-queue-mcp-service' in `mcpkit-registry' and return it."
   (interactive)
   (unless (mcpkit-get-service 'asq)
-    (mcpkit-register-service asq-mcp-service))
-  asq-mcp-service)
+    (mcpkit-register-service agent-shell-queue-mcp-service))
+  agent-shell-queue-mcp-service)
 
-(provide 'asq-mcp)
-;;; asq-mcp.el ends here
+(provide 'agent-shell-queue-mcp)
+;;; agent-shell-queue-mcp.el ends here
