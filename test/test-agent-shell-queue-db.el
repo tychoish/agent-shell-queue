@@ -28,9 +28,12 @@ Skips the enclosing test when built-in sqlite is unavailable."
   `(progn
      (skip-unless (fboundp 'sqlite-open))
      (let* ((db-path (make-temp-file "aq-db-test-" nil ".db"))
+            (state-file (make-temp-file "aq-state-test-" nil ".el"))
             (agent-shell-queue-db-file db-path)
             (agent-shell-queue-db--connection nil)
             (agent-shell-queue--items nil)
+            (agent-shell-queue--store
+             (agent-shell-queue--make-store :items nil :format 'plist :file state-file))
             (agent-shell-queue--loaded t)
             (agent-shell-queue--subscriptions nil)
             (agent-shell-queue--stale-item-ids nil)
@@ -38,8 +41,7 @@ Skips the enclosing test when built-in sqlite is unavailable."
             (agent-shell-queue--next-flush-time nil)
             (agent-shell-queue-save-function nil)
             (agent-shell-queue-load-function nil)
-            (agent-shell-queue-state-file-function
-             #'agent-shell-queue--default-state-file)
+            (agent-shell-queue-state-file-function (lambda () state-file))
             (agent-shell-queue-db--saved-save-function nil)
             (agent-shell-queue-db--saved-load-function nil)
             (agent-shell-queue-db--saved-state-file-function nil))
@@ -50,7 +52,8 @@ Skips the enclosing test when built-in sqlite is unavailable."
          (unwind-protect
              (progn ,@body)
            (agent-shell-queue-db--close)
-           (when (file-exists-p db-path) (delete-file db-path)))))))
+           (when (file-exists-p db-path) (delete-file db-path))
+           (when (file-exists-p state-file) (delete-file state-file)))))))
 
 (defun agent-shell-queue-db-test/make-item (id prompt &optional status background kind)
   "Build a deterministic test item with fixed timestamps."
@@ -634,11 +637,12 @@ reached.  This test documents the actual behaviour."
   "db-enable with a file argument sets `agent-shell-queue-db-file'."
   (skip-unless (fboundp 'sqlite-open))
   (let* ((tmp (make-temp-file "aq-enable-test-" nil ".db"))
+         (state-file (make-temp-file "aq-enable-state-" nil ".el"))
          (agent-shell-queue-db-file nil)
          (agent-shell-queue-db--connection nil)
          (agent-shell-queue-save-function nil)
          (agent-shell-queue-load-function nil)
-         (agent-shell-queue-state-file-function #'agent-shell-queue--default-state-file)
+         (agent-shell-queue-state-file-function (lambda () state-file))
          (agent-shell-queue-db--saved-save-function nil)
          (agent-shell-queue-db--saved-load-function nil)
          (agent-shell-queue-db--saved-state-file-function nil))
@@ -647,7 +651,8 @@ reached.  This test documents the actual behaviour."
           (agent-shell-queue-db-enable tmp)
           (should (equal tmp agent-shell-queue-db-file)))
       (agent-shell-queue-db--close)
-      (when (file-exists-p tmp) (delete-file tmp)))))
+      (when (file-exists-p tmp) (delete-file tmp))
+      (when (file-exists-p state-file) (delete-file state-file)))))
 
 ;;; Done-log
 

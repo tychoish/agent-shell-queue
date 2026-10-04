@@ -15,6 +15,12 @@
 (when (boundp 'alert-default-style)
   (setq alert-default-style 'ignore))
 
+;; Suppress queue state persistence on batch exit
+(with-eval-after-load 'agent-shell-queue-core
+  (remove-hook 'kill-emacs-hook #'agent-shell-queue--save-on-exit))
+(when (fboundp 'agent-shell-queue--save-on-exit)
+  (remove-hook 'kill-emacs-hook #'agent-shell-queue--save-on-exit))
+
 
 (defun agent-shell-test/suffix-plist (suffix)
   "Extract the plist from a parsed transient suffix spec SUFFIX.

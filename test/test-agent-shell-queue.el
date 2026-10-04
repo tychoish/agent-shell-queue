@@ -1696,6 +1696,7 @@ is void: https://... when the command was invoked on an aborted item."
          (agent-shell-queue-state-file-function (lambda () tmp))
          (agent-shell-queue--store
           (agent-shell-queue--make-store :items nil :format 'plist :file nil))
+         (agent-shell-queue--loaded t)
          (agent-shell-queue--last-flush-time nil))
     (unwind-protect
         (progn
