@@ -3,7 +3,7 @@
 ;; Author: tycho garen
 ;; Maintainer: tychoish
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (mcpkit "0.1.0") (agent-shell-queue "0.1.0"))
+;; Package-Requires: ((emacs "29.1") (mcpkit "0.1.0"))
 ;; Keywords: tools, mcp, agent-shell, queue
 ;; URL: https://github.com/tychoish/agent-shell-queue
 
