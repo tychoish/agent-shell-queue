@@ -562,5 +562,62 @@ When MTIME is non-nil, set the file modification time to that value."
               (should (equal "q-backup" (agent-shell-queue-item-id item)))
               (should (equal "backup prompt" (agent-shell-queue-item-args item))))))))))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Show disk state view
+
+(ert-deftest agent-shell-queue/show-disk-state-plist-uses-emacs-lisp-mode ()
+  "show-disk-state opens .el state file in emacs-lisp-mode without visiting file."
+  (let* ((tmp (make-temp-file "asq-disk-state-" nil ".el"))
+         (agent-shell-queue-state-file-function (lambda () tmp)))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert "(((\"*s*\" (:id \"q1\" :args \"test\"))))\n"))
+          (cl-letf (((symbol-function 'display-buffer) #'ignore))
+            (agent-shell-queue-show-disk-state))
+          (let ((buf (get-buffer "*agent-shell-queue-disk*")))
+            (should buf)
+            (with-current-buffer buf
+              (should (eq major-mode 'emacs-lisp-mode))
+              (should (null (buffer-file-name)))
+              (should buffer-read-only)
+              (should (string-search "(:id \"q1\"" (buffer-string))))))
+      (when (get-buffer "*agent-shell-queue-disk*")
+        (kill-buffer "*agent-shell-queue-disk*"))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest agent-shell-queue/show-disk-state-org-uses-org-mode ()
+  "show-disk-state opens .org state file in org-mode via auto-mode-alist without visiting file."
+  (let* ((tmp (make-temp-file "asq-disk-state-" nil ".org"))
+         (agent-shell-queue-state-file-function (lambda () tmp)))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp
+            (insert "* *s*
+** TODO test prompt
+:PROPERTIES:
+:QUEUE-ID: q1
+:END:
+   test prompt
+"))
+          (cl-letf (((symbol-function 'display-buffer) #'ignore))
+            (agent-shell-queue-show-disk-state))
+          (let ((buf (get-buffer "*agent-shell-queue-disk*")))
+            (should buf)
+            (with-current-buffer buf
+              (should (eq major-mode 'org-mode))
+              (should (null (buffer-file-name)))
+              (should buffer-read-only)
+              (should (string-search "* *s*" (buffer-string))))))
+      (when (get-buffer "*agent-shell-queue-disk*")
+        (kill-buffer "*agent-shell-queue-disk*"))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest agent-shell-queue/show-disk-state-missing-file-errors ()
+  "show-disk-state signals user-error when state file does not exist."
+  (let ((agent-shell-queue-state-file-function (lambda () "/nonexistent/path/agent-shell-queue.el")))
+    (should-error (agent-shell-queue-show-disk-state) :type 'user-error)))
+
 (provide 'test-agent-shell-queue-persistence)
 ;;; test-agent-shell-queue-persistence.el ends here
