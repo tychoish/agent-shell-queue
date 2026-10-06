@@ -871,7 +871,19 @@ In addition to any hooks its parent mode ~markdown-mode~ might have run, this mo
 
 Key             Binding
 
-C-a		agent-shell-queue-item-view-archive C-d		agent-shell-queue-item-destructive-menu C-k		agent-shell-queue-item-view-remove C-t		agent-shell-queue-item-view-reassign-all-detached B		agent-shell-queue-item-view-disable-background-task E		agent-shell-queue-item-view-enqueue-running-copy R		agent-shell-queue-item-view-reenqueue T		agent-shell-queue-item-view-reassign-detached U		agent-shell-queue-item-view-untrack-running X		agent-shell-queue-item-view-abort a		agent-shell-queue-item-view-actions b		agent-shell-queue-item-view-enable-background-task d		agent-shell-queue-item-view-pause e		agent-shell-queue-item-view-edit f		agent-shell-queue-item-view-unblock g		agent-shell-queue-item-view-refresh i		agent-shell-queue-item-view-inspect m		agent-shell-queue-item-menu o		agent-shell-queue-item-view-open-shell q		quit-window s		agent-shell-queue-item-view-send t		agent-shell-queue-item-view-assign u		agent-shell-queue-item-view-schedule z		agent-shell-queue-item-view-mark-done C-DEL		agent-shell-queue-item-view-remove M-<down>	agent-shell-queue-item-view-move-down M-<up>		agent-shell-queue-item-view-move-up
+C-a		agent-shell-queue-item-view-archive C-k		agent-shell-queue-item-view-remove a		agent-shell-queue-item-view-actions g		agent-shell-queue-item-view-refresh m		agent-shell-queue-item-menu q		quit-window C-DEL		agent-shell-queue-item-view-remove M-<down>	agent-shell-queue-item-view-move-down M-<up>		agent-shell-queue-item-view-move-up
+
+r a		agent-shell-queue-item-view-reassign-all-detached r b		agent-shell-queue-item-view-reassign-bucket-detached r i		agent-shell-queue-item-view-reassign-detached
+
+l d		agent-shell-queue-item-view-move-down l u		agent-shell-queue-item-view-move-up
+
+e r		agent-shell-queue-item-view-reenqueue
+
+t a		agent-shell-queue-item-view-assign t c		agent-shell-queue-item-view-enqueue-running-copy t d		agent-shell-queue-item-destructive-menu t e		agent-shell-queue-item-view-edit t i		agent-shell-queue-item-view-inspect t k		agent-shell-queue-item-view-untrack-running t o		agent-shell-queue-item-view-open-shell t p		agent-shell-queue-item-view-pause t s		agent-shell-queue-item-view-schedule t u		agent-shell-queue-item-view-unblock t x		agent-shell-queue-item-view-abort t z		agent-shell-queue-item-view-mark-done
+
+d t		agent-shell-queue-item-view-send
+
+t b d		agent-shell-queue-item-view-disable-background-task t b e		agent-shell-queue-item-view-enable-background-task
 
 **** [[file:../agent-shell-queue.el::3675][agent-shell-queue-buffer-view-item]] :command:
 :PROPERTIES:

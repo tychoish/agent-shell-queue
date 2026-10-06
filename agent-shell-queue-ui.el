@@ -1313,13 +1313,13 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
    ;; Plist fields: :key :label :cmd :group :annotation :if
    ;; :group nil  — keymap only, not shown in transient or ACR
    ;; :if nil     — always shown when :group is non-nil
-   (list :key "s"
+   (list :key "dt"
          :label "Dispatch now"
          :cmd 'agent-shell-queue-item-view-send
          :group "Manage Task"
          :annotation "Send item to target shell immediately"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted draft)))))
-   (list :key "ta"
+   (list :key "tx"
          :label "Abort (interrupt)"
          :cmd 'agent-shell-queue-item-view-abort
          :group "Manage Task"
@@ -1331,121 +1331,125 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
          :group "Manage Task"
          :annotation "Append an active copy to the queue without interrupting the current run"
          :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
-   (list :key "tu"
+   (list :key "tk"
          :label "Untrack (remove without aborting)"
          :cmd 'agent-shell-queue-item-view-untrack-running
          :group "Manage Task"
          :annotation "Drop queue tracking for this item; the shell process continues"
          :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
-   (list :key "tr"
+   (list :key "er"
          :label "Re-enqueue"
          :cmd 'agent-shell-queue-item-view-reenqueue
          :group "Manage Task"
          :annotation "Create a new active copy of this completed item"
          :if (lambda () (memq (agent-shell-queue--iv-status) '(done aborted))))
-   (list :key "z"
+   (list :key "tz"
          :label "Mark done"
          :cmd 'agent-shell-queue-item-view-mark-done
          :group "Manage Task"
          :annotation "Manually mark item done without dispatching"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-   (list :key "e"
+   (list :key "te"
          :label "Edit"
          :cmd 'agent-shell-queue-item-view-edit
          :group "Manage Task"
          :annotation "Open item in edit buffer"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-   (list :key "d"
+   (list :key "tp"
          :label "Pause (suspend dispatch)"
          :cmd 'agent-shell-queue-item-view-pause
          :group "Manage Task"
          :annotation "Suspend item from being dispatched"
          :if (lambda () (eq (agent-shell-queue--iv-status) 'active)))
-   (list :key "u"
+   (list :key "ts"
          :label "Schedule (resume dispatch)"
          :cmd 'agent-shell-queue-item-view-schedule
          :group "Manage Task"
          :annotation "Return item to active dispatch queue"
          :if (lambda () (memq (agent-shell-queue--iv-status) '(draft))))
-   (list :key "f"
+   (list :key "tu"
          :label "Unblock"
          :cmd 'agent-shell-queue-item-view-unblock
          :group "Manage Task"
          :annotation "Unblock item and cascade to dependent items"
          :if (lambda () (agent-shell-queue--blocked-status-p (agent-shell-queue--iv-status))))
-   (list :key "b"
+   (list :key "tbe"
          :label "Enable background task"
          :cmd 'agent-shell-queue-item-view-enable-background-task
          :group "Manage Task"
          :annotation "Prefix prompt with /background on dispatch"
          :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
                              (not (agent-shell-queue--iv-bg-p)))))
-   (list :key "tf"
+   (list :key "tbd"
          :label "Disable background task"
          :cmd 'agent-shell-queue-item-view-disable-background-task
          :group "Manage Task"
          :annotation "Remove background task flag"
          :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
                              (agent-shell-queue--iv-bg-p))))
-   (list :key "o"
+   (list :key "to"
          :label "Open shell buffer"
          :cmd 'agent-shell-queue-item-view-open-shell
          :group "Manage Task"
          :annotation "Switch to this item's target shell buffer"
          :if nil)
-   (list :key "i"
+   (list :key "ti"
          :label "Inspect raw"
          :cmd 'agent-shell-queue-item-view-inspect
          :group "Manage Task"
          :annotation "View raw serialization of this item"
          :if nil)
-   (list :key "C-d"
+   (list :key "td"
          :label "Destructive…"
          :cmd 'agent-shell-queue-item-destructive-menu
          :group "Manage Task"
          :annotation "Archive, remove, or other destructive operations"
          :if (lambda () (not (eq (agent-shell-queue--iv-status) 'running))))
    ;; Move / Assign group
-   (list :key "M-<up>"
+   (list :key "lu"
          :label "Move up"
          :cmd 'agent-shell-queue-item-view-move-up
          :group "Move / Assign"
          :annotation "Move item earlier in its bucket queue"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-   (list :key "M-<down>"
+   (list :key "ld"
          :label "Move down"
          :cmd 'agent-shell-queue-item-view-move-down
          :group "Move / Assign"
          :annotation "Move item later in its bucket queue"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
-   (list :key "t"
+   (list :key "ta"
          :label "Assign to shell…"
          :cmd 'agent-shell-queue-item-view-assign
          :group "Move / Assign"
          :annotation "Move item to a different agent-shell buffer"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted)))))
    ;; Detached reassignment — only visible when target buffer is dead
-   (list :key "T"
+   (list :key "ri"
          :label "Reassign (this item)"
          :cmd 'agent-shell-queue-item-view-reassign-detached
          :group "Move / Assign"
          :annotation "Assign this detached item to an active or new shell"
          :if #'agent-shell-queue--iv-detached-p)
-   (list :key "C-t"
+   (list :key "rb"
          :label "Reassign (all in same bucket)"
          :cmd 'agent-shell-queue-item-view-reassign-bucket-detached
          :group "Move / Assign"
          :annotation "Assign all items from the same dead shell to a shell"
          :if #'agent-shell-queue--iv-detached-p)
-   (list :key "C-T"
+   (list :key "ra"
          :label "Reassign (all detached)"
          :cmd 'agent-shell-queue-item-view-reassign-all-detached
          :group "Move / Assign"
          :annotation "Assign every detached item across all buckets to a shell"
          :if #'agent-shell-queue--iv-detached-p)
    ;; Keymap-only entries (no transient/ACR group)
+   (list :key "M-<up>"   :label "Move up"  :cmd 'agent-shell-queue-item-view-move-up   :group nil :annotation nil :if nil)
+   (list :key "M-<down>" :label "Move down":cmd 'agent-shell-queue-item-view-move-down :group nil :annotation nil :if nil)
+   (list :key "C-k"     :label "Remove"   :cmd 'agent-shell-queue-item-view-remove  :group nil :annotation nil :if nil)
    (list :key "C-K"     :label "Remove"   :cmd 'agent-shell-queue-item-view-remove  :group nil :annotation nil :if nil)
    (list :key "C-<DEL>" :label "Remove"   :cmd 'agent-shell-queue-item-view-remove  :group nil :annotation nil :if nil)
+   (list :key "C-a"     :label "Archive"  :cmd 'agent-shell-queue-item-view-archive :group nil :annotation nil :if nil)
    (list :key "C-A"     :label "Archive"  :cmd 'agent-shell-queue-item-view-archive :group nil :annotation nil :if nil)
    (list :key "g"       :label "Refresh"  :cmd 'agent-shell-queue-item-view-refresh :group nil :annotation nil :if nil)
    (list :key "m"       :label "Menu"     :cmd 'agent-shell-queue-item-menu         :group nil :annotation nil :if nil)
