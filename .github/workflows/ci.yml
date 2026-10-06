@@ -29,15 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Prefer IPv4 for network resolution
-        run: echo "precedence ::ffff:0:0/96 100" >> /etc/gai.conf || true
-
       - name: Lint Source Code
-        uses: tychoish/elisp-ci/lint@v0.1.0
+        uses: tychoish/elisp-ci/lint@main
         with:
           fail-on-warning: "false"
 
       - name: Run Tests
-        uses: tychoish/elisp-ci@v0.1.0
+        uses: tychoish/elisp-ci@main
         with:
           load-paths: ". test"
