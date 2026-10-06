@@ -2398,7 +2398,7 @@ function, offer to create a new buffer of the same type."
 (transient-define-prefix agent-shell-queue-destructive-menu ()
   "Destructive actions for the item at point in the queue buffer."
   [["Destructive"
-    ("A" "Archive" agent-shell-queue-buffer-archive
+    ("a" "Archive" agent-shell-queue-buffer-archive
      :if agent-shell-queue--point-not-running-p)
     ("k" "Remove" agent-shell-queue-buffer-remove
      :if agent-shell-queue--point-not-running-p)
