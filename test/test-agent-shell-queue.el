@@ -4542,4 +4542,41 @@ leaving sessions that were already individually paused beforehand untouched."
         (should-not (member id ids))
         (push id ids)))))
 
+(ert-deftest agent-shell-queue/prompt-sent-clears-halted-on-abort ()
+  "Test that sending a prompt clears halted-on-abort for buffer and dir bucket."
+  (agent-shell-queue-test/isolate-no-sub
+   (let* ((buf (get-buffer-create "*asq-prompt-test*"))
+          (dir "/tmp/asq-test-dir/")
+          (bucket (agent-shell-queue--bucket-for-dir dir)))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf
+             (setq default-directory dir))
+           (agent-shell-queue--mark-halted-on-abort (buffer-name buf))
+           (agent-shell-queue--mark-halted-on-abort bucket)
+           (should (agent-shell-queue--halted-on-abort-p (buffer-name buf)))
+           (should (agent-shell-queue--halted-on-abort-p bucket))
+           (agent-shell-queue--on-prompt-sent buf)
+           (should-not (agent-shell-queue--halted-on-abort-p (buffer-name buf)))
+           (should-not (agent-shell-queue--halted-on-abort-p bucket)))
+       (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/recovery-manual-prompt-nil-item ()
+  "Test that verify-recovery allows recovery for manual prompts (nil item)."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((buf (get-buffer-create "*asq-rec-manual-buf*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf
+             (setq major-mode 'agent-shell-mode))
+           (should (agent-shell-queue--verify-recovery buf nil "Task finished without issue."))
+           (should-not (agent-shell-queue--verify-recovery buf nil "Do you want to proceed?"))))
+     (kill-buffer buf))))
+
+(ert-deftest agent-shell-queue/dispatch-task-menu-key-is-dt ()
+  "Test that dispatch task in agent-shell-queue-dispatch is bound to dt."
+  (let ((keys (transient-test/collect-keys 'agent-shell-queue-dispatch)))
+    (should (member "dt" keys))
+    (should-not (member "!" keys))))
+
 ;;; test-agent-shell-queue.el ends here

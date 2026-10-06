@@ -705,14 +705,14 @@ Defined here so setf on item struct slots stays in the same file as the struct."
           (string-match-p "\\(Would you like\\|Do you want\\|Should I\\).*\\?\\s-*\\'" trimmed)))))
 
 (defun agent-shell-queue--verify-recovery (buf item response-text)
-  "Verify whether ITEM turn on BUF satisfies the 3 recovery criteria:
-1. Uninterrupted (status is done, outcome is not aborted/interrupted).
+  "Verify whether ITEM turn on BUF satisfies the recovery criteria:
+1. Uninterrupted (status done, outcome not aborted, or manual turn).
 2. No question (response-text does not end with open question).
 3. Not in plan mode (buf mode-id not in blocked session modes).
 Returns non-nil when all three criteria are satisfied."
-  (and item
-       (eq (agent-shell-queue-item-status item) 'done)
-       (not (memq (agent-shell-queue-item-outcome item) '(aborted interrupted)))
+  (and (or (null item)
+           (and (eq (agent-shell-queue-item-status item) 'done)
+                (not (memq (agent-shell-queue-item-outcome item) '(aborted interrupted)))))
        (not (agent-shell-queue--response-has-question-p response-text))
        (not (agent-shell-queue--session-mode-blocked-p buf))))
 
@@ -1030,6 +1030,34 @@ Installed as :before advice on `agent-shell-interrupt'."
     (agent-shell-queue--refresh-buffer)))
 
 (advice-add 'agent-shell-interrupt :before #'agent-shell-queue--on-interrupt)
+
+(defun agent-shell-queue--on-prompt-sent (buf)
+  "Handle a prompt being sent to BUF.
+Clears halted-on-abort state for BUF and its directory bucket so the
+queue does not remain halted after user intervention."
+  (agent-shell-queue--ensure-loaded)
+  (when (buffer-live-p buf)
+    (let* ((buf-name (buffer-name buf))
+           (dir (with-current-buffer buf default-directory))
+           (dir-bucket (and dir (agent-shell-queue--bucket-for-dir dir))))
+      (when (or (agent-shell-queue--halted-on-abort-p buf-name)
+                (and dir-bucket (agent-shell-queue--halted-on-abort-p dir-bucket)))
+        (agent-shell-queue--clear-halted-on-abort buf-name)
+        (when dir-bucket
+          (agent-shell-queue--clear-halted-on-abort dir-bucket))
+        (agent-shell-queue--save)
+        (agent-shell-queue--refresh-buffer)
+        (message "agent-shell-queue: session %s cleared halt-on-abort on prompt submission" buf-name)))))
+
+(defun agent-shell-queue--on-send-command (&rest args)
+  "Clear halted-on-abort status when any prompt is sent to an agent-shell.
+Installed as :before advice on `agent-shell--send-command'."
+  (agent-shell-queue--ensure-loaded)
+  (let ((buf (or (plist-get args :shell-buffer) (current-buffer))))
+    (when (buffer-live-p buf)
+      (agent-shell-queue--on-prompt-sent buf))))
+
+(advice-add 'agent-shell--send-command :before #'agent-shell-queue--on-send-command)
 
 
 (defun agent-shell-queue--default-pick-buffer (prompt)

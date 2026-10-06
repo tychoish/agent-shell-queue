@@ -23,6 +23,7 @@
 (require 'annotated-completing-read nil t)
 
 (declare-function agent-shell-queue-persistence-request-save "agent-shell-queue-persistence")
+(declare-function agent-shell-queue--on-prompt-sent "agent-shell-queue-core")
 (declare-function yaml-parse-string "yaml")
 (declare-function yaml-encode "yaml")
 (declare-function agent-shell-menu--session-shell-buffer "agent-shell-menu")
@@ -37,9 +38,6 @@
 (defvar agent-shell-queue-input-mode)
 (defvar agent-shell-queue-input-mode-default)
 (defvar agent-shell-queue-only-mode)
-
-
-
 
 (defface agent-shell-queue-blocked-face
   '((t :foreground "darkorange3"))
@@ -1321,25 +1319,25 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
          :group "Manage Task"
          :annotation "Send item to target shell immediately"
          :if (lambda () (not (memq (agent-shell-queue--iv-status) '(done running aborted draft)))))
-   (list :key "X"
+   (list :key "ta"
          :label "Abort (interrupt)"
          :cmd 'agent-shell-queue-item-view-abort
          :group "Manage Task"
          :annotation "Interrupt running item, mark as aborted"
          :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
-   (list :key "E"
+   (list :key "tc"
          :label "Enqueue copy (repeat after current run)"
          :cmd 'agent-shell-queue-item-view-enqueue-running-copy
          :group "Manage Task"
          :annotation "Append an active copy to the queue without interrupting the current run"
          :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
-   (list :key "U"
+   (list :key "tu"
          :label "Untrack (remove without aborting)"
          :cmd 'agent-shell-queue-item-view-untrack-running
          :group "Manage Task"
          :annotation "Drop queue tracking for this item; the shell process continues"
          :if (lambda () (eq (agent-shell-queue--iv-status) 'running)))
-   (list :key "R"
+   (list :key "tr"
          :label "Re-enqueue"
          :cmd 'agent-shell-queue-item-view-reenqueue
          :group "Manage Task"
@@ -1382,7 +1380,7 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
          :annotation "Prefix prompt with /background on dispatch"
          :if (lambda () (and (not (memq (agent-shell-queue--iv-status) '(done running aborted)))
                              (not (agent-shell-queue--iv-bg-p)))))
-   (list :key "B"
+   (list :key "tf"
          :label "Disable background task"
          :cmd 'agent-shell-queue-item-view-disable-background-task
          :group "Manage Task"
@@ -2107,7 +2105,7 @@ excluded.")
 (transient-define-prefix agent-shell-queue-item-destructive-menu ()
   "Destructive actions for the item shown in the current item-view buffer."
   [["Destructive"
-    ("A" "Archive" agent-shell-queue-item-view-archive
+    ("a" "Archive" agent-shell-queue-item-view-archive
      :if (lambda () (not (eq (agent-shell-queue--iv-status) 'running))))
     ("k" "Remove" agent-shell-queue-item-view-remove
      :if (lambda () (not (eq (agent-shell-queue--iv-status) 'running))))
@@ -2424,7 +2422,8 @@ function, offer to create a new buffer of the same type."
     (".k" "Recover stuck" agent-shell-queue-recover-stuck-shell)
     (".m" agent-shell-queue-toggle-input-mode
      :description (lambda ()
-                    (format "Input mode: [%s]" agent-shell-queue-input-mode)))]
+                    (format "Input mode: [%s]" agent-shell-queue-input-mode)))
+    (".o" "Open shell" agent-shell-queue-buffer-open-shell)]
    ["Fork"
     :if agent-shell-queue--point-item
     ("ff" "Fork queue" agent-shell-queue-buffer-fork)
@@ -2438,44 +2437,45 @@ function, offer to create a new buffer of the same type."
     ("gi" "Reset all to default" agent-shell-queue-reset-all-input-modes)
     ("gm" agent-shell-queue-set-input-mode-default
      :description (lambda ()
-                    (format "[%s] Input mode default" agent-shell-queue-input-mode-default)))]
-   ["Task"
+                    (format "toggle input mode " agent-shell-queue-input-mode-default)))]
+   ["Task: Manage"
     :if agent-shell-queue--point-item
-    ("!" "Dispatch now" agent-shell-queue-buffer-send
-     :if agent-shell-queue--point-dispatchable-p)
-    ("a" "Abort" agent-shell-queue-buffer-abort
-     :if agent-shell-queue--point-running-p)
-    ("R" "Re-enqueue" agent-shell-queue-buffer-reenqueue
-     :if agent-shell-queue--point-done-p)
-    ("z" "Mark done" agent-shell-queue-buffer-mark-done
-     :if agent-shell-queue--point-not-done-p)
-    ("e" "Enqueue" agent-shell-queue-enqueue-dispatch)
-    ("tp" "Pause item" agent-shell-queue-buffer-pause
-     :if agent-shell-queue--point-active-p)
-    ("tr" "Schedule" agent-shell-queue-buffer-schedule
-     :if agent-shell-queue--point-deferred-p)
-    ("tu" "Unblock" agent-shell-queue-buffer-unblock
-     :if agent-shell-queue--point-blocked-p)
-    ("tc" "Enqueue copy" agent-shell-queue-buffer-enqueue-running-copy
-     :if agent-shell-queue--point-running-p)
-    ("tk" "Untrack running" agent-shell-queue-buffer-untrack-running
-     :if agent-shell-queue--point-running-p)
-    ("te" "Edit" agent-shell-queue-edit-task)
     ("tbe" "Background on" agent-shell-queue-buffer-enable-background-task
      :if agent-shell-queue--point-editable-p
      :inapt-if agent-shell-queue--point-bg-p)
     ("tbd" "Background off" agent-shell-queue-buffer-disable-background-task
      :if agent-shell-queue--point-editable-p
      :inapt-if-not agent-shell-queue--point-bg-p)
-    ("td" "Destructive…" agent-shell-queue-destructive-menu
-     :if agent-shell-queue--point-not-running-p)
-    ("jo" "Open shell" agent-shell-queue-buffer-open-shell)
     ("lu" "Move up" agent-shell-queue-buffer-move-up
      :if agent-shell-queue--point-editable-p)
     ("ld" "Move down" agent-shell-queue-buffer-move-down
      :if agent-shell-queue--point-editable-p)
     ("ta" "Assign to shell…" agent-shell-queue-buffer-assign
-     :if agent-shell-queue--point-editable-p)]]
+     :if agent-shell-queue--point-editable-p)
+    ("td" "Destructive…" agent-shell-queue-destructive-menu
+     :if agent-shell-queue--point-not-running-p)]
+   ["Task: Action"
+    :if agent-shell-queue--point-item
+    ("te" "Edit" agent-shell-queue-edit-task)
+    ("dt" "Dispatch task" agent-shell-queue-buffer-send
+     :if agent-shell-queue--point-dispatchable-p)
+    ("a" "Abort" agent-shell-queue-buffer-abort
+     :if agent-shell-queue--point-running-p)
+    ("er" "Re-enqueue" agent-shell-queue-buffer-reenqueue
+     :if agent-shell-queue--point-done-p)
+    ("et" "Enqueue" agent-shell-queue-enqueue-dispatch)
+    ("z" "Mark done" agent-shell-queue-buffer-mark-done
+     :if agent-shell-queue--point-not-done-p)
+    ("tp" "Pause item" agent-shell-queue-buffer-pause
+     :if agent-shell-queue--point-active-p)
+    ("ts" "Schedule" agent-shell-queue-buffer-schedule
+     :if agent-shell-queue--point-deferred-p)
+    ("tu" "Unblock" agent-shell-queue-buffer-unblock
+     :if agent-shell-queue--point-blocked-p)
+    ("tc" "Enqueue copy" agent-shell-queue-buffer-enqueue-running-copy
+     :if agent-shell-queue--point-running-p)
+    ("tk" "Untrack running" agent-shell-queue-buffer-untrack-running
+     :if agent-shell-queue--point-running-p)]]
   [["Capture"
     ("cw" "Compose" agent-shell-queue-capture)
     ("ca" "After point" agent-shell-queue-buffer-capture-after)
@@ -3455,6 +3455,7 @@ Installed as :before advice on `shell-maker-submit'."
   (agent-shell-queue--ensure-subscription (current-buffer))
   (push (cons (agent-shell-queue-item-id item) (point-max))
         agent-shell-queue--response-start-positions)
+  (agent-shell-queue--on-prompt-sent (current-buffer))
   (agent-shell-queue--save)
   (agent-shell-queue--refresh-buffer)))
 
