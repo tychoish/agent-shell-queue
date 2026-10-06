@@ -2441,7 +2441,7 @@ function, offer to create a new buffer of the same type."
     ("gi" "Reset all to default" agent-shell-queue-reset-all-input-modes)
     ("gm" agent-shell-queue-set-input-mode-default
      :description (lambda ()
-                    (format "toggle input mode " agent-shell-queue-input-mode-default)))]
+                    (format "toggle input mode [%s]" agent-shell-queue-input-mode-default)))]
    ["Task: Manage"
     :if agent-shell-queue--point-item
     ("tbe" "Background on" agent-shell-queue-buffer-enable-background-task
