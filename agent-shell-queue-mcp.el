@@ -33,19 +33,15 @@
   :group 'mcpkit
   :prefix "agent-shell-queue-mcp-")
 
-(defcustom agent-shell-queue-mcp-port 8765
-  "Default TCP port for the asq MCP service."
-  :type 'integer
-  :group 'agent-shell-queue-mcp)
-
 ;;; Service Definition & Top-Level Tool Registration
 
 (defvar agent-shell-queue-mcp-service
   (or (mcpkit-get-service 'asq)
       (mcpkit-define-service 'asq
-        :port agent-shell-queue-mcp-port
         :description "Agent Shell Queue (asq) Management and Inspection"))
   "The asq `mcpkit-service' instance.")
+
+(mcpkit-register-autostart 'asq :on-collision 'namespace)
 
 (defun agent-shell-queue-mcp--ensure-queue ()
   "Ensure `agent-shell-queue' is loaded."
