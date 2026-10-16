@@ -752,3 +752,122 @@ route a keystroke typed there to the menu command."
       (agent-shell-menu-output-key-0)
       (should agent-shell-menu-test--fn-called))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Buffer naming and formatting
+
+(ert-deftest agent-shell-menu/slugify-basic ()
+  (should (equal "foo" (agent-shell-menu--slugify "foo")))
+  (should (equal "foo-bar" (agent-shell-menu--slugify "foo bar")))
+  (should (equal "foo-bar" (agent-shell-menu--slugify "Foo Bar")))
+  (should (equal "worker-1" (agent-shell-menu--slugify "worker 1")))
+  (should (equal "task" (agent-shell-menu--slugify "--task--")))
+  (should (equal "" (agent-shell-menu--slugify ""))))
+
+(ert-deftest agent-shell-menu/slugify-paths ()
+  (should (equal "emacs.d" (agent-shell-menu--slugify "/home/tychoish/.emacs.d")))
+  (should (equal "emacs.d" (agent-shell-menu--slugify ".emacs.d")))
+  (should (equal "agent-shell-queue" (agent-shell-menu--slugify "agent-shell-queue")))
+  (should (equal "pkg" (agent-shell-menu--slugify "./src/pkg/"))))
+
+(ert-deftest agent-shell-menu/agent-slug ()
+  (should (equal "claude" (agent-shell-menu--agent-slug "Claude")))
+  (should (equal "claude" (agent-shell-menu--agent-slug "Claude Code")))
+  (should (equal "antigravity" (agent-shell-menu--agent-slug "Antigravity")))
+  (should (equal "gemini" (agent-shell-menu--agent-slug 'gemini)))
+  (should (equal "copilot" (agent-shell-menu--agent-slug '(:identifier copilot :buffer-name "Copilot"))))
+  (should (equal "agent" (agent-shell-menu--agent-slug nil)))
+  (should (equal "agent" (agent-shell-menu--agent-slug ""))))
+
+(ert-deftest agent-shell-menu/format-buffer-name-base ()
+  (should (equal "*claude-agent-shell-queue*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue")))
+  (should (equal "*antigravity-emacs.d*"
+                 (agent-shell-menu-format-buffer-name "Antigravity" "/home/tychoish/.emacs.d"))))
+
+(ert-deftest agent-shell-menu/format-buffer-name-with-suffix ()
+  (should (equal "*claude-agent-shell-queue<feature-x>*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "feature-x")))
+  (should (equal "*claude-agent-shell-queue<feature-x>*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "<feature-x>")))
+  (should (equal "*claude-agent-shell-queue<worker-1>*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "worker 1")))
+  (should (equal "*antigravity-emacs.d<fix-bug>*"
+                 (agent-shell-menu-format-buffer-name "Antigravity" "/home/tychoish/.emacs.d" "fix-bug"))))
+
+(ert-deftest agent-shell-menu/format-buffer-name-strips-prefix-and-asterisks ()
+  (should (equal "*claude-agent-shell-queue<feature-x>*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "*claude-agent-shell-queue<feature-x>*")))
+  (should (equal "*claude-agent-shell-queue<task>*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "claude-agent-shell-queue-task")))
+  (should (equal "*claude-agent-shell-queue*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "")))
+  (should (equal "*claude-agent-shell-queue*"
+                 (agent-shell-menu-format-buffer-name "Claude" "agent-shell-queue" "   "))))
+
+(ert-deftest agent-shell-menu/name-buffer-renames-buffer ()
+  (let ((buf (generate-new-buffer "*asq-test-shell*")))
+    (unwind-protect
+        (with-current-buffer buf
+          (setq major-mode 'agent-shell-mode)
+          (setq default-directory "/tmp/my-proj/")
+          (setq agent-shell--state (list :agent-config '(:identifier testagent :buffer-name "TestAgent")))
+          ;; Initial name
+          (let ((res (agent-shell-menu-name-buffer buf "worker-1")))
+            (should (equal "*testagent-my-proj<worker-1>*" res))
+            (should (equal "*testagent-my-proj<worker-1>*" (buffer-name buf)))
+            (should (equal "worker-1" agent-shell-menu-session-name)))
+          ;; Rename replacing existing suffix
+          (let ((res (agent-shell-menu-name-buffer buf "worker-2")))
+            (should (equal "*testagent-my-proj<worker-2>*" res))
+            (should (equal "*testagent-my-proj<worker-2>*" (buffer-name buf)))
+            (should (equal "worker-2" agent-shell-menu-session-name)))
+          ;; Clear name
+          (let ((res (agent-shell-menu-name-buffer buf "")))
+            (should (equal "*testagent-my-proj*" res))
+            (should (equal "*testagent-my-proj*" (buffer-name buf)))
+            (should (null agent-shell-menu-session-name))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-menu/name-buffer-syncs-viewport ()
+  (let* ((shell (generate-new-buffer "*asq-test-shell*"))
+         (vp (generate-new-buffer (concat "*asq-test-shell*" agent-shell-viewport--suffix))))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell
+            (setq major-mode 'agent-shell-mode)
+            (setq default-directory "/tmp/my-proj/")
+            (setq agent-shell--state (list :agent-config '(:identifier testagent :buffer-name "TestAgent")))
+            (agent-shell-menu-name-buffer shell "task"))
+          (should (equal (concat "*testagent-my-proj<task>*" agent-shell-viewport--suffix)
+                         (buffer-name vp))))
+      (when (buffer-live-p shell) (kill-buffer shell))
+      (when (buffer-live-p vp) (kill-buffer vp)))))
+
+(ert-deftest agent-shell-menu/name-buffer-syncs-queue-state ()
+  (require 'agent-shell-queue-core)
+  (let* ((shell (generate-new-buffer "*asq-test-shell*"))
+         (old-name "*asq-test-shell*")
+         (items-cell (cons old-name (list "fake-item"))))
+    (unwind-protect
+        (let ((agent-shell-queue--store (agent-shell-queue--make-store))
+              (agent-shell-queue--queue (agent-shell-queue-queue--make)))
+          (setf (agent-shell-queue-store-items agent-shell-queue--store) (list items-cell))
+          (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue) (list old-name "other"))
+          (with-current-buffer shell
+            (setq major-mode 'agent-shell-mode)
+            (setq default-directory "/tmp/my-proj/")
+            (setq agent-shell--state (list :agent-config '(:identifier testagent :buffer-name "TestAgent")))
+            (agent-shell-menu-name-buffer shell "task"))
+          ;; Bucket re-keyed
+          (should (assoc "*testagent-my-proj<task>*" (agent-shell-queue-store-items agent-shell-queue--store)))
+          (should-not (assoc old-name (agent-shell-queue-store-items agent-shell-queue--store)))
+          ;; Session paused updated
+          (should (member "*testagent-my-proj<task>*" (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+          (should-not (member old-name (agent-shell-queue-queue-session-paused agent-shell-queue--queue))))
+      (when (buffer-live-p shell) (kill-buffer shell)))))
+
+(ert-deftest agent-shell-menu/action-alist-naming-entries ()
+  (should (assoc "name buffer" agent-shell-menu-action-alist))
+  (should (assoc "rename buffer" agent-shell-menu-action-alist)))
+

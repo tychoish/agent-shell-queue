@@ -236,6 +236,162 @@ Optionally, get notified of completion with ON-SUCCESS function."
        :require-match t
        :history 'agent-shell-menu-switch-project-session)))))
 
+;;; Buffer Naming and Formatting
+
+(defvar-local agent-shell-menu-session-name nil
+  "Custom session name suffix for this `agent-shell' buffer.")
+
+(defvar-local agent-shell-menu-base-buffer-name nil
+  "Base `*agent-project*' buffer name for this `agent-shell' buffer.")
+
+(defvar agent-shell-menu-name-buffer-history nil
+  "Minibuffer history for `agent-shell-menu-name-buffer'.")
+
+(defun agent-shell-menu--slugify (str)
+  "Convert STR into a clean lowercase slug with hyphens.
+Strips leading punctuation (such as `.' or `/'), replaces whitespace
+with hyphens, and trims surrounding hyphens."
+  (let* ((raw (string-trim (or str "")))
+         (base (file-name-nondirectory (directory-file-name raw)))
+         (stripped (replace-regexp-in-string "\\`[./]+" "" base))
+         (clean (if (string-empty-p stripped) base stripped))
+         (slug (downcase (replace-regexp-in-string "[^[:alnum:]_.-]+" "-" clean))))
+    (string-trim slug "-+" "-+")))
+
+(defun agent-shell-menu--agent-slug (agent)
+  "Convert AGENT (symbol, string, or config alist) into a short agent slug."
+  (cond
+   ((null agent) "agent")
+   ((symbolp agent) (downcase (symbol-name agent)))
+   ((consp agent)
+    (let ((name (or (map-elt agent :identifier)
+                    (map-elt agent :buffer-name))))
+      (agent-shell-menu--agent-slug name)))
+   ((stringp agent)
+    (let ((trimmed (string-trim agent)))
+      (if (string-empty-p trimmed)
+          "agent"
+        (downcase (car (split-string trimmed))))))
+   (t "agent")))
+
+;;;###autoload
+(defun agent-shell-menu-format-buffer-name (agent-name project-name &optional session-name)
+  "Format an agent-shell buffer name from AGENT-NAME and PROJECT-NAME.
+Optional SESSION-NAME produces `*agent-project<name>*\='; otherwise
+returns `*agent-project*\='."
+  (let* ((agent-slug (agent-shell-menu--agent-slug agent-name))
+         (project-slug (let ((s (agent-shell-menu--slugify project-name)))
+                         (if (string-empty-p s) "project" s)))
+         (clean-name (when (and session-name (stringp session-name))
+                       (let* ((s (string-trim session-name))
+                              (s (string-trim s "\\*+" "\\*+"))
+                              (prefix (format "%s-%s" agent-slug project-slug))
+                              (s (if (string-prefix-p prefix s)
+                                     (substring s (length prefix))
+                                   s))
+                              (s (string-trim s "[-<]+" "[->]+")))
+                         (agent-shell-menu--slugify s)))))
+    (if (and clean-name (not (string-empty-p clean-name)))
+        (format "*%s-%s<%s>*" agent-slug project-slug clean-name)
+      (format "*%s-%s*" agent-slug project-slug))))
+
+(defun agent-shell-menu--sync-viewport-name (old-shell-name new-shell-name)
+  "Rename any viewport buffer for OLD-SHELL-NAME to match NEW-SHELL-NAME."
+  (when (boundp 'agent-shell-viewport--suffix)
+    (when-let* ((old-viewport (get-buffer (concat old-shell-name agent-shell-viewport--suffix)))
+                ((buffer-live-p old-viewport)))
+      (with-current-buffer old-viewport
+        (rename-buffer (concat new-shell-name agent-shell-viewport--suffix) t)))))
+
+(defun agent-shell-menu--sync-queue-session-name (old-shell-name new-shell-name)
+  "Update `agent-shell-queue' runtime state when a session is renamed.
+Migrates bucket items, session pause state, and halted sessions from
+OLD-SHELL-NAME to NEW-SHELL-NAME."
+  (when (and (boundp 'agent-shell-queue--store)
+             agent-shell-queue--store)
+    (when-let* ((cell (assoc old-shell-name (agent-shell-queue-store-items agent-shell-queue--store))))
+      (setcar cell new-shell-name)))
+  (when (and (boundp 'agent-shell-queue--queue)
+             agent-shell-queue--queue)
+    (let ((paused (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+      (when (member old-shell-name paused)
+        (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+              (seq-map (lambda (s) (if (equal s old-shell-name) new-shell-name s)) paused))))
+    (let ((halted (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)))
+      (when (member old-shell-name halted)
+        (setf (agent-shell-queue-queue-halted-sessions agent-shell-queue--queue)
+              (seq-map (lambda (s) (if (equal s old-shell-name) new-shell-name s)) halted))))))
+
+;;;###autoload
+(defun agent-shell-menu-name-buffer (&optional buffer name)
+  "Assign a custom NAME suffix to agent-shell BUFFER.
+Formats the buffer name as `*agent-project-<name>*'.
+When called interactively:
+- Uses the current session buffer (or viewport's shell buffer) if in one.
+- Otherwise prompts with `agent-shell-menu--pick-buffer'.
+- Prompts for NAME, defaulting to the current custom name (if any).
+If NAME is empty, clears the custom name and restores `*agent-project*'.
+
+Also renames any associated viewport buffer and updates `agent-shell-queue'
+tracking to point to the new buffer name."
+  (interactive
+   (let* ((shell (or (agent-shell-menu--session-shell-buffer)
+                     (agent-shell-menu--pick-buffer "Name agent-shell buffer: ")))
+          (cur-name (with-current-buffer shell agent-shell-menu-session-name))
+          (prompt (if (and cur-name (not (string-empty-p cur-name)))
+                      (format "Session name (currently %s): " cur-name)
+                    "Session name (suffix): "))
+          (input (read-string prompt cur-name 'agent-shell-menu-name-buffer-history cur-name)))
+     (list shell input)))
+  (let ((buf (or buffer (agent-shell-menu--session-shell-buffer))))
+    (unless (and buf (buffer-live-p buf))
+      (user-error "No live agent-shell buffer specified"))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'agent-shell-mode)
+        (user-error "Buffer %s is not an agent-shell buffer" (buffer-name buf)))
+      (let* ((old-name (buffer-name buf))
+             (config (ignore-errors (agent-shell-get-config buf)))
+             (agent-name (or (map-elt config :identifier)
+                             (map-elt config :buffer-name)
+                             (map-nested-elt agent-shell--state '(:agent-config :buffer-name))))
+             (proj-name (or (ignore-errors (agent-shell--project-name))
+                            (file-name-nondirectory (directory-file-name default-directory))))
+             (clean-suffix (when (and name (not (string-empty-p (string-trim name))))
+                             (agent-shell-menu--slugify (string-trim name "<+" ">+"))))
+             (new-name (agent-shell-menu-format-buffer-name agent-name proj-name clean-suffix)))
+        (unless (equal old-name new-name)
+          (if (fboundp 'shell-maker-set-buffer-name)
+              (shell-maker-set-buffer-name buf new-name)
+            (rename-buffer new-name t))
+          (setq-local agent-shell-menu-session-name clean-suffix)
+          (setq-local agent-shell-menu-base-buffer-name
+                      (agent-shell-menu-format-buffer-name agent-name proj-name))
+          (agent-shell-menu--sync-viewport-name old-name (buffer-name buf))
+          (agent-shell-menu--sync-queue-session-name old-name (buffer-name buf))
+          (message "Renamed agent-shell buffer: %s → %s" old-name (buffer-name buf))))
+      (buffer-name buf))))
+
+;;;###autoload
+(defalias 'agent-shell-menu-rename-buffer #'agent-shell-menu-name-buffer)
+
+;;;###autoload
+(defun agent-shell-menu-new-named-shell (name &optional dir)
+  "Prompt for NAME and start a new named agent-shell session in DIR.
+The resulting buffer is named `*agent-project-<name>*'."
+  (interactive
+   (let* ((n (read-string "Session name (suffix): " nil 'agent-shell-menu-name-buffer-history))
+          (d (read-directory-name "Shell directory: " default-directory)))
+     (list n d)))
+  (let* ((default-directory (or dir default-directory))
+         (buf (agent-shell--new-shell :location default-directory)))
+    (when (and buf (buffer-live-p buf))
+      (agent-shell-menu-name-buffer buf name))
+    buf))
+
+(advice-add 'agent-shell-rename-buffer :override #'agent-shell-menu-name-buffer)
+(define-key agent-shell-mode-map [remap rename-buffer] #'agent-shell-menu-name-buffer)
+(define-key agent-shell-mode-map [remap shell-maker-rename-buffer] #'agent-shell-menu-name-buffer)
+
 ;;; Actions and Commands
 
 (defvar agent-shell-menu-action-alist
@@ -268,6 +424,8 @@ Optionally, get notified of completion with ON-SUCCESS function."
     ("copy session id" . (agent-shell-copy-session-id . agent-shell-menu--in-session-p))
     ("open transcript" . (agent-shell-open-transcript . agent-shell-menu--in-session-p))
     ("session info" . (agent-shell-menu-session-info . agent-shell-menu--in-session-p))
+    ("name buffer" . (agent-shell-menu-name-buffer . agent-shell-menu--in-session-p))
+    ("rename buffer" . (agent-shell-menu-name-buffer . agent-shell-menu--in-session-p))
     ("collapse menu" . (agent-shell-menu-select-collapse . agent-shell-menu--in-session-p))
     ;; Queue actions
     ("interject" . (agent-shell-queue-interject . agent-shell-queue-interject-available-p))
@@ -855,9 +1013,11 @@ Keys are assigned as 1, 2, 3… in button order."
   ;; Session management (always), act/write/settings/fork (session-conditional)
   [["Sessions"
     ("sn" "New shell" agent-shell-new-shell)
+    ("sN" "New named shell" agent-shell-menu-new-named-shell)
     ("st" "New temp shell" agent-shell-new-temp-shell)
     ("sh" "Hydrate (resume)" agent-shell-resume-session)
     ("sd" "New in directory" agent-shell-menu-new-shell-in-dir)
+    ("sr" "Name buffer" agent-shell-menu-name-buffer)
     ("ss" "Switch session" agent-shell-switch-buffer)
     ("rr" "Review changes" agent-review
      :if agent-shell-menu--agent-review-available-p)
@@ -964,6 +1124,7 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
 
 (agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
+(agent-shell-menu-mode-key "R" agent-shell-menu-name-buffer)
 
 ;; Wire menu key into queue mode map
 
