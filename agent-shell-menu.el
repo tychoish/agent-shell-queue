@@ -40,10 +40,15 @@
 (require 'agent-shell-queue nil t)
 (require 'agent-shell-workflow nil t)
 (require 'hitl nil t)
+(require 'hitl-ui nil t)
 
 (defvar agent-shell-queue-input-mode-default)
 
 (declare-function hitl-view-questions "hitl-ui")
+(declare-function hitl-list "hitl-ui")
+
+(when (and (fboundp 'hitl-list) (not (fboundp 'hitl-view-questions)))
+  (defalias 'hitl-view-questions #'hitl-list))
 (declare-function agent-shell-workflow-select "agent-shell-workflow-menu")
 (declare-function agent-shell-queue-buffer-open "agent-shell-queue-ui")
 (declare-function agent-shell-queue-buffer-switch "agent-shell-queue-ui")
@@ -937,9 +942,10 @@ Also binds FN directly in `agent-shell-viewport-view-mode-map'."
       (fboundp 'agent-shell-queue-buffer-open)))
 
 (defun agent-shell-menu--hitl-available-p ()
-  "Return non-nil when `hitl' is loaded."
-  (or (featurep 'hitl)
-      (fboundp 'hitl-view-questions)))
+  "Return non-nil when HITL question viewing is available."
+  (when (and (fboundp 'hitl-list) (not (fboundp 'hitl-view-questions)))
+    (defalias 'hitl-view-questions #'hitl-list))
+  (fboundp 'hitl-view-questions))
 
 (defun agent-shell-menu--interject-available-p ()
   "Return non-nil when queue interjection is available."
