@@ -26,26 +26,40 @@
   "Extract the plist from a parsed transient suffix spec SUFFIX.
 Handles both the (CLASS :key ...) cons format and the
 (LEVEL CLASS (:key ...)) tuple format produced by different transient versions."
-  (if (integerp (car suffix))
-      (nth 2 suffix)
-    (cdr suffix)))
+  (cond
+   ((and (listp suffix)
+         (or (null (car suffix)) (integerp (car suffix)))
+         (symbolp (cadr suffix))
+         (listp (nth 2 suffix)))
+    (nth 2 suffix))
+   ((and (listp suffix)
+         (symbolp (car suffix))
+         (listp (cadr suffix)))
+    (cadr suffix))
+   ((and (listp suffix)
+         (symbolp (car suffix)))
+    (cdr suffix))
+   (t suffix)))
 
 ;;; Transient key introspection helpers
 
-(defun transient-test/collect-keys (prefix-sym)
-  "Return a list of all :key strings in PREFIX-SYM's transient layout."
-  (let ((queue (list (get prefix-sym 'transient--layout)))
+(defun transient-test/collect-keys (prefix-sym-or-layout)
+  "Return a list of all :key strings in PREFIX-SYM-OR-LAYOUT's transient layout."
+  (let ((queue (list (if (symbolp prefix-sym-or-layout)
+                         (get prefix-sym-or-layout 'transient--layout)
+                       prefix-sym-or-layout)))
         keys)
     (while queue
       (let ((node (pop queue)))
         (cond
-          ((and (vectorp node) (not (byte-code-function-p node)))
-           (setq queue (append (seq-into node 'list) queue)))
-          ((and (consp node) (eq (car node) 'transient-suffix))
-           (when-let* ((key (plist-get (cdr node) :key)))
-             (push key keys)))
-          ((consp node)
-           (setq queue (append node queue))))))
+         ((and (vectorp node) (not (byte-code-function-p node)))
+          (setq queue (append (seq-into node 'list) queue)))
+         ((consp node)
+          (let* ((plist (agent-shell-test/suffix-plist node))
+                 (key (and (listp plist) (plist-get plist :key))))
+            (if key
+                (push key keys)
+              (setq queue (append node queue))))))))
     (nreverse keys)))
 
 (defun transient-test/key-sequence-prefix-p (short long)

@@ -14,6 +14,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'agent-shell-queue)
+(require 'test-helper)
 
 ;;; Test helpers
 
@@ -4578,5 +4579,18 @@ leaving sessions that were already individually paused beforehand untouched."
   (let ((keys (transient-test/collect-keys 'agent-shell-queue-dispatch)))
     (should (member "dt" keys))
     (should-not (member "!" keys))))
+
+(ert-deftest agent-shell-queue/transient-collect-keys-v1-and-v2-compatibility ()
+  "Test that transient-test/collect-keys handles both v1 and v2 transient layouts."
+  (let ((v1-layout (vector nil 'transient-columns nil
+                           (list (vector nil 'transient-column '(:description "Task")
+                                        (list (list nil 'transient-suffix '(:key "dt" :description "Dispatch"))
+                                              (list 1 'transient-suffix '(:key "te" :description "Edit")))))))
+        (v2-layout (vector 2 nil
+                           (list (vector 'transient-column '(:description "Task")
+                                        (list '(transient-suffix :key "dt" :description "Dispatch")
+                                              '(transient-suffix :key "te" :description "Edit")))))))
+    (should (equal '("dt" "te") (transient-test/collect-keys v1-layout)))
+    (should (equal '("dt" "te") (transient-test/collect-keys v2-layout)))))
 
 ;;; test-agent-shell-queue.el ends here
