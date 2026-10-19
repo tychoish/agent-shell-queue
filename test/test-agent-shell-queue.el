@@ -4593,4 +4593,65 @@ leaving sessions that were already individually paused beforehand untouched."
     (should (equal '("dt" "te") (transient-test/collect-keys v1-layout)))
     (should (equal '("dt" "te") (transient-test/collect-keys v2-layout)))))
 
+
+(ert-deftest agent-shell-queue/unblock-cleans-stale-ids ()
+  "agent-shell-queue-unblock removes ID from stale-item-ids list."
+  (agent-shell-queue-test/isolate-no-sub
+    (setf (agent-shell-queue-store-items agent-shell-queue--store)
+          (agent-shell-queue-test/populate '("buf" ("q-1" "p" blocked.skip nil))))
+    (setq agent-shell-queue--stale-item-ids '("q-1" "q-other"))
+    (agent-shell-queue-unblock "q-1")
+    (should (equal agent-shell-queue--stale-item-ids '("q-other")))
+    (should (eq 'active
+                (agent-shell-queue-item-status
+                 (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
+
+(ert-deftest agent-shell-queue/buffer-schedule-unblocks-and-unpauses ()
+  "Scheduling a blocked.skip item from buffer-schedule unblocks, unpauses, and triggers send-next."
+  (agent-shell-queue-test/isolate-no-sub
+    (let ((buf (generate-new-buffer "*asq-sched-buf*"))
+          (send-next-called nil))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (agent-shell-queue-test/populate (list (buffer-name buf) '("q-1" "p" blocked.skip nil))))
+            (setq agent-shell-queue--stale-item-ids '("q-1"))
+            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+                  (list (buffer-name buf)))
+            (cl-letf (((symbol-function 'tabulated-list-get-id) (lambda () "q-1"))
+                      ((symbol-function 'agent-shell-queue-buffer-refresh) (lambda () t))
+                      ((symbol-function 'agent-shell-queue--send-next-for-buffer)
+                       (lambda (b) (setq send-next-called b))))
+              (agent-shell-queue-buffer-schedule)
+              (should (eq send-next-called buf))
+              (should-not (member (buffer-name buf) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+              (should-not (member "q-1" agent-shell-queue--stale-item-ids))
+              (should (eq 'active
+                          (agent-shell-queue-item-status
+                           (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-shell-queue/send-now-unblocks-blocked-skip-when-idle ()
+  "agent-shell-queue--send-now unblocks blocked.skip item and sends immediately when shell idle."
+  (agent-shell-queue-test/isolate-no-sub
+    (let ((buf (generate-new-buffer "*asq-send-now-buf*"))
+          (sent-item nil))
+      (unwind-protect
+          (progn
+            (setf (agent-shell-queue-store-items agent-shell-queue--store)
+                  (agent-shell-queue-test/populate (list (buffer-name buf) '("q-1" "p" blocked.skip nil))))
+            (setq agent-shell-queue--stale-item-ids '("q-1"))
+            (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+                  (list (buffer-name buf)))
+            (cl-letf (((symbol-function 'agent-shell-queue-send-item)
+                       (lambda (id) (setq sent-item id))))
+              (agent-shell-queue--send-now "q-1")
+              (should (equal sent-item "q-1"))
+              (should-not (member (buffer-name buf) (agent-shell-queue-queue-session-paused agent-shell-queue--queue)))
+              (should-not (member "q-1" agent-shell-queue--stale-item-ids))
+              (should (eq 'active
+                          (agent-shell-queue-item-status
+                           (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
+        (kill-buffer buf)))))
+
 ;;; test-agent-shell-queue.el ends here

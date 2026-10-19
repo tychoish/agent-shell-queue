@@ -1385,6 +1385,8 @@ For blocked.task, cascades active to subsequent blocked.dep items."
   (when-let* ((pair (agent-shell-queue--item-by-id id))
               (buf-name (car pair))
               (item (cdr pair)))
+    (setq agent-shell-queue--stale-item-ids
+          (delete id agent-shell-queue--stale-item-ids))
     (pcase (agent-shell-queue-item-status item)
       ('blocked.task
        (setf (agent-shell-queue-item-status item) 'active)
@@ -2362,6 +2364,12 @@ immediately (normal path).  When a running item exists for that buffer:
               (status (agent-shell-queue-item-status item)))
     (if (not (agent-shell-queue--has-running-item-p buf-name))
         (progn
+          (when (agent-shell-queue--blocked-status-p status)
+            (setf (agent-shell-queue-item-status item) 'active)
+            (setq agent-shell-queue--stale-item-ids
+                  (delete id agent-shell-queue--stale-item-ids))
+            (agent-shell-queue--session-unpause-name buf-name)
+            (agent-shell-queue--save))
           (agent-shell-queue--assert-not-running item)
           (agent-shell-queue-send-item id))
       (pcase status

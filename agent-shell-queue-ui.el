@@ -1082,6 +1082,7 @@ Draft items are promoted directly to active without cascade."
   (interactive)
   (when-let* ((id (tabulated-list-get-id))
               (pair (agent-shell-queue--item-by-id id))
+              (buf-name (car pair))
               (item (cdr pair))
               (status (agent-shell-queue-item-status item)))
     (cond
@@ -1091,6 +1092,9 @@ Draft items are promoted directly to active without cascade."
       (setf (agent-shell-queue-item-status item) 'active)
       (agent-shell-queue--save))
      (t (user-error "Item %s cannot be scheduled from status %s" id status)))
+    (when-let* ((buf (get-buffer buf-name)))
+      (agent-shell-queue--session-unpause-name buf-name)
+      (agent-shell-queue--send-next-for-buffer buf))
     (agent-shell-queue-buffer-refresh)))
 
 (defun agent-shell-queue-buffer-unblock ()
@@ -1098,6 +1102,11 @@ Draft items are promoted directly to active without cascade."
   (interactive)
   (when-let* ((id (tabulated-list-get-id)))
     (agent-shell-queue-unblock id)
+    (when-let* ((pair (agent-shell-queue--item-by-id id))
+                (buf-name (car pair))
+                (buf (get-buffer buf-name)))
+      (agent-shell-queue--session-unpause-name buf-name)
+      (agent-shell-queue--send-next-for-buffer buf))
     (agent-shell-queue-buffer-refresh)))
 
 (defun agent-shell-queue-item-view-unblock ()
@@ -1105,6 +1114,11 @@ Draft items are promoted directly to active without cascade."
   (interactive)
   (when-let* ((id agent-shell-queue--item-view-id))
     (agent-shell-queue-unblock id)
+    (when-let* ((pair (agent-shell-queue--item-by-id id))
+                (buf-name (car pair))
+                (buf (get-buffer buf-name)))
+      (agent-shell-queue--session-unpause-name buf-name)
+      (agent-shell-queue--send-next-for-buffer buf))
     (agent-shell-queue-item-view-refresh)))
 
 (defun agent-shell-queue-buffer-remove ()
@@ -1366,7 +1380,8 @@ Changes take effect immediately via `agent-shell-queue-buffer-refresh'."
          :cmd 'agent-shell-queue-item-view-schedule
          :group "Manage Task"
          :annotation "Return item to active dispatch queue"
-         :if (lambda () (memq (agent-shell-queue--iv-status) '(draft))))
+         :if (lambda () (or (eq (agent-shell-queue--iv-status) 'draft)
+                            (agent-shell-queue--blocked-status-p (agent-shell-queue--iv-status)))))
    (list :key "tu"
          :label "Unblock"
          :cmd 'agent-shell-queue-item-view-unblock
@@ -1648,9 +1663,19 @@ based on the item's current status — see `agent-shell-queue--send-now'."
   (interactive)
   (when-let* ((id agent-shell-queue--item-view-id)
               (pair (agent-shell-queue--item-by-id id))
-              ((eq (agent-shell-queue-item-status (cdr pair)) 'draft)))
-    (setf (agent-shell-queue-item-status (cdr pair)) 'active)
-    (agent-shell-queue--save)
+              (buf-name (car pair))
+              (item (cdr pair))
+              (status (agent-shell-queue-item-status item)))
+    (cond
+     ((agent-shell-queue--blocked-status-p status)
+      (agent-shell-queue-unblock id))
+     ((eq status 'draft)
+      (setf (agent-shell-queue-item-status item) 'active)
+      (agent-shell-queue--save))
+     (t (user-error "Item %s cannot be scheduled from status %s" id status)))
+    (when-let* ((buf (get-buffer buf-name)))
+      (agent-shell-queue--session-unpause-name buf-name)
+      (agent-shell-queue--send-next-for-buffer buf))
     (agent-shell-queue--refresh-buffer)
     (agent-shell-queue-item-view-refresh)))
 
