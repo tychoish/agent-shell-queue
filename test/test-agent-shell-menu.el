@@ -338,11 +338,6 @@ used as a transient suffix."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-menu--permission-suffixes
 
-(defun agent-shell-test/suffix-plist (suffix)
-  "Return properties of transient SUFFIX as a plain plist.
-`transient-parse-suffix' returns (transient-suffix :key K :description D ...)
-so this strips the leading type tag via `cdr'."
-  (cdr suffix))
 
 (ert-deftest agent-shell-menu/permission-suffixes-empty-when-no-pending ()
   "No suffixes generated when no permission is pending."

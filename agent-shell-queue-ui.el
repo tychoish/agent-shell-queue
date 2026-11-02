@@ -1487,7 +1487,7 @@ Each entry is a plist with keys:
   "Build `agent-shell-queue-item-view-mode-map' from the action table."
   (let ((m (make-sparse-keymap)))
     (seq-do (lambda (entry)
-              (keymap-set m (plist-get entry :key) (plist-get entry :cmd)))
+              (define-key m (kbd (plist-get entry :key)) (plist-get entry :cmd)))
             agent-shell-queue--item-view-action-table)
     m))
 
