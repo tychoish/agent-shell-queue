@@ -41,7 +41,6 @@
         :description "Agent Shell Queue (asq) Management and Inspection"))
   "The asq `mcpkit-service' instance.")
 
-(mcpkit-register-autostart 'asq :on-collision 'namespace)
 
 (defun agent-shell-queue-mcp--ensure-queue ()
   "Ensure `agent-shell-queue' is loaded."

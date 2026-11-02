@@ -162,7 +162,6 @@ instead of introducing a second public entry point.  Respects
 			      :existing-only t))
 			   shell-buffer))))
 
-(advice-add 'agent-shell-switch-buffer :override #'agent-shell-menu--switch-buffer)
 
 ;;;###autoload
 (defun agent-shell-menu-select-session-mode (&optional on-success)
@@ -393,9 +392,6 @@ The resulting buffer is named `*agent-project-<name>*'."
       (agent-shell-menu-name-buffer buf name))
     buf))
 
-(advice-add 'agent-shell-rename-buffer :override #'agent-shell-menu-name-buffer)
-(define-key agent-shell-mode-map [remap rename-buffer] #'agent-shell-menu-name-buffer)
-(define-key agent-shell-mode-map [remap shell-maker-rename-buffer] #'agent-shell-menu-name-buffer)
 
 ;;; Actions and Commands
 
@@ -1129,12 +1125,14 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
     ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
 
-(agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
-(agent-shell-menu-mode-key "R" agent-shell-menu-name-buffer)
+(with-eval-after-load 'agent-shell
+  (agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
+  (agent-shell-menu-mode-key "R" agent-shell-menu-name-buffer))
 
 ;; Wire menu key into queue mode map
-
-(define-key agent-shell-queue-mode-map (kbd "M") #'agent-shell-menu-dispatch)
+(with-eval-after-load 'agent-shell-queue-ui
+  (when (boundp 'agent-shell-queue-mode-map)
+    (keymap-set agent-shell-queue-mode-map "M" #'agent-shell-menu-dispatch)))
 
 (provide 'agent-shell-menu)
 

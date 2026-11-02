@@ -71,17 +71,17 @@
 
 (defvar agent-shell-queue-capture-mode-map
   (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "C-c C-c") #'agent-shell-queue-capture-confirm)
-    (define-key m (kbd "C-c C-k") #'agent-shell-queue-capture-cancel)
-    (define-key m (kbd "C-c C-s") #'agent-shell-queue-capture-save-draft)
-    (define-key m (kbd "C-c C-b") #'agent-shell-queue-capture-enable-background-task)
-    (define-key m (kbd "C-c M-b") #'agent-shell-queue-capture-disable-background-task)
-    (define-key m (kbd "C-c C-y") #'agent-shell-queue-capture-yank-kill)
-    (define-key m (kbd "C-c M-w") #'agent-shell-queue-capture-yank-clipboard)
-    (define-key m (kbd "C-c C-p") #'agent-shell-queue-capture-insert-thing-at-point)
-    (define-key m (kbd "C-c C-x") #'agent-shell-queue-capture-select-context)
-    (define-key m (kbd "C-c C-f") #'agent-shell-queue-insert-file)
-    (define-key m (kbd "C-c M-f") #'agent-shell-queue-insert-buffer)
+    (keymap-set m "C-c C-c" #'agent-shell-queue-capture-confirm)
+    (keymap-set m "C-c C-k" #'agent-shell-queue-capture-cancel)
+    (keymap-set m "C-c C-s" #'agent-shell-queue-capture-save-draft)
+    (keymap-set m "C-c C-b" #'agent-shell-queue-capture-enable-background-task)
+    (keymap-set m "C-c M-b" #'agent-shell-queue-capture-disable-background-task)
+    (keymap-set m "C-c C-y" #'agent-shell-queue-capture-yank-kill)
+    (keymap-set m "C-c M-w" #'agent-shell-queue-capture-yank-clipboard)
+    (keymap-set m "C-c C-p" #'agent-shell-queue-capture-insert-thing-at-point)
+    (keymap-set m "C-c C-x" #'agent-shell-queue-capture-select-context)
+    (keymap-set m "C-c C-f" #'agent-shell-queue-insert-file)
+    (keymap-set m "C-c M-f" #'agent-shell-queue-insert-buffer)
     m)
   "Keymap for `agent-shell-queue-capture-mode'.")
 
@@ -662,62 +662,62 @@ Directories are derived from live shell buffers and directory queue buckets."
 (defvar agent-shell-queue-mode-map
   (let ((m (make-sparse-keymap)))
     ;; View / send / remove
-    (define-key m (kbd "RET")      #'agent-shell-queue-buffer-view-item)
-    (define-key m (kbd "C-c C-s")  #'agent-shell-queue-buffer-send)
-    (define-key m (kbd "C-K")      #'agent-shell-queue-buffer-remove)
-    (define-key m (kbd "C-<DEL>")  #'agent-shell-queue-buffer-remove)
-    (define-key m (kbd "C-c C-r")  #'agent-shell-queue-buffer-reenqueue)
-    (define-key m (kbd "C-A")      #'agent-shell-queue-buffer-archive)
-    (define-key m (kbd "z")        #'agent-shell-queue-buffer-mark-done)
+    (keymap-set m "RET" #'agent-shell-queue-buffer-view-item)
+    (keymap-set m "C-c C-s" #'agent-shell-queue-buffer-send)
+    (keymap-set m "C-K" #'agent-shell-queue-buffer-remove)
+    (keymap-set m "C-<DEL>" #'agent-shell-queue-buffer-remove)
+    (keymap-set m "C-c C-r" #'agent-shell-queue-buffer-reenqueue)
+    (keymap-set m "C-A" #'agent-shell-queue-buffer-archive)
+    (keymap-set m "z" #'agent-shell-queue-buffer-mark-done)
     ;; Edit / enqueue
-    (define-key m (kbd "e")        #'agent-shell-queue-enqueue-dispatch)
-    (define-key m (kbd "C-e")      #'agent-shell-queue-edit-task)
+    (keymap-set m "e" #'agent-shell-queue-enqueue-dispatch)
+    (keymap-set m "C-e" #'agent-shell-queue-edit-task)
     ;; Pause / schedule (suspend item from auto-dispatch without removing)
-    (define-key m (kbd "p")        #'agent-shell-queue-buffer-pause)
-    (define-key m (kbd "r")        #'agent-shell-queue-buffer-schedule)
+    (keymap-set m "p" #'agent-shell-queue-buffer-pause)
+    (keymap-set m "r" #'agent-shell-queue-buffer-schedule)
     ;; Background flag
-    (define-key m (kbd "b")        #'agent-shell-queue-buffer-enable-background-task)
-    (define-key m (kbd "B")        #'agent-shell-queue-buffer-disable-background-task)
+    (keymap-set m "b" #'agent-shell-queue-buffer-enable-background-task)
+    (keymap-set m "B" #'agent-shell-queue-buffer-disable-background-task)
     ;; Move / assign
-    (define-key m (kbd "a")        #'agent-shell-queue-buffer-assign)
-    (define-key m (kbd "M-<up>")   #'agent-shell-queue-buffer-move-up)
-    (define-key m (kbd "M-<down>") #'agent-shell-queue-buffer-move-down)
+    (keymap-set m "a" #'agent-shell-queue-buffer-assign)
+    (keymap-set m "M-<up>" #'agent-shell-queue-buffer-move-up)
+    (keymap-set m "M-<down>" #'agent-shell-queue-buffer-move-down)
     ;; Pause / resume session queue dispatch
-    (define-key m (kbd "C-c C-p")        #'agent-shell-queue-session-pause)
-    (define-key m (kbd "C-c C-r")        #'agent-shell-queue-session-resume)
-    (define-key m (kbd "C-c C-x")        #'agent-shell-queue-recover-stuck-shell)
+    (keymap-set m "C-c C-p" #'agent-shell-queue-session-pause)
+    (keymap-set m "C-c C-r" #'agent-shell-queue-session-resume)
+    (keymap-set m "C-c C-x" #'agent-shell-queue-recover-stuck-shell)
     ;; Interjection
-    (define-key m (kbd "i")        #'agent-shell-queue-interject)
+    (keymap-set m "i" #'agent-shell-queue-interject)
     ;; Insert items
-    (define-key m (kbd "C-d p")    #'agent-shell-queue-insert-pause)
-    (define-key m (kbd "C-d C-c")  #'agent-shell-queue-insert-clear-context)
-    (define-key m (kbd "C-w")      #'agent-shell-queue-insert-wait)
-    (define-key m (kbd "C-d c")    #'agent-shell-queue-insert-compact)
+    (keymap-set m "C-d p" #'agent-shell-queue-insert-pause)
+    (keymap-set m "C-d C-c" #'agent-shell-queue-insert-clear-context)
+    (keymap-set m "C-w" #'agent-shell-queue-insert-wait)
+    (keymap-set m "C-d c" #'agent-shell-queue-insert-compact)
     ;; Capture entry points
-    (define-key m (kbd "c")        #'agent-shell-queue-capture)
-    (define-key m (kbd "a")        #'agent-shell-queue-buffer-capture-after)
-    (define-key m (kbd "u")        #'agent-shell-queue-capture-unassigned)
-    (define-key m (kbd "y")        #'agent-shell-queue-capture-from-clipboard)
+    (keymap-set m "c" #'agent-shell-queue-capture)
+    (keymap-set m "a" #'agent-shell-queue-buffer-capture-after)
+    (keymap-set m "u" #'agent-shell-queue-capture-unassigned)
+    (keymap-set m "y" #'agent-shell-queue-capture-from-clipboard)
     ;; Navigation / display
-    (define-key m (kbd "<down>")   #'agent-shell-queue-next-item)
-    (define-key m (kbd "<up>")     #'agent-shell-queue-prev-item)
-    (define-key m (kbd "TAB")      #'agent-shell-queue-buffer-jump-to-next)
-    (define-key m (kbd "g")        #'agent-shell-queue-buffer-refresh)
-    (define-key m (kbd "M-r")      #'agent-shell-queue-reload)
-    (define-key m (kbd "D")        #'agent-shell-queue-show-disk-state)
+    (keymap-set m "<down>" #'agent-shell-queue-next-item)
+    (keymap-set m "<up>" #'agent-shell-queue-prev-item)
+    (keymap-set m "TAB" #'agent-shell-queue-buffer-jump-to-next)
+    (keymap-set m "g" #'agent-shell-queue-buffer-refresh)
+    (keymap-set m "M-r" #'agent-shell-queue-reload)
+    (keymap-set m "D" #'agent-shell-queue-show-disk-state)
     ;; Scope / narrowing
-    (define-key m (kbd "n")        #'agent-shell-queue-set-scope)
-    (define-key m (kbd "w")        #'agent-shell-queue-scope-global)
-    (define-key m (kbd "SPC")      #'agent-shell-queue-buffer-context-menu)
-    (define-key m (kbd "C-d x")    #'agent-shell-queue-raw-edit)
-    (define-key m (kbd "C-d i")    #'agent-shell-queue-import)
-    (define-key m (kbd "o")        #'agent-shell-queue-buffer-open-shell)
-    (define-key m (kbd "C-d a")    #'agent-shell-queue-buffer-abort)
-    (define-key m (kbd "C-v")      #'agent-shell-queue-select-columns)
-    (define-key m (kbd "=")        #'agent-shell-queue-buffer-inspect-item)
-    (define-key m (kbd "m")        #'agent-shell-queue-dispatch)
-    (define-key m (kbd "?")        #'describe-bindings)
-    (define-key m (kbd "q")        #'quit-window)
+    (keymap-set m "n" #'agent-shell-queue-set-scope)
+    (keymap-set m "w" #'agent-shell-queue-scope-global)
+    (keymap-set m "SPC" #'agent-shell-queue-buffer-context-menu)
+    (keymap-set m "C-d x" #'agent-shell-queue-raw-edit)
+    (keymap-set m "C-d i" #'agent-shell-queue-import)
+    (keymap-set m "o" #'agent-shell-queue-buffer-open-shell)
+    (keymap-set m "C-d a" #'agent-shell-queue-buffer-abort)
+    (keymap-set m "C-v" #'agent-shell-queue-select-columns)
+    (keymap-set m "=" #'agent-shell-queue-buffer-inspect-item)
+    (keymap-set m "m" #'agent-shell-queue-dispatch)
+    (keymap-set m "?" #'describe-bindings)
+    (keymap-set m "q" #'quit-window)
     m)
   "Keymap for `agent-shell-queue-mode'.")
 
@@ -1487,7 +1487,7 @@ Each entry is a plist with keys:
   "Build `agent-shell-queue-item-view-mode-map' from the action table."
   (let ((m (make-sparse-keymap)))
     (seq-do (lambda (entry)
-              (define-key m (kbd (plist-get entry :key)) (plist-get entry :cmd)))
+              (keymap-set m (plist-get entry :key) (plist-get entry :cmd)))
             agent-shell-queue--item-view-action-table)
     m))
 
@@ -1874,11 +1874,11 @@ Returns a buffer name string, or nil if cancelled."
 
 (defvar agent-shell-queue-inspect-mode-map
   (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "p") #'agent-shell-queue-inspect-as-plist)
-    (define-key m (kbd "j") #'agent-shell-queue-inspect-as-json)
-    (define-key m (kbd "y") #'agent-shell-queue-inspect-as-yaml)
-    (define-key m (kbd "g") #'agent-shell-queue-inspect-refresh)
-    (define-key m (kbd "q") #'quit-window)
+    (keymap-set m "p" #'agent-shell-queue-inspect-as-plist)
+    (keymap-set m "j" #'agent-shell-queue-inspect-as-json)
+    (keymap-set m "y" #'agent-shell-queue-inspect-as-yaml)
+    (keymap-set m "g" #'agent-shell-queue-inspect-refresh)
+    (keymap-set m "q" #'quit-window)
     m)
   "Keymap for `agent-shell-queue-inspect-mode'.")
 
@@ -2688,11 +2688,11 @@ Multi-line prompt/response fields are formatted as literal block scalars."
 
 (defvar agent-shell-queue-edit-mode-map
   (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "C-c C-c") #'agent-shell-queue-edit-confirm)
-    (define-key m (kbd "C-c C-k") #'agent-shell-queue-edit-cancel)
-    (define-key m (kbd "C-x C-s") #'agent-shell-queue-edit-save-and-flush)
-    (define-key m (kbd "C-c C-f") #'agent-shell-queue-insert-file)
-    (define-key m (kbd "C-c M-f") #'agent-shell-queue-insert-buffer)
+    (keymap-set m "C-c C-c" #'agent-shell-queue-edit-confirm)
+    (keymap-set m "C-c C-k" #'agent-shell-queue-edit-cancel)
+    (keymap-set m "C-x C-s" #'agent-shell-queue-edit-save-and-flush)
+    (keymap-set m "C-c C-f" #'agent-shell-queue-insert-file)
+    (keymap-set m "C-c M-f" #'agent-shell-queue-insert-buffer)
     m)
   "Keymap for `agent-shell-queue-edit-mode'.")
 
@@ -2818,8 +2818,8 @@ Candidates include all non-done, non-running items across all buffers."
 
 (defvar agent-shell-queue-raw-edit-mode-map
   (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "C-c C-c") #'agent-shell-queue-raw-edit-confirm)
-    (define-key m (kbd "C-c C-k") #'agent-shell-queue-raw-edit-cancel)
+    (keymap-set m "C-c C-c" #'agent-shell-queue-raw-edit-confirm)
+    (keymap-set m "C-c C-k" #'agent-shell-queue-raw-edit-cancel)
     m)
   "Keymap for `agent-shell-queue-raw-edit-mode'.")
 
@@ -3250,8 +3250,6 @@ of that buffer instead of being sent via `agent-shell-insert'."
                           (apply real-cr prompt collection args)))))
             (funcall orig-fn prompt-for-file))))))))
 
-(advice-add 'agent-shell-send-file-to :around
-            #'agent-shell-queue--ad-agent-shell-send-file-to)
 
 (defvar agent-shell-queue-interjection-continuation-suffix
   "\n\nAfter addressing the above, please resume previous task."
@@ -3266,9 +3264,9 @@ Set to nil to send the user's text verbatim without a continuation instruction."
 
 (defvar agent-shell-queue-interjection-mode-map
   (let ((m (make-sparse-keymap)))
-    (define-key m (kbd "C-c C-c") #'agent-shell-queue-interjection-send)
-    (define-key m (kbd "C-c C-k") #'agent-shell-queue-interjection-close)
-    (define-key m (kbd "q")       #'agent-shell-queue-interjection-close)
+    (keymap-set m "C-c C-c" #'agent-shell-queue-interjection-send)
+    (keymap-set m "C-c C-k" #'agent-shell-queue-interjection-close)
+    (keymap-set m "q" #'agent-shell-queue-interjection-close)
     m)
   "Keymap for `agent-shell-queue-interjection-mode'.")
 
@@ -3488,7 +3486,6 @@ Installed as :before advice on `shell-maker-submit'."
   (agent-shell-queue--save)
   (agent-shell-queue--refresh-buffer)))
 
-(advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept)
 
 (defun agent-shell-queue--intercept-clear ()
   "Remove the input-intercept prompt overlay in current buffer."

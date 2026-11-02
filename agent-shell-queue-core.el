@@ -1029,7 +1029,6 @@ Installed as :before advice on `agent-shell-interrupt'."
     (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)))
 
-(advice-add 'agent-shell-interrupt :before #'agent-shell-queue--on-interrupt)
 
 (defun agent-shell-queue--on-prompt-sent (buf)
   "Handle a prompt being sent to BUF.
@@ -1057,7 +1056,6 @@ Installed as :before advice on `agent-shell--send-command'."
     (when (buffer-live-p buf)
       (agent-shell-queue--on-prompt-sent buf))))
 
-(advice-add 'agent-shell--send-command :before #'agent-shell-queue--on-send-command)
 
 
 (defun agent-shell-queue--default-pick-buffer (prompt)
@@ -1235,7 +1233,6 @@ the queue, such as a batch process that merely requires this file."
   (when agent-shell-queue--loaded
     (agent-shell-queue--save)))
 
-(add-hook 'kill-emacs-hook #'agent-shell-queue--save-on-exit)
 
 ;; Store predicates
 
