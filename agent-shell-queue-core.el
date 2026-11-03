@@ -1592,7 +1592,8 @@ that the subsequent --save does not fail on other stale items."
   "Mark ITEM in BUF-NAME as done and trigger the next dispatch cycle.
 Records completion time, appends to the done log, persists state,
 refreshes the queue buffer, fires the empty-queue alert if warranted,
-and dispatches the next item for BUF-NAME if the buffer is still live."
+and dispatches the next item for BUF-NAME if the buffer is still live,
+honoring `delay-after' or `agent-shell-queue-default-pause-delay'."
   (setf (agent-shell-queue-item-completed item) (float-time))
   (setf (agent-shell-queue-item-status item) 'done)
   (agent-shell-queue--append-done-log buf-name item)
@@ -1600,7 +1601,18 @@ and dispatches the next item for BUF-NAME if the buffer is still live."
   (agent-shell-queue--refresh-buffer)
   (agent-shell-queue--alert-if-empty)
   (when-let* ((buf (get-buffer buf-name)))
-    (agent-shell-queue--send-next-for-buffer buf)))
+    (let ((delay-after (or (agent-shell-queue-item-delay-after item)
+                           agent-shell-queue-default-pause-delay
+                           0)))
+      (if (and delay-after (> delay-after 0))
+          (agent-shell-queue--start-pause-delay
+           buf-name delay-after "Task pause"
+           (lambda ()
+             (when (buffer-live-p buf)
+               (agent-shell-queue--send-next-for-buffer buf))))
+        (agent-shell-queue--send-next-for-buffer buf)))))
+
+(defalias 'agent-shell-queue-complete-item #'agent-shell-queue--complete-item)
 
 (defun agent-shell-queue--wait-timer-fire (id)
   "Handle expiry of the wait timer for item ID."
@@ -1971,6 +1983,19 @@ The queue must be manually resumed via `agent-shell-queue-session-resume'."
                                 (agent-shell-queue-queue-editing-ids agent-shell-queue--queue)))))
             items))
 
+(defun agent-shell-queue--buffer-busy-p (buf)
+  "Return non-nil if BUF is busy in `shell-maker' or has a running queue item."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (or (and (fboundp 'shell-maker-busy)
+               (condition-case nil
+                   (shell-maker-busy)
+                 (error nil)))
+          (seq-some (lambda (it)
+                      (eq (agent-shell-queue-item-status it) 'running))
+                    (cdr (assoc (buffer-name buf)
+                                (agent-shell-queue-store-items agent-shell-queue--store))))))))
+
 (defun agent-shell-queue--dispatch-if-ready (buf)
   "Send the next dispatchable item for BUF if all conditions are met."
   (when (and (buffer-live-p buf)
@@ -1978,7 +2003,7 @@ The queue must be manually resumed via `agent-shell-queue-session-resume'."
              (not (agent-shell-queue--halted-on-abort-p (buffer-name buf)))
              (not (assoc (buffer-name buf) agent-shell-queue--pause-timers)))
     (with-current-buffer buf
-      (when-let* ((_ (not (shell-maker-busy)))
+      (when-let* ((_ (not (agent-shell-queue--buffer-busy-p buf)))
                   (buf-name (buffer-name))
                   (item (agent-shell-queue--next-dispatchable-item
                          (cdr (assoc buf-name (agent-shell-queue-store-items agent-shell-queue--store))))))
@@ -2181,21 +2206,29 @@ Running item → aborted with auto-resume task; active items → blocked.runner.
 
 (defun agent-shell-queue--ensure-subscription (buf)
   "Subscribe to `turn-complete' events on BUF if no subscription exists yet.
-Also subscribes to `clean-up' so the registry is updated when BUF is killed."
-  (when-let* ((buf-name (buffer-name buf))
-              (_ (not (assoc buf-name agent-shell-queue--subscriptions))))
-    (push (cons buf-name
-                (agent-shell-subscribe-to
-                 :shell-buffer buf
-                 :event 'turn-complete
-                 :on-event (lambda (event)
-                             (agent-shell-queue--on-turn-complete buf buf-name event))))
-          agent-shell-queue--subscriptions)
-    (agent-shell-subscribe-to
-     :shell-buffer buf
-     :event 'clean-up
-     :on-event (lambda (event)
-                 (agent-shell-queue--on-clean-up buf-name event)))))
+Also subscribes to `clean-up' so the registry is updated when BUF is killed.
+For non-`agent-shell-mode' buffers, installs a `kill-buffer-hook' and
+immediately schedules dispatch if the buffer is ready."
+  (when-let* ((buf-name (buffer-name buf)))
+    (if (not (with-current-buffer buf (derived-mode-p 'org-agenda-mode)))
+        (unless (assoc buf-name agent-shell-queue--subscriptions)
+          (push (cons buf-name
+                      (agent-shell-subscribe-to
+                       :shell-buffer buf
+                       :event 'turn-complete
+                       :on-event (lambda (event)
+                                   (agent-shell-queue--on-turn-complete buf buf-name event))))
+                agent-shell-queue--subscriptions)
+          (agent-shell-subscribe-to
+           :shell-buffer buf
+           :event 'clean-up
+           :on-event (lambda (event)
+                       (agent-shell-queue--on-clean-up buf-name event))))
+      (with-current-buffer buf
+        (add-hook 'kill-buffer-hook
+                  (lambda () (agent-shell-queue--on-clean-up buf-name nil))
+                  nil t))
+      (agent-shell-queue--send-next-for-buffer buf))))
 
 (defun agent-shell-queue--auto-send ()
   "Backup scan: send first active item for each idle buffer or directory bucket.
@@ -2215,7 +2248,7 @@ Session-paused and halted-on-abort buckets are skipped."
                  (t
                   (when-let* ((buf (get-buffer bucket-name))
                               (_ (buffer-live-p buf))
-                              (_ (not (with-current-buffer buf (shell-maker-busy)))))
+                              (_ (not (agent-shell-queue--buffer-busy-p buf))))
                     (agent-shell-queue-send-item (agent-shell-queue-item-id item)))))))
             (copy-sequence (agent-shell-queue-store-items agent-shell-queue--store)))))
 
