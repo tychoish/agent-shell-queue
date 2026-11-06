@@ -37,6 +37,87 @@
    (current-buffer))
 #+END_SRC
 
+* Queuing hitl Plans
+
+=agent-shell-queue-plan.el= registers the =hitl-plan= queue item type, so a
+resumable bulk action plan from the =hitl= package runs as an ordinary queue
+item. The file soft-depends on =hitl-plan=: without the package, loading is a
+no-op and enqueueing signals a clear error.
+
+Three symbols make up the public surface, and an approval rule (described
+below) decides whether a plan created by an agent may run at all.
+
+- [[file:../agent-shell-queue-plan.el::agent-shell-queue-plan-enqueue][~agent-shell-queue-plan-enqueue~]] =(BUF PLAN &optional DELAY-AFTER APPROVE)=:
+  Enqueues a plan, or a plan ID, on a live buffer. The function checks that
+  every operation is =:queueable= (and that log-notes mode is not =each=),
+  rejects plans that are not draft or paused or are already queued, saves the
+  plan, locks the batch, and queues an item that records the plan ID and the
+  plan directory. The function returns the plan.
+- [[file:../agent-shell-queue-plan.el::agent-shell-queue-plan-dispatch][~agent-shell-queue-plan-dispatch~]]: Runs the plan with =hitl-plan-execute=
+  when the item reaches the front of the queue, completes the item, and
+  unlocks the batch once no other =hitl-plan= items remain for the buffer. A
+  =C-g= pauses the plan rather than failing it.
+- [[file:../agent-shell-queue-plan.el::agent-shell-queue-plan-max-items][~agent-shell-queue-plan-max-items~]] (default =5=): Caps the active or running
+  =hitl-plan= items per buffer, and enqueueing beyond the cap signals a
+  =user-error=. A value of nil, or a non-positive number, means unlimited.
+
+The plan's domain controls batch locking. Enqueueing calls the domain's
+=:lock-batch= as =(buf plan-id)=, and the last finished plan calls
+=:unlock-batch= as =(buf)=. If enqueueing fails, the batch is unlocked again.
+
+** Plans created over MCP run only after the user approves them
+
+A plan created over MCP (=hitl-plan-origin-mcp-p=) is untrusted, and the queue
+runs it only when =hitl-plan-approved-p= is true. Two things satisfy that
+check: the user has set =hitl-plan-agent-may-apply=, or the user has queued
+that plan through the interactive command, which confirms with a prompt and
+then calls ~agent-shell-queue-plan-enqueue~ with =APPROVE=. In the second case
+enqueueing records =:approved t= in the plan metadata. MCP code must never
+pass =APPROVE=.
+
+Dispatch consumes the marker, so one approval buys one run, and dispatch also
+requires the plan to be draft or paused. Dispatch signals a =user-error= for a
+plan in any other state, or for an unapproved MCP plan.
+
+** The reenqueue guard applies the same rules to a re-queued plan
+
+The item type registers
+[[file:../agent-shell-queue-plan.el::agent-shell-queue-plan--reenqueue-guard][~agent-shell-queue-plan--reenqueue-guard~]]
+as its =:reenqueue-guard=, so ~agent-shell-queue-reenqueue~ of a =hitl-plan=
+item refuses unless the plan could be queued now. The plan must still exist,
+be draft or paused, not already be queued, and pass the same approval and
+unattended checks as dispatch.
+
+** Target Buffers
+
+A buffer is a valid target when a registered domain accepts the buffer. The
+check runs in this order:
+
+1. A domain's =:accept-buffer= predicate returns non-nil for the buffer.
+   Domains are tried in registration order, so the first registered wins.
+2. The buffer-local variable
+   [[file:../agent-shell-queue-plan.el::agent-shell-queue-plan-domain][~agent-shell-queue-plan-domain~]]
+   names a registered domain.
+3. A function in
+   [[file:../agent-shell-queue-plan.el::agent-shell-queue-plan-buffer-accept-functions][~agent-shell-queue-plan-buffer-accept-functions~]]
+   returns the name (symbol or string) of a registered domain. A bare non-nil
+   hook result does not accept the buffer.
+
+When a domain accepts the buffer, the interactive picker offers only that
+domain's plans. The picker also searches each domain's =:directory= store and
+annotates each plan with status, progress, age and description.
+
+** Delay After
+
+Pass =DELAY-AFTER= in seconds to ~agent-shell-queue-plan-enqueue~ to pause
+after the plan item completes, the same way other items use =delay-after=. A
+value that is not positive is ignored.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'agent-shell-queue-plan)
+  (agent-shell-queue-plan-enqueue (current-buffer) "plan-20261103-080242-1a2b" 30)
+#+END_SRC
+
 * Reference
 
 See the [[file:api.org][API Reference]] for full documentation of these functions.
