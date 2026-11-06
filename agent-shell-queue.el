@@ -22,6 +22,13 @@
 
 (require 'agent-shell-queue-core)
 (require 'agent-shell-queue-ui)
+;; Optional: skip only when the module itself is missing, so a real load
+;; error in it (or a missing dependency it needs) is not hidden.
+(condition-case err
+    (require 'agent-shell-queue-plan)
+  (file-missing
+   (unless (equal (car (last err)) "agent-shell-queue-plan")
+     (signal (car err) (cdr err)))))
 
 (autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
   "Global minor mode routing inbuilt agent-shell queue to ASQ." t)

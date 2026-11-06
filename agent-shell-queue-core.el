@@ -482,8 +482,11 @@ INPUT-SPEC: plist describing how to collect user input:
   (:kind capture :mode MODE)   open capture buffer in MODE (nil → capture-mode)
   (:kind read :prompt P :fn F) single read via function F called with P
   (:kind none)                 no user input; args will be empty
-  (:kind special :fn F)        zero-arg interactive function F handles everything"
-  kind label buffer-pred dispatch-fn input-spec)
+  (:kind special :fn F)        zero-arg interactive function F handles everything
+REENQUEUE-GUARD: optional (lambda (ITEM BUF)) called by
+  `agent-shell-queue-reenqueue' before a done or aborted ITEM of this kind is
+  copied; it signals an error (typically `user-error') to refuse."
+  kind label buffer-pred dispatch-fn input-spec reenqueue-guard)
 
 (defvar agent-shell-queue--item-types nil
   "List of `agent-shell-queue-item-type' entries.
@@ -491,13 +494,17 @@ Register entries with `agent-shell-queue-register-item-type'.
 Built-in registrations are added at the end of this file.")
 
 
-(cl-defun agent-shell-queue-register-item-type (&key kind label buffer-pred dispatch-fn input-spec)
+(cl-defun agent-shell-queue-register-item-type (&key kind label buffer-pred dispatch-fn input-spec
+                                                    reenqueue-guard)
   "Register item type with KIND, LABEL, BUFFER-PRED, DISPATCH-FN, and INPUT-SPEC.
+REENQUEUE-GUARD is an optional (lambda (ITEM BUF)) that may refuse
+re-enqueueing by signalling an error.
 KIND is a symbol; re-registering an existing KIND replaces the entry."
   (setq agent-shell-queue--item-types
         (cons (agent-shell-queue-item-type--make
                :kind kind :label label :buffer-pred buffer-pred
-               :dispatch-fn dispatch-fn :input-spec input-spec)
+               :dispatch-fn dispatch-fn :input-spec input-spec
+               :reenqueue-guard reenqueue-guard)
               (seq-remove (lambda (e) (eq kind (agent-shell-queue-item-type-kind e)))
                           agent-shell-queue--item-types))))
 
@@ -2106,7 +2113,8 @@ No-op when BUF's session is paused."
 ;; Registry input helpers
 
 (defun agent-shell-queue--enqueue-args (args kind buf)
-  "Enqueue ARGS as a KIND item targeting BUF (nil = unassigned bucket)."
+  "Enqueue ARGS as a KIND item targeting BUF (nil = unassigned bucket).
+Return the new item."
   (with-agent-shell-queue
     (let ((item (agent-shell-queue--make-item args nil kind)))
       (if buf
@@ -2115,7 +2123,8 @@ No-op when BUF's session is paused."
                   (buffer-local-value 'default-directory buf))
             (agent-shell-queue--add-item-to-bucket (buffer-name buf) item)
             (agent-shell-queue--ensure-subscription buf))
-        (agent-shell-queue--add-item-to-bucket agent-shell-queue--unassigned-key item)))))
+        (agent-shell-queue--add-item-to-bucket agent-shell-queue--unassigned-key item))
+      item)))
 
 (defun agent-shell-queue--invoke-input-for-type (type buf)
   "Collect user input for TYPE and enqueue the resulting item targeting BUF."
@@ -2455,6 +2464,11 @@ for a live replacement."
                            (user-error "No live agent-shell buffers available")))))
     (unless (memq (agent-shell-queue-item-status old-item) '(done aborted))
       (user-error "Item %s is not done or aborted; cannot re-enqueue" id))
+    ;; Item types with their own safety checks (such as `hitl-plan') veto here.
+    (when-let* ((type (agent-shell-queue--type-for-kind
+                       (agent-shell-queue-item-kind old-item)))
+                (guard (agent-shell-queue-item-type-reenqueue-guard type)))
+      (funcall guard old-item buf))
     (let* ((new-item (agent-shell-queue--make-item
                       (agent-shell-queue-item-args old-item)
                       (agent-shell-queue-item-background old-item)
