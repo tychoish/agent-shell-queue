@@ -884,6 +884,13 @@ the underlying shell process uptime for the current agent-shell buffer."
 
 ;;; Transient Prefix Menus
 
+;;;###autoload
+(defun agent-shell-menu-restart ()
+  "Restart the current agent-shell session after confirmation."
+  (interactive)
+  (when (y-or-n-p "Restart this agent-shell session? ")
+    (call-interactively #'agent-shell-restart)))
+
 (defmacro agent-shell-menu-mode-key (key fn)
   "Define `agent-shell-menu-output-key-KEY' and bind it in `agent-shell-mode-map'.
 In the output area, calls FN interactively. Self-inserts KEY at the prompt,
@@ -1028,6 +1035,8 @@ Keys are assigned as 1, 2, 3… in button order."
    ["Actions" :if agent-shell-menu--in-session-p
     ("aa" "Action menu" agent-shell-menu-select-action)
     ("ai" "Interrupt" agent-shell-interrupt)
+    ("as" "Steer" agent-shell-prompt-steer)
+    ("ae" "Restart" agent-shell-menu-restart)
     ("ar" "Resolve permission" agent-shell-menu-resolve-permission)
     ("ac" "Command menu" agent-shell-menu-select-command)
     ("ap" "Workflows" agent-shell-workflow-select
