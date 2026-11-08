@@ -3748,6 +3748,46 @@ access to all registered item kinds rather than prompt-only capture."
        :subscription agent-shell-queue--ready-sub-submit)
       (setq agent-shell-queue--ready-sub-submit nil))))
 
+(defun agent-shell-queue-capture--slash-command-capf ()
+  "Complete slash commands after / in queue capture buffers."
+  (when-let* ((shell-buf (and (boundp 'agent-shell-queue--capture-target)
+                              (buffer-live-p agent-shell-queue--capture-target)
+                              agent-shell-queue--capture-target))
+              (commands (with-current-buffer shell-buf
+                          (map-elt agent-shell--state :available-commands)))
+              ((not (seq-empty-p commands))))
+    (save-excursion
+      (let ((end (point)))
+        (when (re-search-backward "/" (line-beginning-position) t)
+          (list (1+ (point)) end
+                (seq-map (lambda (c) (map-elt c 'name)) commands)
+                :annotation-function
+                (lambda (name)
+                  (let ((cmd (seq-find (lambda (c) (equal (map-elt c 'name) name)) commands)))
+                    (concat "  " (or (and cmd (map-elt cmd 'description)) ""))))
+                :exclusive 'no))))))
+
+;;;###autoload
+(defun agent-shell-queue-setup-capture-completion ()
+  "Configure Corfu and completion-at-point for queue capture and edit buffers."
+  (when (fboundp 'corfu-mode)
+    (corfu-mode +1)
+    (setq-local corfu-auto-prefix 2))
+  (let ((capfs (list #'agent-shell-queue-capture--slash-command-capf)))
+    (when (fboundp 'cape-dabbrev)
+      (push #'cape-dabbrev capfs))
+    (setq-local completion-at-point-functions
+                (append capfs (remq t completion-at-point-functions)))))
+
+(with-eval-after-load 'nerd-icons
+  (dolist (entry '((agent-shell-queue-mode nerd-icons-codicon "nf-cod-checklist" :face nerd-icons-purple)
+                   (agent-shell-queue-item-view-mode nerd-icons-codicon "nf-cod-preview" :face nerd-icons-purple)
+                   (agent-shell-queue-edit-mode nerd-icons-codicon "nf-cod-edit" :face nerd-icons-purple)
+                   (agent-shell-queue-capture-mode nerd-icons-codicon "nf-cod-record" :face nerd-icons-purple)
+                   (agent-shell-queue-raw-edit-mode nerd-icons-codicon "nf-cod-file_code" :face nerd-icons-purple)
+                   (agent-shell-queue-interjection-mode nerd-icons-codicon "nf-cod-comment_discussion" :face nerd-icons-purple)))
+    (add-to-list 'nerd-icons-mode-icon-alist entry)))
+
 (provide 'agent-shell-queue-ui)
 
 ;;; agent-shell-queue-ui.el ends here

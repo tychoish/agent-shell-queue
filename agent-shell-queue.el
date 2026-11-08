@@ -33,6 +33,9 @@
 (autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
   "Global minor mode routing inbuilt agent-shell queue to ASQ." t)
 
+(autoload 'agent-shell-menu-dispatch "agent-shell-menu"
+  "agent-shell operations — navigate, act, send, queue, and session management." t)
+
 
 (defvar agent-shell-queue-global--managed-settings nil
   "Alist of (SYMBOL . VALUE) settings managed globally by `agent-shell-queue-global-mode'.")
