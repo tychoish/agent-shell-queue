@@ -73,6 +73,8 @@
     (advice-add 'agent-shell-send-file-to :around #'agent-shell-queue--ad-agent-shell-send-file-to))
   (when (fboundp 'agent-shell-queue--on-submit-intercept)
     (advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept))
+  (when (fboundp 'agent-shell-menu-install)
+    (agent-shell-menu-install))
   (when (fboundp 'agent-shell-menu--switch-buffer)
     (advice-add 'agent-shell-switch-buffer :override #'agent-shell-menu--switch-buffer))
   (when (fboundp 'agent-shell-menu-name-buffer)
