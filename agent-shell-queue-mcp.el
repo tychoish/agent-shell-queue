@@ -26,7 +26,6 @@
 (require 'subr-x)
 (require 'seq)
 (require 'mcpkit)
-(require 'agent-shell-queue nil t)
 
 (defgroup agent-shell-queue-mcp nil
   "Agent Shell Queue (asq) MCP service integration."
