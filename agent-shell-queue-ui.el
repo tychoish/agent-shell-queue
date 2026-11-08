@@ -3779,14 +3779,21 @@ access to all registered item kinds rather than prompt-only capture."
     (setq-local completion-at-point-functions
                 (append capfs (remq t completion-at-point-functions)))))
 
-(with-eval-after-load 'nerd-icons
-  (dolist (entry '((agent-shell-queue-mode nerd-icons-codicon "nf-cod-checklist" :face nerd-icons-purple)
-                   (agent-shell-queue-item-view-mode nerd-icons-codicon "nf-cod-preview" :face nerd-icons-purple)
-                   (agent-shell-queue-edit-mode nerd-icons-codicon "nf-cod-edit" :face nerd-icons-purple)
-                   (agent-shell-queue-capture-mode nerd-icons-codicon "nf-cod-record" :face nerd-icons-purple)
-                   (agent-shell-queue-raw-edit-mode nerd-icons-codicon "nf-cod-file_code" :face nerd-icons-purple)
-                   (agent-shell-queue-interjection-mode nerd-icons-codicon "nf-cod-comment_discussion" :face nerd-icons-purple)))
-    (add-to-list 'nerd-icons-mode-icon-alist entry)))
+;;;###autoload
+(defun agent-shell-queue-ui-install-nerd-icons ()
+  "Register `agent-shell-queue' mode icons in `nerd-icons-mode-icon-alist'."
+  (interactive)
+  (when (boundp 'nerd-icons-mode-icon-alist)
+    (dolist (entry '((agent-shell-queue-mode nerd-icons-codicon "nf-cod-checklist" :face nerd-icons-purple)
+                     (agent-shell-queue-item-view-mode nerd-icons-codicon "nf-cod-preview" :face nerd-icons-purple)
+                     (agent-shell-queue-edit-mode nerd-icons-codicon "nf-cod-edit" :face nerd-icons-purple)
+                     (agent-shell-queue-capture-mode nerd-icons-codicon "nf-cod-record" :face nerd-icons-purple)
+                     (agent-shell-queue-raw-edit-mode nerd-icons-codicon "nf-cod-file_code" :face nerd-icons-purple)
+                     (agent-shell-queue-interjection-mode nerd-icons-codicon "nf-cod-comment_discussion" :face nerd-icons-purple)))
+      (add-to-list 'nerd-icons-mode-icon-alist entry))))
+
+(when (boundp 'nerd-icons-mode-icon-alist)
+  (agent-shell-queue-ui-install-nerd-icons))
 
 (provide 'agent-shell-queue-ui)
 

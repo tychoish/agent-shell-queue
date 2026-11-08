@@ -1134,31 +1134,31 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
     ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
 
-(with-eval-after-load 'agent-shell
+;;;###autoload
+(defun agent-shell-menu-install ()
+  "Install `agent-shell-menu' keybindings and customizations into `agent-shell' and `agent-shell-queue'."
+  (interactive)
   (setq agent-shell-buffer-name-format #'agent-shell-menu-format-buffer-name)
-  (agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
-  (agent-shell-menu-mode-key "R" agent-shell-menu-name-buffer)
-  (agent-shell-menu-mode-key "m" agent-shell-menu-dispatch)
-  (agent-shell-menu-mode-key "?" agent-shell-menu-dispatch)
-  (agent-shell-menu-mode-key "p" agent-shell-menu-resolve-permission)
-  (agent-shell-menu-mode-key "/" agent-shell-prompt-queue)
-  (agent-shell-menu-mode-key "a" agent-shell-menu-select-action)
-  (agent-shell-menu-mode-key "b" agent-shell-switch-buffer)
-  (agent-shell-menu-mode-key "x" execute-extended-agent-shell-command)
-  (agent-shell-menu-mode-key "f" agent-shell-menu-select-collapse)
-  (agent-shell-menu-mode-key "c" agent-shell-menu-select-command)
-  (agent-shell-menu-mode-key "t" agent-shell-set-session-thought-level)
-  (agent-shell-menu-mode-key " " agent-shell-set-session-mode)
-  (agent-shell-menu-mode-key "TAB" agent-shell-ui-toggle-fragment)
-  (agent-shell-menu-mode-key "q" agent-shell-queue-buffer-open)
-  (agent-shell-menu-mode-key "s" agent-shell-prompt-steer)
-  (agent-shell-menu-mode-key "r" agent-shell-menu-restart))
-
-(with-eval-after-load 'agent-shell-queue-core
-  (setq agent-shell-queue-pick-buffer-function #'agent-shell-menu--pick-buffer))
-
-;; Wire menu key into queue mode map
-(with-eval-after-load 'agent-shell-queue-ui
+  (when (boundp 'agent-shell-mode-map)
+    (agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
+    (agent-shell-menu-mode-key "R" agent-shell-menu-name-buffer)
+    (agent-shell-menu-mode-key "m" agent-shell-menu-dispatch)
+    (agent-shell-menu-mode-key "?" agent-shell-menu-dispatch)
+    (agent-shell-menu-mode-key "p" agent-shell-menu-resolve-permission)
+    (agent-shell-menu-mode-key "/" agent-shell-prompt-queue)
+    (agent-shell-menu-mode-key "a" agent-shell-menu-select-action)
+    (agent-shell-menu-mode-key "b" agent-shell-switch-buffer)
+    (agent-shell-menu-mode-key "x" execute-extended-agent-shell-command)
+    (agent-shell-menu-mode-key "f" agent-shell-menu-select-collapse)
+    (agent-shell-menu-mode-key "c" agent-shell-menu-select-command)
+    (agent-shell-menu-mode-key "t" agent-shell-set-session-thought-level)
+    (agent-shell-menu-mode-key " " agent-shell-set-session-mode)
+    (agent-shell-menu-mode-key "TAB" agent-shell-ui-toggle-fragment)
+    (agent-shell-menu-mode-key "q" agent-shell-queue-buffer-open)
+    (agent-shell-menu-mode-key "s" agent-shell-prompt-steer)
+    (agent-shell-menu-mode-key "r" agent-shell-menu-restart))
+  (when (boundp 'agent-shell-queue-pick-buffer-function)
+    (setq agent-shell-queue-pick-buffer-function #'agent-shell-menu--pick-buffer))
   (when (boundp 'agent-shell-queue-mode-map)
     (keymap-set agent-shell-queue-mode-map "M" #'agent-shell-menu-dispatch)))
 
