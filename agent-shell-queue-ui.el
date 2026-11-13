@@ -5,7 +5,7 @@
 ;; Keywords: tools, agent-shell
 ;; Version: 0.1.0
 ;; URL: https://github.com/tychoish/agent-shell-queue
-;; Package-Requires: ((emacs "29.1") (agent-shell "0.1") (transient "0.4.0") (annotated-completing-read "0.1"))
+;; Package-Requires: ((emacs "29.1") (agent-shell "0.1") (transient "0.4.0") (annotated-completing-read "0.1") (nerd-icons "0.1"))
 
 ;;; Commentary:
 
@@ -19,8 +19,9 @@
 (require 'subr-x)
 (require 'tabulated-list)
 (require 'agent-shell-queue-core)
-(require 'transient nil t)
-(require 'annotated-completing-read nil t)
+(require 'transient)
+(require 'annotated-completing-read)
+(require 'nerd-icons)
 
 (declare-function agent-shell-queue-persistence-request-save "agent-shell-queue-persistence")
 (declare-function agent-shell-queue--on-prompt-sent "agent-shell-queue-core")
@@ -3779,21 +3780,27 @@ access to all registered item kinds rather than prompt-only capture."
     (setq-local completion-at-point-functions
                 (append capfs (remq t completion-at-point-functions)))))
 
+(defconst agent-shell-queue-ui--nerd-icon-entries
+  '((agent-shell-queue-mode nerd-icons-codicon "nf-cod-checklist" :face nerd-icons-purple)
+    (agent-shell-queue-item-view-mode nerd-icons-codicon "nf-cod-preview" :face nerd-icons-purple)
+    (agent-shell-queue-edit-mode nerd-icons-codicon "nf-cod-edit" :face nerd-icons-purple)
+    (agent-shell-queue-capture-mode nerd-icons-codicon "nf-cod-record" :face nerd-icons-purple)
+    (agent-shell-queue-raw-edit-mode nerd-icons-codicon "nf-cod-file_code" :face nerd-icons-purple)
+    (agent-shell-queue-interjection-mode nerd-icons-codicon "nf-cod-comment_discussion" :face nerd-icons-purple))
+  "Mode icon entries registered in `nerd-icons-mode-icon-alist'.")
+
 ;;;###autoload
 (defun agent-shell-queue-ui-install-nerd-icons ()
   "Register `agent-shell-queue' mode icons in `nerd-icons-mode-icon-alist'."
   (interactive)
-  (when (boundp 'nerd-icons-mode-icon-alist)
-    (dolist (entry '((agent-shell-queue-mode nerd-icons-codicon "nf-cod-checklist" :face nerd-icons-purple)
-                     (agent-shell-queue-item-view-mode nerd-icons-codicon "nf-cod-preview" :face nerd-icons-purple)
-                     (agent-shell-queue-edit-mode nerd-icons-codicon "nf-cod-edit" :face nerd-icons-purple)
-                     (agent-shell-queue-capture-mode nerd-icons-codicon "nf-cod-record" :face nerd-icons-purple)
-                     (agent-shell-queue-raw-edit-mode nerd-icons-codicon "nf-cod-file_code" :face nerd-icons-purple)
-                     (agent-shell-queue-interjection-mode nerd-icons-codicon "nf-cod-comment_discussion" :face nerd-icons-purple)))
-      (add-to-list 'nerd-icons-mode-icon-alist entry))))
+  (dolist (entry agent-shell-queue-ui--nerd-icon-entries)
+    (add-to-list 'nerd-icons-mode-icon-alist entry)))
 
-(when (boundp 'nerd-icons-mode-icon-alist)
-  (agent-shell-queue-ui-install-nerd-icons))
+(defun agent-shell-queue-ui-uninstall-nerd-icons ()
+  "Remove `agent-shell-queue' mode icons from `nerd-icons-mode-icon-alist'."
+  (dolist (entry agent-shell-queue-ui--nerd-icon-entries)
+    (setq nerd-icons-mode-icon-alist
+          (remove entry nerd-icons-mode-icon-alist))))
 
 (provide 'agent-shell-queue-ui)
 

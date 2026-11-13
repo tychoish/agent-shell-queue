@@ -17,8 +17,8 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'hitl nil t)
-(require 'annotated-completing-read nil t)
+(require 'hitl)
+(require 'annotated-completing-read)
 
 (declare-function agent-shell-queue-persistence-request-save "agent-shell-queue-persistence")
 (declare-function agent-shell-queue-enqueue "agent-shell-queue")

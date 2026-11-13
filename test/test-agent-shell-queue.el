@@ -4657,4 +4657,13 @@ leaving sessions that were already individually paused beforehand untouched."
                            (cadar (agent-shell-queue-store-items agent-shell-queue--store)))))))
         (kill-buffer buf)))))
 
+(defvar nerd-icons-mode-icon-alist)
+
+(ert-deftest agent-shell-queue-ui-install-nerd-icons/registers-modes ()
+  "Installing nerd-icons entries registers the queue item view mode."
+  (let ((nerd-icons-mode-icon-alist nil))
+    (agent-shell-queue-ui-install-nerd-icons)
+    (should (assq 'agent-shell-queue-item-view-mode nerd-icons-mode-icon-alist))
+    (should (assq 'agent-shell-queue-mode nerd-icons-mode-icon-alist))))
+
 ;;; test-agent-shell-queue.el ends here

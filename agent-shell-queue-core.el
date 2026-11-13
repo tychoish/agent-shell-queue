@@ -18,9 +18,9 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'sprite-future nil t)
+(require 'sprite-future)
 (require 'agent-shell)
-(require 'alert nil t)
+(require 'alert)
 (require 'savehist)
 
 (declare-function agent-shell-queue-buffer-refresh "agent-shell-queue-ui")

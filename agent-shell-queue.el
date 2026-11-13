@@ -5,7 +5,7 @@
 ;; Keywords: tools, agent-shell
 ;; Version: 0.1.0
 ;; URL: https://github.com/tychoish/agent-shell-queue
-;; Package-Requires: ((emacs "29.1") (transient "0.4") (agent-shell "0.1") (alert "1.2") (annotated-completing-read "0.1"))
+;; Package-Requires: ((emacs "29.1") (transient "0.4") (agent-shell "0.1") (alert "1.2") (annotated-completing-read "0.1") (hitl "0.1.0") (nerd-icons "0.1"))
 
 ;; This file is not part of GNU Emacs
 
@@ -22,13 +22,7 @@
 
 (require 'agent-shell-queue-core)
 (require 'agent-shell-queue-ui)
-;; Optional: skip only when the module itself is missing, so a real load
-;; error in it (or a missing dependency it needs) is not hidden.
-(condition-case err
-    (require 'agent-shell-queue-plan)
-  (file-missing
-   (unless (equal (car (last err)) "agent-shell-queue-plan")
-     (signal (car err) (cdr err)))))
+(require 'agent-shell-queue-plan)
 
 (autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
   "Global minor mode routing inbuilt agent-shell queue to ASQ." t)
@@ -69,36 +63,27 @@
   (add-hook 'kill-emacs-hook #'agent-shell-queue--save-on-exit)
   (advice-add 'agent-shell-interrupt :before #'agent-shell-queue--on-interrupt)
   (advice-add 'agent-shell--send-command :before #'agent-shell-queue--on-send-command)
-  (when (fboundp 'agent-shell-queue--ad-agent-shell-send-file-to)
-    (advice-add 'agent-shell-send-file-to :around #'agent-shell-queue--ad-agent-shell-send-file-to))
-  (when (fboundp 'agent-shell-queue--on-submit-intercept)
-    (advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept))
-  (when (fboundp 'agent-shell-menu-install)
-    (agent-shell-menu-install))
-  (when (fboundp 'agent-shell-menu--switch-buffer)
-    (advice-add 'agent-shell-switch-buffer :override #'agent-shell-menu--switch-buffer))
-  (when (fboundp 'agent-shell-menu-name-buffer)
-    (advice-add 'agent-shell-rename-buffer :override #'agent-shell-menu-name-buffer)
-    (when (boundp 'agent-shell-mode-map)
-      (keymap-set agent-shell-mode-map "<remap> <rename-buffer>" #'agent-shell-menu-name-buffer)
-      (keymap-set agent-shell-mode-map "<remap> <shell-maker-rename-buffer>" #'agent-shell-menu-name-buffer))))
+  (advice-add 'agent-shell-send-file-to :around #'agent-shell-queue--ad-agent-shell-send-file-to)
+  (advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept)
+  (agent-shell-menu-install)
+  (advice-add 'agent-shell-switch-buffer :override #'agent-shell-menu--switch-buffer)
+  (advice-add 'agent-shell-rename-buffer :override #'agent-shell-menu-name-buffer)
+  (keymap-set agent-shell-mode-map "<remap> <rename-buffer>" #'agent-shell-menu-name-buffer)
+  (keymap-set agent-shell-mode-map "<remap> <shell-maker-rename-buffer>" #'agent-shell-menu-name-buffer)
+  (agent-shell-queue-ui-install-nerd-icons))
 
 (defun agent-shell-queue--disable-integrations ()
   "Disable `agent-shell-queue' advice, hooks, and integrations."
   (remove-hook 'kill-emacs-hook #'agent-shell-queue--save-on-exit)
   (advice-remove 'agent-shell-interrupt #'agent-shell-queue--on-interrupt)
   (advice-remove 'agent-shell--send-command #'agent-shell-queue--on-send-command)
-  (when (fboundp 'agent-shell-queue--ad-agent-shell-send-file-to)
-    (advice-remove 'agent-shell-send-file-to #'agent-shell-queue--ad-agent-shell-send-file-to))
-  (when (fboundp 'agent-shell-queue--on-submit-intercept)
-    (advice-remove 'shell-maker-submit #'agent-shell-queue--on-submit-intercept))
-  (when (fboundp 'agent-shell-menu--switch-buffer)
-    (advice-remove 'agent-shell-switch-buffer #'agent-shell-menu--switch-buffer))
-  (when (fboundp 'agent-shell-menu-name-buffer)
-    (advice-remove 'agent-shell-rename-buffer #'agent-shell-menu-name-buffer)
-    (when (boundp 'agent-shell-mode-map)
-      (keymap-unset agent-shell-mode-map "<remap> <rename-buffer>" t)
-      (keymap-unset agent-shell-mode-map "<remap> <shell-maker-rename-buffer>" t)))
+  (advice-remove 'agent-shell-send-file-to #'agent-shell-queue--ad-agent-shell-send-file-to)
+  (advice-remove 'shell-maker-submit #'agent-shell-queue--on-submit-intercept)
+  (advice-remove 'agent-shell-switch-buffer #'agent-shell-menu--switch-buffer)
+  (advice-remove 'agent-shell-rename-buffer #'agent-shell-menu-name-buffer)
+  (keymap-unset agent-shell-mode-map "<remap> <rename-buffer>" t)
+  (keymap-unset agent-shell-mode-map "<remap> <shell-maker-rename-buffer>" t)
+  (agent-shell-queue-ui-uninstall-nerd-icons)
   (agent-shell-queue-global--revert-settings))
 
 ;;;###autoload

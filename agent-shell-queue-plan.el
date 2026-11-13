@@ -49,7 +49,8 @@
 (require 'seq)
 (require 'subr-x)
 (require 'agent-shell-queue-core)
-(require 'hitl-plan nil t)
+(require 'hitl-plan)
+(require 'hitl-plan-ui)
 
 (declare-function hitl-plan-get "hitl-plan")
 (declare-function hitl-plan-status "hitl-plan")
@@ -93,12 +94,6 @@ its plans are offered).  Any other result, including a bare non-nil value,
 does not accept.  The first accepting function wins.  Consulted after the
 domains' :accept-buffer predicates and `agent-shell-queue-plan-domain'.")
 
-(defun agent-shell-queue-plan--require ()
-  "Signal a `user-error' unless `hitl-plan' is available."
-  (unless (featurep 'hitl-plan)
-    (unless (require 'hitl-plan nil t)
-      (user-error "The `hitl' package (hitl-plan) is required by agent-shell-queue-plan"))))
-
 ;;; Buffer Predicate
 
 (defun agent-shell-queue-plan--domain-for-buffer (buf)
@@ -106,7 +101,7 @@ domains' :accept-buffer predicates and `agent-shell-queue-plan-domain'.")
 Domains' `:accept-buffer' predicates are consulted first (in registration
 order), then the buffer-local domain name, then the accept-functions hook,
 whose functions must return a registered domain name to accept."
-  (when (and (featurep 'hitl-plan) (buffer-live-p buf))
+  (when (buffer-live-p buf)
     (let ((name (buffer-local-value 'agent-shell-queue-plan-domain buf)))
       (or (seq-find (lambda (d)
                       (when-let* ((pred (hitl-plan-domain-accept-buffer d)))
@@ -210,7 +205,6 @@ unattended-safe."
 This is the item type's reenqueue guard: the plan must exist, be draft or
 paused, not already be queued, and pass
 `agent-shell-queue-plan--check-runnable'."
-  (agent-shell-queue-plan--require)
   (let* ((spec (agent-shell-queue-plan--parse-args (agent-shell-queue-item-args item)))
          (plan (and (plist-get spec :plan-id)
                     (hitl-plan-get (plist-get spec :plan-id) (plist-get spec :directory)))))
@@ -228,11 +222,10 @@ batch once no other `hitl-plan' items remain queued for the buffer."
                 (agent-shell-queue-item-args item)))
          (plan-id (plist-get spec :plan-id))
          (buf (get-buffer buf-name))
-         (plan (and (featurep 'hitl-plan) plan-id
+         (plan (and plan-id
                     (hitl-plan-get plan-id (plist-get spec :directory)))))
     (unwind-protect
         (progn
-          (agent-shell-queue-plan--require)
           (unless plan
             (error "Plan %S not found for buffer %s" plan-id buf-name))
           (agent-shell-queue-plan--check-runnable plan)
@@ -261,7 +254,6 @@ is the pause in seconds after the item completes.  APPROVE, non-nil only
 when the user chose to queue PLAN (the interactive picker), records the
 `:approved' marker that lets a plan created over MCP run unattended; MCP
 code must never pass it.  Returns PLAN."
-  (agent-shell-queue-plan--require)
   (let* ((buf (if (stringp buf) (get-buffer buf) buf))
          (plan (if (stringp plan) (or (agent-shell-queue-plan--find plan)
                                       (user-error "Unknown plan %s" plan))
@@ -324,8 +316,6 @@ that domain's plans are offered."
   "Interactive input handler for BUF: prompt for a saved plan and enqueue it.
 The picker is `hitl-plan-ui-read-from', annotating each plan with its
 status, progress, age and description."
-  (agent-shell-queue-plan--require)
-  (require 'hitl-plan-ui)
   (let ((plans (agent-shell-queue-plan--candidates buf)))
     (unless plans (user-error "No draft or paused hitl plans"))
     (let* ((id (hitl-plan-ui-read-from plans "Plan: "))

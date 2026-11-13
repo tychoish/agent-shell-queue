@@ -34,7 +34,7 @@
 (require 'subr-x)
 (require 'agent-shell-queue-core)
 (require 'agent-shell-queue-ui)
-(require 'agent-shell-prompt-queue nil t)
+(require 'agent-shell-prompt-queue)
 (eval-when-compile (require 'cl-lib))
 
 (declare-function agent-shell--shell-buffer "agent-shell")
