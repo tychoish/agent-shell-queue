@@ -4666,4 +4666,39 @@ leaving sessions that were already individually paused beforehand untouched."
     (should (assq 'agent-shell-queue-item-view-mode nerd-icons-mode-icon-alist))
     (should (assq 'agent-shell-queue-mode nerd-icons-mode-icon-alist))))
 
+(ert-deftest agent-shell-queue/buffer-refresh-does-not-corrupt-other-buffers ()
+  "agent-shell-queue-buffer-refresh from an arbitrary buffer does not overwrite it."
+  (agent-shell-queue-test/isolate
+    (with-temp-buffer
+      (insert "original buffer content\nline 2")
+      (agent-shell-queue-buffer-refresh)
+      (should (equal (buffer-string) "original buffer content\nline 2"))
+      (should-not (bound-and-true-p agent-shell-queue--last-column-structure)))))
+
+(ert-deftest agent-shell-queue/buffer-refresh-redirects-to-queue-buffer ()
+  "agent-shell-queue-buffer-refresh from non-queue buffer refreshes *agent-shell-queue*."
+  (agent-shell-queue-test/isolate
+    (let ((qbuf (get-buffer-create "*agent-shell-queue*"))
+          (other (generate-new-buffer "*other-buffer*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer qbuf
+              (agent-shell-queue-mode))
+            (with-current-buffer other
+              (insert "untouched text")
+              (agent-shell-queue-buffer-refresh)
+              (should (equal (buffer-string) "untouched text"))
+              (should-not (bound-and-true-p agent-shell-queue--last-column-structure)))
+            (with-current-buffer qbuf
+              (should (bound-and-true-p agent-shell-queue--last-column-structure))))
+        (kill-buffer qbuf)
+        (kill-buffer other)))))
+
+(ert-deftest agent-shell-queue/buffer-send-preserves-buffer-context ()
+  "agent-shell-queue-buffer-send errors outside queue buffer and preserves context."
+  (agent-shell-queue-test/isolate
+    (with-temp-buffer
+      (insert "not in queue")
+      (should-error (agent-shell-queue-buffer-send) :type 'user-error))))
+
 ;;; test-agent-shell-queue.el ends here

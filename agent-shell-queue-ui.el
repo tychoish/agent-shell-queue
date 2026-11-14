@@ -923,79 +923,92 @@ then places the unassigned bucket last."
       assigned)))
 
 (defun agent-shell-queue-buffer-refresh ()
-  "Rebuild the tabulated list from current queue state."
+  "Rebuild the tabulated list from current queue state.
+When invoked outside `agent-shell-queue-mode', safely redirects to
+the `*agent-shell-queue*' buffer if live and in queue mode, preventing
+accidental corruption of other buffers."
   (interactive)
-  (agent-shell-queue--ensure-loaded)
-  (let* ((ordered (seq-map #'agent-shell-queue--sanitize-bucket
-                           (agent-shell-queue--ordered-display-items)))
-         (show-buffer-p agent-shell-queue-show-buffer-column)
-         (column-structure (list show-buffer-p
-                                 agent-shell-queue-show-kind-column
-                                 agent-shell-queue-show-ordinal-column
-                                 agent-shell-queue-show-age-column))
-         (next-id-map (seq-map (lambda (it)
-                                 (cons (car it)
-                                       (when-let* ((next (agent-shell-queue--next-dispatchable-item
-                                                          (cdr it))))
-                                         (agent-shell-queue-item-id next))))
-                               (agent-shell-queue-store-items agent-shell-queue--store)))
-         (pw (agent-shell-queue--prompt-width show-buffer-p)))
-    (unless (equal column-structure agent-shell-queue--last-column-structure)
-      (setq agent-shell-queue--last-column-structure column-structure)
-      (setq tabulated-list-format (agent-shell-queue--column-format show-buffer-p pw))
-      (tabulated-list-init-header))
-    (setq tabulated-list-entries
-          (thread-last ordered
-            (seq-mapcat
-             (lambda (pair)
-               (seq-map
-                (lambda (item)
-                  (let* ((id (agent-shell-queue-item-id item))
-                         (next-p (equal id (cdr (assoc (car pair) next-id-map))))
-                         (display (agent-shell-queue--item-display item (car pair) next-p))
-                         (status-str (car display))
-                         (face (cdr display))
-                         (cell (lambda (str) (if face (propertize str 'face face) str)))
-                         (idx (cl-position id
-                                           (cdr (assoc (car pair) (agent-shell-queue-store-items agent-shell-queue--store)))
-                                           :key #'agent-shell-queue-item-id :test #'equal))
-                         (ordinal (if idx (1+ idx) 0))
-                         (status (agent-shell-queue-item-status item))
-                         (dispatched (agent-shell-queue-item-dispatched item))
-                         (completed (agent-shell-queue-item-completed item))
-                         (age-str (cond
-                                   ((and (eq status 'done) dispatched completed)
-                                    (agent-shell-queue--format-age
-                                     (time-subtract completed dispatched)))
-                                   ((and (eq status 'running) dispatched)
-                                    (agent-shell-queue--format-age (time-since dispatched)))
-                                   (t "")))
-                         (first-line (car (split-string
-                                           (agent-shell-queue-item-args item) "\n")))
-                         (buf-cell (funcall cell
-                                            (if (equal (car pair) agent-shell-queue--unassigned-key)
-                                                "(unassigned)" (car pair))))
-                         (kind-str (agent-shell-queue--item-kind-string item))
-                         (row (let (cols)
-                                (push (funcall cell status-str) cols)
-                                (when agent-shell-queue-show-kind-column
-                                  (push (funcall cell kind-str) cols))
-                                (when show-buffer-p (push buf-cell cols))
-                                (when agent-shell-queue-show-ordinal-column
-                                  (push (funcall cell (if (> ordinal 0)
-                                                          (number-to-string ordinal) ""))
-                                        cols))
-                                (when agent-shell-queue-show-age-column
-                                  (push (funcall cell age-str) cols))
-                                (push (funcall cell (truncate-string-to-width
-                                                     first-line pw nil nil "…"))
-                                      cols)
-                                (apply #'vector (nreverse cols)))))
-                    (list id row)))
-                (cdr pair))))))
-    (tabulated-list-print t)
-    (when agent-shell-queue-multiline-format
-      (agent-shell-queue--expand-multiline))))
+  (if (not (derived-mode-p 'agent-shell-queue-mode))
+      (if-let* ((buf (get-buffer "*agent-shell-queue*")))
+          (if (and (buffer-live-p buf)
+                   (with-current-buffer buf (derived-mode-p 'agent-shell-queue-mode)))
+              (with-current-buffer buf
+                (agent-shell-queue-buffer-refresh))
+            (when (called-interactively-p 'interactive)
+              (user-error "Buffer *agent-shell-queue* is not in agent-shell-queue-mode")))
+        (when (called-interactively-p 'interactive)
+          (user-error "No *agent-shell-queue* buffer exists")))
+    (agent-shell-queue--ensure-loaded)
+    (let* ((ordered (seq-map #'agent-shell-queue--sanitize-bucket
+                             (agent-shell-queue--ordered-display-items)))
+           (show-buffer-p agent-shell-queue-show-buffer-column)
+           (column-structure (list show-buffer-p
+                                   agent-shell-queue-show-kind-column
+                                   agent-shell-queue-show-ordinal-column
+                                   agent-shell-queue-show-age-column))
+           (next-id-map (seq-map (lambda (it)
+                                   (cons (car it)
+                                         (when-let* ((next (agent-shell-queue--next-dispatchable-item
+                                                            (cdr it))))
+                                           (agent-shell-queue-item-id next))))
+                                 (agent-shell-queue-store-items agent-shell-queue--store)))
+           (pw (agent-shell-queue--prompt-width show-buffer-p)))
+      (unless (equal column-structure agent-shell-queue--last-column-structure)
+        (setq agent-shell-queue--last-column-structure column-structure)
+        (setq tabulated-list-format (agent-shell-queue--column-format show-buffer-p pw))
+        (tabulated-list-init-header))
+      (setq tabulated-list-entries
+            (thread-last ordered
+              (seq-mapcat
+               (lambda (pair)
+                 (seq-map
+                  (lambda (item)
+                    (let* ((id (agent-shell-queue-item-id item))
+                           (next-p (equal id (cdr (assoc (car pair) next-id-map))))
+                           (display (agent-shell-queue--item-display item (car pair) next-p))
+                           (status-str (car display))
+                           (face (cdr display))
+                           (cell (lambda (str) (if face (propertize str 'face face) str)))
+                           (idx (cl-position id
+                                             (cdr (assoc (car pair) (agent-shell-queue-store-items agent-shell-queue--store)))
+                                             :key #'agent-shell-queue-item-id :test #'equal))
+                           (ordinal (if idx (1+ idx) 0))
+                           (status (agent-shell-queue-item-status item))
+                           (dispatched (agent-shell-queue-item-dispatched item))
+                           (completed (agent-shell-queue-item-completed item))
+                           (age-str (cond
+                                     ((and (eq status 'done) dispatched completed)
+                                      (agent-shell-queue--format-age
+                                       (time-subtract completed dispatched)))
+                                     ((and (eq status 'running) dispatched)
+                                      (agent-shell-queue--format-age (time-since dispatched)))
+                                     (t "")))
+                           (first-line (car (split-string
+                                             (agent-shell-queue-item-args item) "\n")))
+                           (buf-cell (funcall cell
+                                              (if (equal (car pair) agent-shell-queue--unassigned-key)
+                                                  "(unassigned)" (car pair))))
+                           (kind-str (agent-shell-queue--item-kind-string item))
+                           (row (let (cols)
+                                  (push (funcall cell status-str) cols)
+                                  (when agent-shell-queue-show-kind-column
+                                    (push (funcall cell kind-str) cols))
+                                  (when show-buffer-p (push buf-cell cols))
+                                  (when agent-shell-queue-show-ordinal-column
+                                    (push (funcall cell (if (> ordinal 0)
+                                                            (number-to-string ordinal) ""))
+                                          cols))
+                                  (when agent-shell-queue-show-age-column
+                                    (push (funcall cell age-str) cols))
+                                  (push (funcall cell (truncate-string-to-width
+                                                       first-line pw nil nil "…"))
+                                        cols)
+                                  (apply #'vector (nreverse cols)))))
+                      (list id row)))
+                  (cdr pair))))))
+      (tabulated-list-print t)
+      (when agent-shell-queue-multiline-format
+        (agent-shell-queue--expand-multiline)))))
 
 (defun agent-shell-queue--expand-multiline ()
   "Expand each tabulated entry with a second prompt line and a separator.
@@ -1163,9 +1176,15 @@ Draft items are promoted directly to active without cascade."
 When another task is already running for the same session, behavior adapts
 based on the item's current status — see `agent-shell-queue--send-now'."
   (interactive)
-  (when-let* ((id (tabulated-list-get-id)))
+  (unless (derived-mode-p 'agent-shell-queue-mode)
+    (user-error "Command must be invoked from an agent-shell queue buffer"))
+  (when-let* ((id (tabulated-list-get-id))
+              (qbuf (current-buffer)))
     (agent-shell-queue--send-now id)
-    (agent-shell-queue-buffer-refresh)))
+    (when (buffer-live-p qbuf)
+      (with-current-buffer qbuf
+        (when (derived-mode-p 'agent-shell-queue-mode)
+          (agent-shell-queue-buffer-refresh))))))
 
 (defun agent-shell-queue-buffer-untrack-running ()
   "Remove the running item at point from queue tracking without aborting it."
