@@ -27,6 +27,9 @@
 (autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
   "Global minor mode routing inbuilt agent-shell queue to ASQ." t)
 
+(autoload 'agent-shell-menu-global-navigation-mode "agent-shell-menu"
+  "Enable session navigation bindings in agent-shell buffers." t)
+
 (autoload 'agent-shell-menu-dispatch "agent-shell-menu"
   "agent-shell operations — navigate, act, send, queue, and session management." t)
 
@@ -66,6 +69,7 @@
   (advice-add 'agent-shell-send-file-to :around #'agent-shell-queue--ad-agent-shell-send-file-to)
   (advice-add 'shell-maker-submit :before #'agent-shell-queue--on-submit-intercept)
   (agent-shell-menu-install)
+  (agent-shell-menu-global-navigation-mode 1)
   (advice-add 'agent-shell-switch-buffer :override #'agent-shell-menu--switch-buffer)
   (advice-add 'agent-shell-rename-buffer :override #'agent-shell-menu-name-buffer)
   (keymap-set agent-shell-mode-map "<remap> <rename-buffer>" #'agent-shell-menu-name-buffer)
@@ -79,6 +83,7 @@
   (advice-remove 'agent-shell--send-command #'agent-shell-queue--on-send-command)
   (advice-remove 'agent-shell-send-file-to #'agent-shell-queue--ad-agent-shell-send-file-to)
   (advice-remove 'shell-maker-submit #'agent-shell-queue--on-submit-intercept)
+  (agent-shell-menu-global-navigation-mode -1)
   (advice-remove 'agent-shell-switch-buffer #'agent-shell-menu--switch-buffer)
   (advice-remove 'agent-shell-rename-buffer #'agent-shell-menu-name-buffer)
   (keymap-unset agent-shell-mode-map "<remap> <rename-buffer>" t)

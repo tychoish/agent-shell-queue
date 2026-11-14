@@ -145,21 +145,78 @@ and time since last activity — a superset of what
       :require-match t
       :history 'agent-shell-menu--pick-buffer))))
 
+(defun agent-shell-menu--display-shell (shell-buffer)
+  "Switch to SHELL-BUFFER, respecting viewport preference."
+  (switch-to-buffer (or (when agent-shell-prefer-viewport-interaction
+                          (agent-shell-viewport--buffer
+                           :shell-buffer shell-buffer :existing-only t))
+                        shell-buffer)))
+
 ;;;###autoload
 (defun agent-shell-menu--switch-buffer ()
-  "Switch to an agent-shell buffer with annotations.
-Annotations include icon, status, title, cwd, and age.
-Installed as `:override' advice on `agent-shell-switch-buffer' so the
-enhanced picker is used under the original, upstream-compatible name
-instead of introducing a second public entry point.  Respects
-`agent-shell-prefer-viewport-interaction' like the original."
+  "Switch to an agent-shell buffer using the annotated picker."
   (interactive)
-  (let ((shell-buffer (agent-shell-menu--pick-buffer "agent-shell =>")))
-    (switch-to-buffer (or (when agent-shell-prefer-viewport-interaction
-			     (agent-shell-viewport--buffer
-			      :shell-buffer shell-buffer
-			      :existing-only t))
-			   shell-buffer))))
+  (when-let* ((shell-buffer (agent-shell-menu--pick-buffer "agent-shell =>")))
+    (agent-shell-menu--display-shell shell-buffer)))
+
+(defvar agent-shell-menu--cycle-buffers nil
+  "Snapshot of shell buffers for consecutive navigation commands.")
+
+(defun agent-shell-menu--older-activity-p (left right)
+  "Return non-nil if LEFT was active before RIGHT; unknown times sort last."
+  (let ((left-time (agent-shell-last-activity-time :shell-buffer left))
+        (right-time (agent-shell-last-activity-time :shell-buffer right)))
+    (and left-time (or (not right-time) (time-less-p left-time right-time)))))
+
+;;;###autoload
+(defun agent-shell-menu-next-buffer (&optional backward)
+  "Switch to the next agent shell in order of decreasing idle time.
+With BACKWARD non-nil, move in the opposite direction.  Consecutive
+navigation commands keep a stable snapshot until another command runs.
+Shells with no recorded activity sort after those with timestamps."
+  (interactive "P")
+  (unless (memq last-command '(agent-shell-menu-next-buffer agent-shell-menu-previous-buffer))
+    (setq agent-shell-menu--cycle-buffers
+          (seq-sort #'agent-shell-menu--older-activity-p (agent-shell-buffers))))
+  (setq agent-shell-menu--cycle-buffers
+        (seq-filter #'buffer-live-p agent-shell-menu--cycle-buffers))
+  (unless agent-shell-menu--cycle-buffers
+    (user-error "No live agent-shell buffers"))
+  (let* ((current (agent-shell-menu--session-shell-buffer))
+         (position (seq-position agent-shell-menu--cycle-buffers current))
+         (index (if position
+                    (mod (+ position (if backward -1 1)) (length agent-shell-menu--cycle-buffers))
+                  (if backward (1- (length agent-shell-menu--cycle-buffers)) 0))))
+    (agent-shell-menu--display-shell (nth index agent-shell-menu--cycle-buffers))))
+
+;;;###autoload
+(defun agent-shell-menu-previous-buffer ()
+  "Switch to the preceding agent shell in the idle-ordered stack."
+  (interactive)
+  (agent-shell-menu-next-buffer t))
+
+
+(defvar-keymap agent-shell-menu-navigation-mode-map
+  "C-c b" #'agent-shell-menu--switch-buffer
+  "C-c ]" #'agent-shell-menu-next-buffer
+  "C-c [" #'agent-shell-menu-previous-buffer)
+
+;;;###autoload
+(define-minor-mode agent-shell-menu-navigation-mode
+  "Provide prompt-safe keys for navigating agent-shell sessions."
+  :lighter nil
+  :keymap agent-shell-menu-navigation-mode-map)
+
+(defun agent-shell-menu--enable-navigation ()
+  "Enable session navigation in agent-shell and viewport buffers."
+  (when (derived-mode-p 'agent-shell-mode 'agent-shell-viewport-view-mode
+                        'agent-shell-viewport-edit-mode)
+    (agent-shell-menu-navigation-mode 1)))
+
+;;;###autoload
+(define-globalized-minor-mode agent-shell-menu-global-navigation-mode
+  agent-shell-menu-navigation-mode agent-shell-menu--enable-navigation
+  :group 'agent-shell-queue)
 
 
 ;;;###autoload

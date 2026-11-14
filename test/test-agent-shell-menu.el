@@ -214,6 +214,95 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
   (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () nil)))
     (should-error (agent-shell-menu--pick-buffer "test: ") :type 'user-error)))
 
+(ert-deftest agent-shell-menu/cycle-idle-order-and-stable-snapshot ()
+  "Cycle from oldest activity, keeping order as activity changes."
+  (let ((old (generate-new-buffer " *asq-old*"))
+        (recent (generate-new-buffer " *asq-recent*"))
+        (unknown (generate-new-buffer " *asq-unknown*"))
+        (agent-shell-menu--cycle-buffers nil)
+        (last-command nil)
+        (changed nil)
+        current)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () (if changed (list old recent) (list recent unknown old))))
+                  ((symbol-function 'agent-shell-last-activity-time)
+                   (lambda (&rest args)
+                     (let ((buf (plist-get args :shell-buffer)))
+                       (cond ((eq buf old) (seconds-to-time (if changed 30 10)))
+                             ((eq buf recent) (seconds-to-time (if changed 5 20)))))))
+                  ((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () current))
+                  ((symbol-function 'agent-shell-menu--display-shell) (lambda (buf) (setq current buf))))
+          (agent-shell-menu-next-buffer)
+          (should (eq current old))
+          (setq changed t)
+          (setq last-command 'agent-shell-menu-next-buffer)
+          (agent-shell-menu-next-buffer)
+          (should (eq current recent))
+          (agent-shell-menu-next-buffer)
+          (should (eq current unknown))
+          (setq last-command 'agent-shell-menu-previous-buffer)
+          (agent-shell-menu-previous-buffer)
+          (should (eq current recent))
+          (kill-buffer old)
+          (agent-shell-menu-next-buffer)
+          (should (eq current unknown))
+          (setq last-command 'other-command)
+          (setq current nil)
+          (agent-shell-menu-next-buffer)
+          (should (eq current recent)))
+      (seq-do (lambda (buf) (when (buffer-live-p buf) (kill-buffer buf)))
+              (list old recent unknown)))))
+
+(ert-deftest agent-shell-menu/cycle-empty-errors ()
+  "Cycling with no live sessions reports a user error."
+  (let ((last-command nil))
+    (cl-letf (((symbol-function 'agent-shell-buffers) (lambda () nil)))
+      (should-error (agent-shell-menu-next-buffer) :type 'user-error))))
+
+(ert-deftest agent-shell-menu/navigation-mode-bindings ()
+  "Navigation keys are local to the minor mode and disappear on disable."
+  (with-temp-buffer
+    (let ((overriding-local-map nil))
+      (agent-shell-menu-navigation-mode 1)
+      (should (eq (key-binding (kbd "C-c b")) 'agent-shell-menu--switch-buffer))
+      (should (eq (key-binding (kbd "C-c ]")) 'agent-shell-menu-next-buffer))
+      (should (eq (key-binding (kbd "C-c [")) 'agent-shell-menu-previous-buffer))
+      (agent-shell-menu-navigation-mode -1)
+      (should-not (eq (key-binding (kbd "C-c ]")) 'agent-shell-menu-next-buffer)))))
+
+(ert-deftest agent-shell-menu/navigation-enable-only-in-shell ()
+  "The global mode enables its local mode only in agent-shell buffers."
+  (with-temp-buffer
+    (agent-shell-menu--enable-navigation)
+    (should-not agent-shell-menu-navigation-mode)
+    (setq major-mode 'agent-shell-mode)
+    (agent-shell-menu--enable-navigation)
+    (should agent-shell-menu-navigation-mode)
+    (agent-shell-menu-navigation-mode -1)
+    (setq major-mode 'agent-shell-viewport-edit-mode)
+    (agent-shell-menu--enable-navigation)
+    (should agent-shell-menu-navigation-mode)))
+
+(ert-deftest agent-shell-menu/global-navigation-lifecycle ()
+  "Global navigation follows session buffers and removes their bindings."
+  (let ((shell (generate-new-buffer " *asq-nav-shell*"))
+        (other (generate-new-buffer " *asq-nav-other*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer shell (setq major-mode 'agent-shell-mode))
+          (agent-shell-menu-global-navigation-mode 1)
+          (with-current-buffer shell
+            (agent-shell-menu--enable-navigation)
+            (should agent-shell-menu-navigation-mode))
+          (with-current-buffer other
+            (agent-shell-menu--enable-navigation)
+            (should-not agent-shell-menu-navigation-mode))
+          (agent-shell-menu-global-navigation-mode -1)
+          (with-current-buffer shell (should-not agent-shell-menu-navigation-mode)))
+      (agent-shell-menu-global-navigation-mode -1)
+      (kill-buffer shell)
+      (kill-buffer other))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; agent-shell-menu-project-buffers
 
