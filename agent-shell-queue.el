@@ -23,6 +23,7 @@
 (require 'agent-shell-queue-core)
 (require 'agent-shell-queue-ui)
 (require 'agent-shell-queue-plan)
+(require 'agent-shell-queue-org)
 
 (autoload 'agent-shell-queue-overload-mode "agent-shell-queue-overload"
   "Global minor mode routing inbuilt agent-shell queue to ASQ." t)
