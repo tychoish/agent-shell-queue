@@ -43,6 +43,54 @@
          (agent-shell-queue-overload-mode -1))
        (delete-directory temp-dir t))))
 
+(ert-deftest asq-overload/paused-enqueue-choices ()
+  "Paused sessions honor each enqueue choice."
+  (with-test-queue-overload-env
+   (seq-do
+    (lambda (choice)
+      (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+            (list (buffer-name test-buf)))
+      (cl-letf (((symbol-function 'annotated-completing-read) (lambda (&rest _) choice))
+                ((symbol-function 'agent-shell-queue-session-resume)
+                 (lambda (_buf) (setq choice (concat choice "!"))))
+                ((symbol-function 'agent-shell-queue-resume)
+                 (lambda () (setq choice (concat choice "!")))))
+        (should (eq (agent-shell-queue--paused-enqueue-choice test-buf)
+                    (if (equal choice "Enqueue blocked") 'blocked 'resumed)))))
+    '("Resume queue" "Resume all queues" "Enqueue blocked"))))
+
+(ert-deftest asq-overload/steering-choice-and-lifecycle ()
+  "Steering mode routes the prompt and restores the previous setting."
+  (with-test-queue-overload-env
+   (let ((agent-shell-busy-submit-default-function #'ignore)
+         (answer "Steer") sent)
+     (agent-shell-queue-ask-steering-mode 1)
+     (agent-shell-queue-ask-steering-mode 1)
+     (cl-letf (((symbol-function 'agent-shell-steering-supported-p) (lambda (&rest _) t))
+               ((symbol-function 'annotated-completing-read) (lambda (&rest _) answer))
+               ((symbol-function 'agent-shell-prompt-steer) (lambda (p) (setq sent (cons 'steer p))))
+               ((symbol-function 'agent-shell-busy-submit-queue) (lambda (p) (setq sent (cons 'queue p)))))
+       (agent-shell-queue--ask-busy-submit "hello")
+       (should (equal sent '(steer . "hello")))
+       (setq answer "Queue")
+       (agent-shell-queue--ask-busy-submit "next")
+       (should (equal sent '(queue . "next"))))
+     (agent-shell-queue-ask-steering-mode -1)
+     (should (eq agent-shell-busy-submit-default-function #'ignore)))))
+
+(ert-deftest asq-overload/paused-enqueue-stays-blocked ()
+  "Enqueuing into a paused idle session never sends directly."
+  (with-test-queue-overload-env
+   (setf (agent-shell-queue-queue-session-paused agent-shell-queue--queue)
+         (list (buffer-name test-buf)))
+   (cl-letf (((symbol-function 'annotated-completing-read) (lambda (&rest _) "Enqueue blocked"))
+             ((symbol-function 'shell-maker-busy) (lambda (&rest _) nil))
+             ((symbol-function 'agent-shell--insert-to-shell-buffer) (lambda (&rest _) (error "Sent directly")))
+             ((symbol-function 'agent-shell-queue--ensure-subscription) #'ignore))
+     (let ((item (agent-shell-queue-overload-enqueue "later" test-buf)))
+       (should (eq (agent-shell-queue-item-status item) 'blocked.skip))
+       (should (equal (agent-shell-queue-item-args item) "later"))))))
+
 ;;; Mode Lifecycle Tests
 
 (ert-deftest asq-overload/mode-toggle-lifecycle ()

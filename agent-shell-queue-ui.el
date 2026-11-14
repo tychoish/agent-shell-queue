@@ -166,6 +166,28 @@ Optional DELAY-BEFORE and DELAY-AFTER specify per-task delays in seconds."
     (pop-to-buffer capture-buf '(display-buffer-below-selected))
     capture-buf))
 
+(defun agent-shell-queue--paused-enqueue-choice (buf)
+  "Ask how to enqueue to paused or halted BUF.
+Return `blocked' to block the item, `resumed' after resuming, or nil."
+  (when (buffer-live-p buf)
+    (agent-shell-queue--ensure-loaded)
+    (let ((name (buffer-name buf)))
+      (when (or (member name (agent-shell-queue-queue-session-paused agent-shell-queue--queue))
+                (agent-shell-queue--halted-on-abort-p name)
+                (seq-some (lambda (item)
+                            (eq (agent-shell-queue-item-status item) 'blocked.runner))
+                          (cdr (assoc name (agent-shell-queue-store-items agent-shell-queue--store)))))
+        (pcase (annotated-completing-read
+                '(("Resume queue" . "Resume this session and enqueue")
+                  ("Resume all queues" . "Resume all sessions and enqueue")
+                  ("Enqueue blocked" . "Keep this item blocked"))
+                :prompt "Queue is paused: " :require-match t
+                :history 'agent-shell-queue--paused-enqueue-choice)
+          ("Resume queue" (agent-shell-queue-session-resume buf) 'resumed)
+          ("Resume all queues" (agent-shell-queue-resume) 'resumed)
+          ("Enqueue blocked" 'blocked)
+          (_ (user-error "Enqueue cancelled")))))))
+
 (defun agent-shell-queue-capture-confirm ()
   "Confirm capture: queue the buffer contents and close."
   (interactive)
@@ -176,7 +198,10 @@ Optional DELAY-BEFORE and DELAY-AFTER specify per-task delays in seconds."
         (kind agent-shell-queue--capture-kind)
         (delay-before agent-shell-queue--capture-delay-before)
         (delay-after agent-shell-queue--capture-delay-after))
-    (let ((use-blocked (agent-shell-queue--capture-plan-mode-choice buf)))
+    (when (string-empty-p prompt)
+      (user-error "Nothing to enqueue"))
+    (let ((use-blocked (or (agent-shell-queue--capture-plan-mode-choice buf)
+                           (eq (agent-shell-queue--paused-enqueue-choice buf) 'blocked))))
       (agent-shell-queue--close-capture-window)
       (unless (string-empty-p prompt)
         (message "agent-shell: %s" prompt)

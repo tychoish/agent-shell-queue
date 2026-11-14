@@ -30,6 +30,7 @@
 ;;; Code:
 
 (declare-function agent-shell-queue-send-next "agent-shell-queue-core")
+(declare-function agent-shell-queue--paused-enqueue-choice "agent-shell-queue-ui" (buf))
 
 (require 'subr-x)
 (require 'agent-shell-queue-core)
@@ -135,22 +136,61 @@ a newly opened capture buffer."
 
 ;;; Core overload operations
 
+;;;###autoload
+(define-minor-mode agent-shell-queue-ask-steering-mode
+  "Ask whether to queue or steer when submitting to a busy agent.
+Only agents advertising steering support offer the choice."
+  :lighter " Q?"
+  (if agent-shell-queue-ask-steering-mode
+      (progn
+        (unless agent-shell-queue--previous-busy-submit-function
+          (setq-local agent-shell-queue--previous-busy-submit-function
+                    (cons (local-variable-p 'agent-shell-busy-submit-default-function)
+                          agent-shell-busy-submit-default-function)))
+        (setq-local agent-shell-busy-submit-default-function
+                    #'agent-shell-queue--ask-busy-submit))
+    (when agent-shell-queue--previous-busy-submit-function
+      (if (car agent-shell-queue--previous-busy-submit-function)
+          (setq-local agent-shell-busy-submit-default-function
+                      (cdr agent-shell-queue--previous-busy-submit-function))
+        (kill-local-variable 'agent-shell-busy-submit-default-function))
+      (kill-local-variable 'agent-shell-queue--previous-busy-submit-function))))
+
+(defvar-local agent-shell-queue--previous-busy-submit-function nil)
+
+(defun agent-shell-queue--ask-busy-submit (prompt)
+  "Ask whether to queue PROMPT or steer the current agent."
+  (if (not (agent-shell-steering-supported-p))
+      (agent-shell-busy-submit-queue prompt)
+    (pcase (annotated-completing-read
+            '(("Queue" . "Send after the current turn")
+              ("Steer" . "Send to the running turn"))
+            :prompt "Submit prompt: " :require-match t
+            :history 'agent-shell-queue--ask-busy-submit)
+      ("Queue" (agent-shell-busy-submit-queue prompt))
+      ("Steer" (agent-shell-prompt-steer prompt))
+      (_ (user-error "Submission cancelled")))))
+
+
 (defun agent-shell-queue-overload-enqueue (prompt &optional buf)
   "Enqueue PROMPT into `agent-shell-queue' for BUF.
 If the shell is idle, submits immediately.  If busy, creates a persistent
 `agent-shell-queue' item with unique ID, persistence, and pause support."
   (let* ((target-buf (agent-shell-queue-overload--target-shell-buffer buf))
+         (choice (agent-shell-queue--paused-enqueue-choice target-buf))
          (busy (and (buffer-live-p target-buf)
                     (fboundp 'shell-maker-busy)
                     (with-current-buffer target-buf (shell-maker-busy)))))
-    (if (not busy)
+    (if (and (not busy) (not choice))
         (with-current-buffer target-buf
-          (if (fboundp 'agent-shell--insert-to-shell-buffer)
-              (agent-shell--insert-to-shell-buffer :text prompt :submit t :no-focus t)
-            (insert prompt)
-            (when (fboundp 'comint-send-input)
-              (comint-send-input))))
+          (agent-shell--insert-to-shell-buffer :text prompt :submit t :no-focus t))
       (let ((item (agent-shell-queue-add prompt target-buf)))
+        (when (eq choice 'blocked)
+          (setf (agent-shell-queue-item-status item) 'blocked.skip)
+          (agent-shell-queue--save)
+          (agent-shell-queue--refresh-buffer))
+        (when (eq choice 'resumed)
+          (agent-shell-queue--send-next-for-buffer target-buf))
         (when agent-shell-queue-overload-echo-queue
           (agent-shell-queue-overload--echo-status prompt target-buf))
         item))))

@@ -181,3 +181,11 @@ Detailed API documentation for all interactive commands, options, and functions 
 
 Copyright (C) tychoish.  GPL-3.0 or later.  See the source file header
 for the full license text.
+
+* Choosing how to submit
+
+Enable =agent-shell-queue-ask-steering-mode= in an agent-shell buffer to
+choose between queueing and steering when submitting during a running turn.
+Agents without steering support queue normally.  When adding to a paused or
+halted session, choose to resume that queue, resume all queues, or enqueue
+the item blocked.
