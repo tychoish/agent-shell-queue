@@ -346,6 +346,10 @@ Signals an error for unknown formats.")
   "Return the file extension string (with leading dot) for FORMAT."
   ".el")
 
+(cl-defmethod agent-shell-queue-format-file-extension :before ((_format (eql org)))
+  (unless (featurep 'agent-shell-queue-org)
+    (require 'agent-shell-queue-org nil t)))
+
 (cl-defmethod agent-shell-queue--serialize-items ((_format (eql plist)) items)
   "Serialize ITEMS using plist format."
   (agent-shell-queue--serialize-plist items))
@@ -397,15 +401,21 @@ Installs cl-generic methods for `agent-shell-queue--serialize-items' and
 
 (defun agent-shell-queue-serialize (store)
   "Serialize STORE to a string using the format recorded in STORE."
-  (agent-shell-queue--serialize-items
-   (agent-shell-queue-store-format store)
-   (agent-shell-queue-store-items store)))
+  (let ((fmt (agent-shell-queue-store-format store)))
+    (when (and (eq fmt 'org) (not (featurep 'agent-shell-queue-org)))
+      (require 'agent-shell-queue-org nil t))
+    (agent-shell-queue--serialize-items
+     fmt
+     (agent-shell-queue-store-items store))))
 
 (defun agent-shell-queue-deserialize (store string)
   "Parse STRING using the format in STORE, returning an items alist."
-  (agent-shell-queue--deserialize-items
-   (agent-shell-queue-store-format store)
-   string))
+  (let ((fmt (agent-shell-queue-store-format store)))
+    (when (and (eq fmt 'org) (not (featurep 'agent-shell-queue-org)))
+      (require 'agent-shell-queue-org nil t))
+    (agent-shell-queue--deserialize-items
+     fmt
+     string)))
 
 (defun agent-shell-queue--safe-save-directory ()
   "Return the directory for safe-save backups.
