@@ -18,7 +18,6 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'sprite-future)
 (require 'agent-shell)
 (require 'alert)
 (require 'savehist)

@@ -35,7 +35,6 @@
 (require 'help-mode)
 (require 'annotated-completing-read)
 (require 'transient)
-(require 'sprite-future)
 (require 'agent-shell)
 (require 'agent-shell-queue)
 (require 'agent-shell-workflow nil t)
