@@ -4432,6 +4432,32 @@ leaving sessions that were already individually paused beforehand untouched."
              (should-not (agent-shell-queue--dispatch-if-ready buf))))
        (kill-buffer buf)))))
 
+(ert-deftest agent-shell-queue/interrupt-watchdog-arms-timer ()
+  "Interrupt arms a fallback timer when confirmation is granted."
+  (let ((armed nil))
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-mode)
+      (setq-local agent-shell--state '((:active-requests . (request-1))))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (&rest _) (setq armed t)))
+                ((symbol-function 'agent-shell-interrupt-confirmed-p)
+                 (lambda () t)))
+        (agent-shell-queue--on-interrupt)
+        (should armed)))))
+
+(ert-deftest agent-shell-queue/interrupt-watchdog-declined-confirmation ()
+  "Interrupt does not arm fallback timer when confirmation is declined."
+  (let ((armed nil))
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-mode)
+      (setq-local agent-shell--state '((:active-requests . (request-1))))
+      (cl-letf (((symbol-function 'run-with-timer)
+                 (lambda (&rest _) (setq armed t)))
+                ((symbol-function 'agent-shell-interrupt-confirmed-p)
+                 (lambda () nil)))
+        (agent-shell-queue--on-interrupt)
+        (should-not armed)))))
+
 (ert-deftest agent-shell-queue/recovery-criteria-verification ()
   "Test the 3 recovery criteria (uninterrupted, no question, not in plan mode)."
   (agent-shell-queue-test/isolate-no-sub

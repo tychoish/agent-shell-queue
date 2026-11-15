@@ -1190,11 +1190,24 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
     ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
 
+(defun agent-shell-menu-installed-agent-configs ()
+  "Return default agent config makers whose executable is available on `exec-path'."
+  (seq-filter
+   (lambda (maker)
+     (when-let* ((config (if (functionp maker) (funcall maker) maker))
+                 (cm (map-elt config :client-maker))
+                 (client (ignore-errors (funcall cm (current-buffer))))
+                 (cmd (map-elt client :command))
+                 (bin (if (consp cmd) (car cmd) cmd)))
+       (executable-find bin t)))
+   (agent-shell-default-agent-config-makers)))
+
 ;;;###autoload
 (defun agent-shell-menu-install ()
   "Install `agent-shell-menu' keybindings and customizations into `agent-shell' and `agent-shell-queue'."
   (interactive)
   (setq agent-shell-buffer-name-format #'agent-shell-menu-format-buffer-name)
+  (setq agent-shell-agent-configs #'agent-shell-menu-installed-agent-configs)
   (agent-shell-menu-mode-key "e" agent-shell-queue-capture-menu)
   (agent-shell-menu-mode-key "R" agent-shell-menu-name-buffer)
   (agent-shell-menu-mode-key "m" agent-shell-menu-dispatch)

@@ -330,6 +330,9 @@ and renames it to match TARGET-SHELL."
       buf)))
 
 (declare-function shell-maker-busy "shell-maker")
+(declare-function shell-maker-finish-output "shell-maker")
+(declare-function agent-shell-interrupt-confirmed-p "agent-shell")
+(defvar shell-maker--config)
 (declare-function markdown-mode "markdown-mode")
 (declare-function yaml-encode "yaml")
 (declare-function yaml-parse-string "yaml")
@@ -1024,7 +1027,25 @@ Affected buffer queues are paused and the queue state is saved."
     (user-error "Queue state file does not exist: %s" file)))
 
 
-(defun agent-shell-queue--on-interrupt (&optional _force)
+(defcustom agent-shell-queue-interrupt-timeout 5
+  "Seconds after interrupt before forcing shell recovery if unanswered.
+Set to nil to disable automatic recovery on interrupt."
+  :type '(choice (integer :tag "Seconds") (const :tag "Disabled" nil))
+  :group 'agent-shell-queue)
+
+(defun agent-shell-queue--force-clear-busy (shell-buffer request)
+  "Force SHELL-BUFFER ready if REQUEST never received a response."
+  (when (buffer-live-p shell-buffer)
+    (with-current-buffer shell-buffer
+      (when (and (shell-maker-busy)
+                 (member request (map-elt agent-shell--state :active-requests)))
+        (message "agent-shell-queue: forcing recovery after interrupt got no response")
+        (map-put! agent-shell--state :active-requests
+                  (seq-remove (lambda (r) (equal r request))
+                              (map-elt agent-shell--state :active-requests)))
+        (shell-maker-finish-output :config shell-maker--config :success nil)))))
+
+(defun agent-shell-queue--on-interrupt (&optional force)
   "Flag session and bucket as halted-on-abort on interrupt.
 Installed as :before advice on `agent-shell-interrupt'."
   (agent-shell-queue--ensure-loaded)
@@ -1037,7 +1058,13 @@ Installed as :before advice on `agent-shell-interrupt'."
 		(dir (agent-shell-queue-item-directory running-item)))
       (agent-shell-queue--mark-halted-on-abort (agent-shell-queue--bucket-for-dir dir)))
     (agent-shell-queue--save)
-    (agent-shell-queue--refresh-buffer)))
+    (agent-shell-queue--refresh-buffer)
+    (when (and agent-shell-queue-interrupt-timeout
+               (or force (agent-shell-interrupt-confirmed-p)))
+      (when-let* ((req (car (map-elt agent-shell--state :active-requests))))
+        (run-with-timer agent-shell-queue-interrupt-timeout nil
+                        #'agent-shell-queue--force-clear-busy
+                        (current-buffer) req)))))
 
 
 (defun agent-shell-queue--on-prompt-sent (buf)

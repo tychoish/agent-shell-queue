@@ -955,3 +955,9 @@ route a keystroke typed there to the menu command."
   (should (assoc "name buffer" agent-shell-menu-action-alist))
   (should (assoc "rename buffer" agent-shell-menu-action-alist)))
 
+(ert-deftest agent-shell-menu/installed-agent-configs ()
+  "Filtering returns makers whose command executable exists."
+  (let ((configs (agent-shell-menu-installed-agent-configs)))
+    (should (listp configs))
+    (should (seq-every-p #'functionp configs))))
+
