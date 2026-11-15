@@ -135,6 +135,10 @@ is only a safety net for buffers that become idle outside that path.")
   "File path for appending completed queue items as JSON lines.
 When nil (the default), completed items are not logged to disk.")
 
+(defvar agent-shell-queue-state-directory nil
+  "Directory where queue state and archive files are stored.
+When nil, defaults to `user-emacs-directory'.")
+
 (defvar agent-shell-queue-state-file-function #'agent-shell-queue--default-state-file
   "Function returning the path to the queue state file.")
 

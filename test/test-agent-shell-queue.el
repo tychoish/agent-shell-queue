@@ -2933,6 +2933,12 @@ Applies to all capture paths, not just insert-after."
     (should (stringp result))
     (should (string-match-p "\\.jsonl\\'" result))))
 
+(ert-deftest agent-shell-queue/default-files-respect-state-directory ()
+  "Default state and archive paths use `agent-shell-queue-state-directory' when set."
+  (let ((agent-shell-queue-state-directory "/custom/state/dir"))
+    (should (string-prefix-p "/custom/state/dir/" (agent-shell-queue--default-state-file)))
+    (should (string-prefix-p "/custom/state/dir/" (agent-shell-queue--default-archive-file)))))
+
 (ert-deftest agent-shell-queue/write-archive-no-op-when-disabled ()
   "`--write-archive' does nothing when archiving is disabled."
   (let ((agent-shell-queue-archive-enabled nil)

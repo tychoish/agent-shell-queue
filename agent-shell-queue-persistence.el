@@ -73,6 +73,7 @@
   (defvar agent-shell-queue--store)
   (defvar agent-shell-queue--queue)
   (defvar agent-shell-queue--loaded)
+  (defvar agent-shell-queue-state-directory)
   (defvar agent-shell-queue-serialization-format)
   (defvar agent-shell-queue-save-function)
   (defvar agent-shell-queue-load-function)
@@ -168,16 +169,17 @@ When `agent-shell-queue-write-log-enabled' is non-nil, also appends to
   (pop-to-buffer "*agent-shell-queue-write-log*"))
 
 (defun agent-shell-queue--default-state-file ()
-  "Default queue state file path under `user-emacs-directory'."
+  "Default queue state file path under `agent-shell-queue-state-directory'."
   (expand-file-name (concat "agent-shell-queue."
                             (substring (agent-shell-queue-format-file-extension
                                         agent-shell-queue-serialization-format)
                                        1))
-                    user-emacs-directory))
+                    (or agent-shell-queue-state-directory user-emacs-directory)))
 
 (defun agent-shell-queue--default-archive-file ()
-  "Default JSONL archive file path under `user-emacs-directory'."
-  (expand-file-name "agent-shell-queue-archive.jsonl" user-emacs-directory))
+  "Default JSONL archive file path under `agent-shell-queue-state-directory'."
+  (expand-file-name "agent-shell-queue-archive.jsonl"
+                    (or agent-shell-queue-state-directory user-emacs-directory)))
 
 (defun agent-shell-queue--archive-file ()
   "Return the resolved archive file path, or nil if archiving is disabled."
@@ -347,6 +349,14 @@ Signals an error for unknown formats.")
   ".el")
 
 (cl-defmethod agent-shell-queue-format-file-extension :before ((_format (eql org)))
+  (unless (featurep 'agent-shell-queue-org)
+    (require 'agent-shell-queue-org nil t)))
+
+(cl-defmethod agent-shell-queue--serialize-items :before ((_format (eql org)) _items)
+  (unless (featurep 'agent-shell-queue-org)
+    (require 'agent-shell-queue-org nil t)))
+
+(cl-defmethod agent-shell-queue--deserialize-items :before ((_format (eql org)) _string)
   (unless (featurep 'agent-shell-queue-org)
     (require 'agent-shell-queue-org nil t)))
 

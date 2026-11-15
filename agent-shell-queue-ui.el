@@ -89,7 +89,8 @@
 (define-derived-mode agent-shell-queue-capture-mode markdown-mode "Queue-Capture"
   "Mode for composing a queued `agent-shell' prompt.
 \\{agent-shell-queue-capture-mode-map}"
-  (setq-local electric-indent-inhibit t))
+  (setq-local electric-indent-inhibit t)
+  (agent-shell-queue-setup-capture-completion))
 
 (defvar-local agent-shell-queue--capture-target nil
   "Target `agent-shell' buffer for this capture session.")
@@ -2742,7 +2743,8 @@ Multi-line prompt/response fields are formatted as literal block scalars."
   "Keymap for `agent-shell-queue-edit-mode'.")
 
 (define-derived-mode agent-shell-queue-edit-mode markdown-mode "Queue-Edit"
-  "Mode for editing a queued prompt in a popup buffer.")
+  "Mode for editing a queued prompt in a popup buffer."
+  (agent-shell-queue-setup-capture-completion))
 
 (defvar-local agent-shell-queue--editing-id nil
   "Item ID being edited in this `agent-shell-queue-edit-mode' buffer.")
