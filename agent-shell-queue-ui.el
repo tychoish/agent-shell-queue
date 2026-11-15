@@ -1230,7 +1230,7 @@ based on the item's current status — see `agent-shell-queue--send-now'."
   "Show the Buffer column in the queue buffer.
 Toggle with `agent-shell-queue-toggle-buffer-column' (db in the menu).")
 
-(defvar agent-shell-queue-show-ordinal-column t
+(defvar agent-shell-queue-show-ordinal-column nil
   "Show the ordinal (#) column in the queue buffer.")
 
 (defvar agent-shell-queue-show-age-column t

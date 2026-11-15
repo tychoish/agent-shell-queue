@@ -100,7 +100,7 @@ Each entry is a plist: :time :trigger :file :items :buckets :format :error.")
   :type 'integer
   :group 'agent-shell-queue)
 
-(defcustom agent-shell-queue-write-log-enabled nil
+(defcustom agent-shell-queue-write-log-enabled t
   "When non-nil, log persistence events to *agent-shell-queue-log* buffer."
   :type 'boolean
   :group 'agent-shell-queue)

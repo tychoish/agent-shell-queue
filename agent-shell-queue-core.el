@@ -90,13 +90,13 @@ When non-nil and less than the total pause duration, an alert is sent when
 (defvar agent-shell-queue--loaded nil
   "Non-nil when queue has been loaded from storage.")
 
-(defvar agent-shell-queue-serialization-format 'plist
+(defvar agent-shell-queue-serialization-format 'org
   "Format used to persist queue state to disk.
 One of:
-  `plist' — s-expression with keyword-keyed plists (default; no extra deps)
+  `plist' — s-expression with keyword-keyed plists
   `json'  — JSON via built-in `json-serialize'/`json-parse-string' (Emacs 27+)
   `yaml'  — YAML via `yaml-encode'/`yaml-parse-string' from the `yaml' package
-  `org'   — Org-mode file backend via `agent-shell-queue-org'")
+  `org'   — Org-mode file backend via `agent-shell-queue-org' (default)")
 
 (defvar agent-shell-queue-idle-delay 60.0
   "Idle delay in seconds for the backup auto-send timer.
@@ -145,7 +145,7 @@ When nil, defaults to `user-emacs-directory'.")
 (defvar agent-shell-queue-pick-buffer-function #'agent-shell-queue--default-pick-buffer
   "Function called with a PROMPT string to pick an `agent-shell' buffer.")
 
-(defvar agent-shell-queue-archive-enabled nil
+(defvar agent-shell-queue-archive-enabled t
   "When non-nil, completed items can be archived.
 Controls whether `agent-shell-queue-buffer-archive' is active.
 The destination path is controlled separately by
@@ -223,7 +223,7 @@ The function is called with no arguments and must populate
 the queue items from a durable store.
 Used by backends such as `agent-shell-queue-db' to bypass file I/O.")
 
-(defvar agent-shell-queue-safe-save nil
+(defvar agent-shell-queue-safe-save t
   "When non-nil, write a versioned backup before each queue state save.
 Backups are written to `agent-shell-queue-safe-save-directory' using the
 format selected by `agent-shell-queue-safe-save-format'.
@@ -239,7 +239,7 @@ Nil means use a subdirectory of variable `temporary-file-directory' named
   "Serialization format for safe-save backups.
 When nil, use `agent-shell-queue-serialization-format'.")
 
-(defvar agent-shell-queue-safe-save-max-files nil
+(defvar agent-shell-queue-safe-save-max-files 50
   "Maximum number of versioned backup files to keep in the safe-save directory.
 When non-nil and the backup count exceeds this limit, the oldest file is
 deleted after each save — one file at a time so lowering the limit converges
@@ -249,7 +249,7 @@ gradually.  Requires `agent-shell-queue-safe-save'.")
   "Seconds of Emacs idle time after which the queue state is flushed to disk.
 Set to nil to disable idle-triggered saves (default).")
 
-(defvar agent-shell-queue-stall-timeout 180
+(defvar agent-shell-queue-stall-timeout 600
   "Seconds after dispatch before a still-running item is reported as stalled.
 The ACP/shell-maker layer has no watchdog of its own: a wedged Lisp event
 loop or a desynced busy flag leaves a dispatched item showing `running'
