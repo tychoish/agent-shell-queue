@@ -1059,12 +1059,12 @@ Installed as :before advice on `agent-shell-interrupt'."
       (agent-shell-queue--mark-halted-on-abort (agent-shell-queue--bucket-for-dir dir)))
     (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)
-    (when (and agent-shell-queue-interrupt-timeout
-               (or force (agent-shell-interrupt-confirmed-p)))
-      (when-let* ((req (car (map-elt agent-shell--state :active-requests))))
-        (run-with-timer agent-shell-queue-interrupt-timeout nil
-                        #'agent-shell-queue--force-clear-busy
-                        (current-buffer) req)))))
+    (when-let* ((agent-shell-queue-interrupt-timeout)
+                (req (car (map-elt agent-shell--state :active-requests)))
+                ((or force (agent-shell-interrupt-confirmed-p))))
+      (run-with-timer agent-shell-queue-interrupt-timeout nil
+                      #'agent-shell-queue--force-clear-busy
+                      (current-buffer) req))))
 
 
 (defun agent-shell-queue--on-prompt-sent (buf)

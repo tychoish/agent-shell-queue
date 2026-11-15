@@ -4458,6 +4458,17 @@ leaving sessions that were already individually paused beforehand untouched."
         (agent-shell-queue--on-interrupt)
         (should-not armed)))))
 
+(ert-deftest agent-shell-queue/interrupt-watchdog-skips-confirmation-without-active-requests ()
+  "Interrupt does not prompt for confirmation when no requests are active."
+  (let ((prompted nil))
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-mode)
+      (setq-local agent-shell--state nil)
+      (cl-letf (((symbol-function 'agent-shell-interrupt-confirmed-p)
+                 (lambda () (setq prompted t))))
+        (agent-shell-queue--on-interrupt)
+        (should-not prompted)))))
+
 (ert-deftest agent-shell-queue/recovery-criteria-verification ()
   "Test the 3 recovery criteria (uninterrupted, no question, not in plan mode)."
   (agent-shell-queue-test/isolate-no-sub
