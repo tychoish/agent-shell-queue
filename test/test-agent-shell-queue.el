@@ -4778,3 +4778,44 @@ leaving sessions that were already individually paused beforehand untouched."
         (should-not (agent-shell-queue--heal-chat-labels (current-buffer)))))))
 
 ;;; test-agent-shell-queue.el ends here
+
+(ert-deftest agent-shell-queue/effective-pause-delay-per-item ()
+  "Per-item delay-after overrides the default; nil falls back; 0 disables."
+  (let ((agent-shell-queue-default-pause-delay 30.0))
+    (should (= 30.0 (agent-shell-queue--effective-pause-delay nil)))
+    (should (= 30.0 (agent-shell-queue--effective-pause-delay
+                     (agent-shell-queue-item--make :id "p1"))))
+    (should (= 5 (agent-shell-queue--effective-pause-delay
+                  (agent-shell-queue-item--make :id "p2" :delay-after 5))))
+    (should (= 0 (agent-shell-queue--effective-pause-delay
+                  (agent-shell-queue-item--make :id "p3" :delay-after 0)))))
+  (let ((agent-shell-queue-default-pause-delay nil))
+    (should (= 0 (agent-shell-queue--effective-pause-delay nil)))))
+
+(ert-deftest agent-shell-queue/set-item-delay-after-roundtrip ()
+  "set-item-delay-after stores 0 distinctly from nil and persists via JSON."
+  (agent-shell-queue-test/isolate-no-sub
+   (let ((item (agent-shell-queue-test/make-item "sd1" "x")))
+     (agent-shell-queue--add-item-to-bucket "b" item)
+     (agent-shell-queue-set-item-delay-after "sd1" 0)
+     (should (eql 0 (agent-shell-queue-item-delay-after item)))
+     (should (eql 0 (agent-shell-queue-item-delay-after
+                     (agent-shell-queue--item-from-json
+                      (agent-shell-queue--item-to-json item)))))
+     (agent-shell-queue-set-item-delay-after "sd1" nil)
+     (should-not (agent-shell-queue-item-delay-after item)))))
+
+(ert-deftest agent-shell-queue/read-item-id-from-find-item-pair ()
+  "Regression: interactive item picker must yield an ID, not a (BUF . ITEM) pair."
+  (let ((item (agent-shell-queue-test/make-item "rid1" "x")))
+    (cl-letf (((symbol-function 'agent-shell-queue-find-item)
+               (lambda (&optional _p) (cons "b" item))))
+      (with-temp-buffer
+        (should (equal "rid1" (agent-shell-queue--read-item-id "p")))))))
+
+(ert-deftest agent-shell-queue/queue-mode-delay-keys-bound ()
+  "Delay keys are bound once in the queue mode map."
+  (should (eq #'agent-shell-queue-set-item-delay-after
+              (keymap-lookup agent-shell-queue-mode-map "d")))
+  (should (eq #'agent-shell-queue-set-item-delay-before
+              (keymap-lookup agent-shell-queue-mode-map "l"))))

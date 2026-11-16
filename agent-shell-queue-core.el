@@ -1630,6 +1630,14 @@ that the subsequent --save does not fail on other stale items."
   (agent-shell-queue--save)
   (agent-shell-queue--refresh-buffer))
 
+(defun agent-shell-queue--effective-pause-delay (item)
+  "Return the post-task pause in seconds for ITEM (which may be nil).
+ITEM's own `delay-after' wins when non-nil, including 0 to suppress the
+pause; otherwise `agent-shell-queue-default-pause-delay', otherwise 0."
+  (or (and item (agent-shell-queue-item-delay-after item))
+      agent-shell-queue-default-pause-delay
+      0))
+
 (defun agent-shell-queue--complete-item (item buf-name)
   "Mark ITEM in BUF-NAME as done and trigger the next dispatch cycle.
 Records completion time, appends to the done log, persists state,
@@ -1643,9 +1651,7 @@ honoring `delay-after' or `agent-shell-queue-default-pause-delay'."
   (agent-shell-queue--refresh-buffer)
   (agent-shell-queue--alert-if-empty)
   (when-let* ((buf (get-buffer buf-name)))
-    (let ((delay-after (or (agent-shell-queue-item-delay-after item)
-                           agent-shell-queue-default-pause-delay
-                           0)))
+    (let ((delay-after (agent-shell-queue--effective-pause-delay item)))
       (if (and delay-after (> delay-after 0))
           (agent-shell-queue--start-pause-delay
            buf-name delay-after "Task pause"
@@ -2252,11 +2258,7 @@ is missing (or the timer is stale)."
             (when dir-bucket (agent-shell-queue--clear-halted-on-abort dir-bucket))
             (message "agent-shell-queue: session %s recovered from halt-on-abort" buf-name))
         (message "agent-shell-queue: session %s turn complete but remains halted-on-abort" buf-name)))
-    (let ((delay-after (if last-item
-                           (or (agent-shell-queue-item-delay-after last-item)
-                               agent-shell-queue-default-pause-delay
-                               0)
-                         (or agent-shell-queue-default-pause-delay 0))))
+    (let ((delay-after (agent-shell-queue--effective-pause-delay last-item)))
       (if (and delay-after (> delay-after 0))
           (agent-shell-queue--start-pause-delay
            buf-name delay-after "Task pause"
@@ -2994,27 +2996,45 @@ prefix arg)."
              (if duration (format " (%s s)" (agent-shell-queue--format-duration duration)) "")
              buf-name)))
 
+(defun agent-shell-queue--read-item-id (prompt)
+  "Return the item ID at point in a queue listing, else prompt with PROMPT."
+  (or (and (derived-mode-p 'tabulated-list-mode)
+           (tabulated-list-get-id))
+      (agent-shell-queue-item-id (cdr (agent-shell-queue-find-item prompt)))))
+
+(defun agent-shell-queue--read-delay (prompt current)
+  "Read a delay with PROMPT; CURRENT is the existing value or nil.
+Return nil (inherit the default) for a negative answer, else the number;
+0 explicitly means no delay for the item."
+  (let ((val (read-number (format "%s (seconds, 0 = none, -1 = default; current %s): "
+                                  prompt (or current "default"))
+                          (or current -1))))
+    (if (< val 0) nil val)))
+
+;;;###autoload
 (defun agent-shell-queue-set-item-delay-before (id delay)
-  "Set pre-dispatch DELAY (in seconds) for queue item ID."
+  "Set pre-dispatch DELAY (in seconds) for queue item ID.
+A nil DELAY clears the per-item value."
   (interactive
-   (let* ((item (agent-shell-queue-find-item "Set delay-before for item: "))
-          (id (agent-shell-queue-item-id item))
-          (cur (or (agent-shell-queue-item-delay-before item) 0))
-          (val (read-number (format "Delay before dispatch (seconds, current %s): " cur) cur)))
-     (list id (if (<= val 0) nil val))))
+   (let* ((id (agent-shell-queue--read-item-id "Set delay-before for item: "))
+          (item (cdr (agent-shell-queue--item-by-id id))))
+     (list id (agent-shell-queue--read-delay
+               "Delay before dispatch" (agent-shell-queue-item-delay-before item)))))
   (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
     (setf (agent-shell-queue-item-delay-before item) delay)
     (agent-shell-queue--save)
     (agent-shell-queue--refresh-buffer)))
 
+;;;###autoload
 (defun agent-shell-queue-set-item-delay-after (id delay)
-  "Set post-completion DELAY (in seconds) for queue item ID."
+  "Set post-completion pause DELAY (in seconds) for queue item ID.
+Overrides `agent-shell-queue-default-pause-delay' for this item; 0 means
+no pause and nil restores the default."
   (interactive
-   (let* ((item (agent-shell-queue-find-item "Set delay-after for item: "))
-          (id (agent-shell-queue-item-id item))
-          (cur (or (agent-shell-queue-item-delay-after item) 0))
-          (val (read-number (format "Delay after complete (seconds, current %s): " cur) cur)))
-     (list id (if (<= val 0) nil val))))
+   (let* ((id (agent-shell-queue--read-item-id "Set delay-after for item: "))
+          (item (cdr (agent-shell-queue--item-by-id id))))
+     (list id (agent-shell-queue--read-delay
+               "Pause after complete" (agent-shell-queue-item-delay-after item)))))
   (when-let* ((item (cdr (agent-shell-queue--item-by-id id))))
     (setf (agent-shell-queue-item-delay-after item) delay)
     (agent-shell-queue--save)

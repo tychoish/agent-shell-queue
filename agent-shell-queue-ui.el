@@ -701,6 +701,8 @@ Directories are derived from live shell buffers and directory queue buckets."
     (keymap-set m "C-e" #'agent-shell-queue-edit-task)
     ;; Pause / schedule (suspend item from auto-dispatch without removing)
     (keymap-set m "p" #'agent-shell-queue-buffer-pause)
+    (keymap-set m "d" #'agent-shell-queue-set-item-delay-after)
+    (keymap-set m "l" #'agent-shell-queue-set-item-delay-before)
     (keymap-set m "r" #'agent-shell-queue-buffer-schedule)
     ;; Background flag
     (keymap-set m "b" #'agent-shell-queue-buffer-enable-background-task)
