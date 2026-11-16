@@ -32,6 +32,11 @@
 (declare-function agent-shell-queue-capture-confirm "agent-shell-queue-ui")
 (declare-function agent-shell-queue-enqueue "agent-shell-queue-ui")
 (declare-function annotated-completing-read "annotated-completing-read")
+(declare-function agent-shell-chat--relabel "agent-shell-chat-mode")
+(declare-function agent-shell-chat--find-live-marker-overlay "agent-shell-chat-mode")
+(defvar agent-shell-chat--labeled)
+(defvar agent-shell-chat--relabel-timer)
+(defvar agent-shell-prompt-bar-mode)
 
 
 ;;; Configuration and Defvars
@@ -2195,8 +2200,45 @@ Safe to call with a dead buffer — the subscription token is merely discarded."
   (setq agent-shell-queue--subscriptions
         (seq-remove (lambda (it) (equal (car it) buf-name)) agent-shell-queue--subscriptions)))
 
+(defun agent-shell-queue--heal-chat-labels (buf)
+  "Restore BUF's chat-mode `Me' label and prompt marker if they were lost.
+Return `healed' after relabeling, nil when BUF needed nothing, and
+`skipped' when chat mode is not loaded (so the check cannot run).
+Chat mode relabels on shell events only, and refuses to schedule a relabel
+while it holds a timer that is no longer pending.  Queue dispatch and
+interjections submit prompts from outside the shell, so a lost label or a
+stale timer left the live prompt drawn as the shell's plain prompt.
+Relabeling is idempotent, so this only acts when the live marker overlay
+is missing (or the timer is stale)."
+  (cond
+   ((not (fboundp 'agent-shell-chat--relabel)) 'skipped)
+   ((not (buffer-live-p buf)) nil)
+   (t
+    (with-current-buffer buf
+      (when (bound-and-true-p agent-shell-chat--labeled)
+        (let ((stale (and agent-shell-chat--relabel-timer
+                          (not (memq agent-shell-chat--relabel-timer timer-list)))))
+          (when stale
+            (setq agent-shell-chat--relabel-timer nil))
+          (when (or stale
+                    (and (not (bound-and-true-p agent-shell-prompt-bar-mode))
+                         (not (agent-shell-chat--find-live-marker-overlay))))
+            (agent-shell-chat--relabel)
+            'healed)))))))
+
+(defun agent-shell-queue--heal-all-chat-labels ()
+  "Run `agent-shell-queue--heal-chat-labels' on every live agent shell."
+  (seq-do (lambda (buf)
+            (when (buffer-local-value 'agent-shell-chat--labeled buf)
+              (agent-shell-queue--heal-chat-labels buf)))
+          (seq-filter (lambda (buf)
+                        (provided-mode-derived-p
+                         (buffer-local-value 'major-mode buf) 'agent-shell-mode))
+                      (buffer-list))))
+
 (defun agent-shell-queue--on-turn-complete (buf buf-name _event)
   "Handle a turn-complete event for BUF (named BUF-NAME)."
+  (run-with-idle-timer 1 nil #'agent-shell-queue--heal-chat-labels buf)
   (let* ((marked-items (agent-shell-queue--mark-running-done buf-name))
          (last-item (car (last marked-items)))
          (response-text (and last-item (agent-shell-queue-item-response last-item)))
@@ -2273,7 +2315,10 @@ immediately schedules dispatch if the buffer is ready."
   "Backup scan: send first active item for each idle buffer or directory bucket.
 Runs infrequently; deferred items are always skipped.
 Primary draining is handled by per-buffer `turn-complete' subscriptions.
-Session-paused and halted-on-abort buckets are skipped."
+Session-paused and halted-on-abort buckets are skipped.
+Also restores any agent shell's lost chat labels (see
+`agent-shell-queue--heal-chat-labels')."
+  (agent-shell-queue--heal-all-chat-labels)
   (when (and agent-shell-queue--loaded (agent-shell-queue-store-items agent-shell-queue--store))
     (agent-shell-queue--migrate-all-stale-items)
     (seq-do (lambda (it)

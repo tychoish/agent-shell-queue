@@ -4744,4 +4744,37 @@ leaving sessions that were already individually paused beforehand untouched."
       (insert "not in queue")
       (should-error (agent-shell-queue-buffer-send) :type 'user-error))))
 
+
+(defvar agent-shell-prompt-bar-mode)
+(defvar agent-shell-chat--labeled)
+(defvar agent-shell-chat--relabel-timer)
+
+(ert-deftest agent-shell-queue/heal-chat-labels ()
+  "Healing relabels a shell with no marker overlay or a stale timer, else not."
+  (let ((calls 0))
+    (cl-letf (((symbol-function 'agent-shell-chat--relabel)
+               (lambda () (cl-incf calls)))
+              ((symbol-function 'agent-shell-chat--find-live-marker-overlay)
+               (lambda () nil)))
+      (with-temp-buffer
+        (setq-local agent-shell-chat--labeled t)
+        (setq-local agent-shell-chat--relabel-timer nil)
+        ;; Missing marker overlay: relabel.
+        (should (eq 'healed (agent-shell-queue--heal-chat-labels (current-buffer))))
+        (should (= 1 calls))
+        ;; Prompt bar hides the live prompt: nothing to heal.
+        (let ((agent-shell-prompt-bar-mode t))
+          (should-not (agent-shell-queue--heal-chat-labels (current-buffer))))
+        ;; Stale timer is cleared even when the marker is present.
+        (cl-letf (((symbol-function 'agent-shell-chat--find-live-marker-overlay)
+                   (lambda () t)))
+          (setq-local agent-shell-chat--relabel-timer (timer-create))
+          (should (eq 'healed (agent-shell-queue--heal-chat-labels (current-buffer))))
+          (should-not agent-shell-chat--relabel-timer)
+          (should-not (agent-shell-queue--heal-chat-labels (current-buffer)))))
+      ;; Not labeled: untouched.
+      (with-temp-buffer
+        (setq-local agent-shell-chat--labeled nil)
+        (should-not (agent-shell-queue--heal-chat-labels (current-buffer)))))))
+
 ;;; test-agent-shell-queue.el ends here
