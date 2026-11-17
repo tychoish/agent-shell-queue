@@ -33,6 +33,7 @@
 
 (require 'cl-lib)
 (require 'help-mode)
+(require 'which-key)
 (require 'annotated-completing-read)
 (require 'transient)
 (require 'agent-shell)
@@ -220,6 +221,22 @@ Shells with no recorded activity sort after those with timestamps."
   agent-shell-menu-navigation-mode agent-shell-menu--enable-navigation
   :group 'agent-shell-queue)
 
+
+(defconst agent-shell-menu--which-key-replacement
+  '((nil . "\\`agent-shell-\\(.*\\)") . (nil . "\\1")))
+(defvar agent-shell-menu--which-key-owned nil)
+
+(defun agent-shell-menu--sync-which-key ()
+  "Manage the which-key label while global navigation is active."
+  (if agent-shell-menu-global-navigation-mode
+      (unless (member agent-shell-menu--which-key-replacement which-key-replacement-alist)
+        (push agent-shell-menu--which-key-replacement which-key-replacement-alist)
+        (setq agent-shell-menu--which-key-owned t))
+    (when agent-shell-menu--which-key-owned
+      (setq which-key-replacement-alist
+            (delete agent-shell-menu--which-key-replacement which-key-replacement-alist))
+      (setq agent-shell-menu--which-key-owned nil))))
+(add-hook 'agent-shell-menu-global-navigation-mode-hook #'agent-shell-menu--sync-which-key)
 
 ;;;###autoload
 (defun agent-shell-menu-select-session-mode (&optional on-success)
