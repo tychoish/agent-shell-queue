@@ -965,6 +965,8 @@ route a keystroke typed there to the menu command."
 (ert-deftest agent-shell-menu/queue-delay-keys-in-dispatch ()
   "The dispatch menu exposes both per-item delay setters."
   (should (eq 'agent-shell-queue-set-item-delay-after
-              (plist-get (cdr (transient-get-suffix 'agent-shell-menu-dispatch "qa")) :command)))
+              (plist-get (agent-shell-test/suffix-plist
+                          (transient-get-suffix 'agent-shell-menu-dispatch "qa")) :command)))
   (should (eq 'agent-shell-queue-set-item-delay-before
-              (plist-get (cdr (transient-get-suffix 'agent-shell-menu-dispatch "qw")) :command))))
+              (plist-get (agent-shell-test/suffix-plist
+                          (transient-get-suffix 'agent-shell-menu-dispatch "qw")) :command))))
