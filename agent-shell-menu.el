@@ -81,6 +81,8 @@
 (declare-function agent-shell-queue-enqueue-shell-eshell "agent-shell-queue-ui")
 (declare-function agent-shell-queue-enqueue-shell-eat "agent-shell-queue-ui")
 (declare-function agent-shell-queue-insert-pause "agent-shell-queue-core")
+(declare-function agent-shell-queue-set-item-delay-after "agent-shell-queue-core")
+(declare-function agent-shell-queue-set-item-delay-before "agent-shell-queue-core")
 (declare-function agent-shell-queue-insert-clear-context "agent-shell-queue-core")
 (declare-function agent-shell-queue-insert-compact "agent-shell-queue-core")
 (declare-function agent-shell-queue-insert-wait "agent-shell-queue-core")
@@ -1138,6 +1140,8 @@ Keys are assigned as 1, 2, 3… in button order."
     ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
     ("qe" "Enqueue" agent-shell-queue-enqueue)
     ("qd" "Edit task" agent-shell-queue-edit-task)
+    ("qa" "Pause after task…" agent-shell-queue-set-item-delay-after)
+    ("qw" "Delay before task…" agent-shell-queue-set-item-delay-before)
     ("qp" "Suspend all dispatch" agent-shell-queue-pause)
     ("qr" "Resume all dispatch" agent-shell-queue-resume)
     ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
