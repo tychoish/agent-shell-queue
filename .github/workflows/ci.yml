@@ -25,6 +25,7 @@ jobs:
           - "31.1"
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELISP_CI_ELPAISH: "true"
 
     steps:
       - uses: actions/checkout@v5
@@ -32,9 +33,11 @@ jobs:
       - name: Lint Source Code
         uses: tychoish/elisp-ci/lint@main
         with:
+          elpaish: true
           fail-on-warning: "false"
 
       - name: Run Tests
         uses: tychoish/elisp-ci@main
         with:
+          elpaish: true
           load-paths: ". test"
