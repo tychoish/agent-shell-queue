@@ -40,7 +40,8 @@
   :group 'agent-shell)
 
 (defcustom agent-shell-queue-global-managed-settings nil
-  "Alist of (SYMBOL . VALUE) settings managed globally by `agent-shell-queue-global-mode'."
+  "Alist of (SYMBOL . VALUE) settings managed globally.
+Applied when `agent-shell-queue-global-mode' is enabled."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'agent-shell-queue)
 
