@@ -35,16 +35,22 @@
   "agent-shell operations — navigate, act, send, queue, and session management." t)
 
 
-(defvar agent-shell-queue-global--managed-settings nil
-  "Alist of (SYMBOL . VALUE) settings managed globally by `agent-shell-queue-global-mode'.")
+(defgroup agent-shell-queue nil
+  "Queue and orchestration manager for agent-shell sessions."
+  :group 'agent-shell)
+
+(defcustom agent-shell-queue-global-managed-settings nil
+  "Alist of (SYMBOL . VALUE) settings managed globally by `agent-shell-queue-global-mode'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'agent-shell-queue)
 
 (defvar agent-shell-queue-global--saved-settings nil
   "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `agent-shell-queue-global-mode'.")
 
 (defun agent-shell-queue-global--apply-settings ()
-  "Save previous values and apply `agent-shell-queue-global--managed-settings'."
+  "Save previous values and apply `agent-shell-queue-global-managed-settings'."
   (setq agent-shell-queue-global--saved-settings nil)
-  (dolist (pair agent-shell-queue-global--managed-settings)
+  (dolist (pair agent-shell-queue-global-managed-settings)
     (let ((sym (car pair))
           (val (cdr pair)))
       (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
