@@ -39,7 +39,12 @@
   "Queue and orchestration manager for agent-shell sessions."
   :group 'agent-shell)
 
-(defcustom agent-shell-queue-global-managed-settings nil
+(defvar agent-shell-display-action)
+
+(defcustom agent-shell-queue-global-managed-settings
+  '((agent-shell-display-action
+     . ((display-buffer-reuse-window display-buffer-use-some-window)
+        (reusable-frames . t))))
   "Alist of (SYMBOL . VALUE) settings managed globally.
 Applied when `agent-shell-queue-global-mode' is enabled."
   :type '(alist :key-type symbol :value-type sexp)

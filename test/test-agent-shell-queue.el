@@ -4819,3 +4819,19 @@ leaving sessions that were already individually paused beforehand untouched."
               (keymap-lookup agent-shell-queue-mode-map "d")))
   (should (eq #'agent-shell-queue-set-item-delay-before
               (keymap-lookup agent-shell-queue-mode-map "l"))))
+
+(ert-deftest agent-shell-queue/global-mode-managed-settings ()
+  "Enabling `agent-shell-queue-global-mode' applies managed settings; disabling reverts them."
+  (let ((agent-shell-queue-global-mode nil)
+        (orig-action (when (boundp 'agent-shell-display-action) agent-shell-display-action)))
+    (unwind-protect
+        (progn
+          (setq agent-shell-display-action nil)
+          (agent-shell-queue-global-mode 1)
+          (should (equal agent-shell-display-action
+                         '((display-buffer-reuse-window display-buffer-use-some-window)
+                           (reusable-frames . t))))
+          (agent-shell-queue-global-mode -1)
+          (should-not agent-shell-display-action))
+      (agent-shell-queue-global-mode -1)
+      (setq agent-shell-display-action orig-action))))
