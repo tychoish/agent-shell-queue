@@ -162,6 +162,11 @@ and time since last activity — a superset of what
   (when-let* ((shell-buffer (agent-shell-menu--pick-buffer "agent-shell =>")))
     (agent-shell-menu--display-shell shell-buffer)))
 
+(defcustom agent-shell-menu-cycle-avoid-frame-duplicates t
+  "When non-nil, cycling avoids buffers displayed in other windows on frame."
+  :type 'boolean
+  :group 'agent-shell-queue)
+
 (defvar agent-shell-menu--cycle-buffers nil
   "Snapshot of shell buffers for consecutive navigation commands.")
 
@@ -170,6 +175,41 @@ and time since last activity — a superset of what
   (let ((left-time (agent-shell-last-activity-time :shell-buffer left))
         (right-time (agent-shell-last-activity-time :shell-buffer right)))
     (and left-time (or (not right-time) (time-less-p left-time right-time)))))
+
+(defun agent-shell-menu--buffer-displayed-elsewhere-in-frame-p (shell-buffer &optional frame)
+  "Return non-nil if SHELL-BUFFER is displayed in another window on FRAME.
+FRAME defaults to the selected frame.  The selected window is excluded."
+  (let* ((target-frame (or frame (selected-frame)))
+         (cur-win (selected-window))
+         (vp-buffer (when (fboundp 'agent-shell-viewport--buffer)
+                      (condition-case nil
+                          (agent-shell-viewport--buffer :shell-buffer shell-buffer
+                                                        :existing-only t)
+                        (error nil)))))
+    (seq-some
+     (lambda (win)
+       (unless (eq win cur-win)
+         (let ((wbuf (window-buffer win)))
+           (or (eq wbuf shell-buffer)
+               (and vp-buffer (eq wbuf vp-buffer))
+               (with-current-buffer wbuf
+                 (and (derived-mode-p 'agent-shell-viewport-view-mode
+                                      'agent-shell-viewport-edit-mode)
+                      (fboundp 'agent-shell-viewport--shell-buffer)
+                      (eq (agent-shell-viewport--shell-buffer) shell-buffer)))))))
+     (window-list target-frame 'no-minibuf))))
+
+(defun agent-shell-menu--cycle-candidate-buffers ()
+  "Return candidate buffers for cycling in the current window.
+Filters `agent-shell-menu--cycle-buffers' to live buffers, and when
+`agent-shell-menu-cycle-avoid-frame-duplicates' is non-nil, excludes
+buffers already displayed in another window on the selected frame."
+  (let ((live (seq-filter #'buffer-live-p agent-shell-menu--cycle-buffers)))
+    (if agent-shell-menu-cycle-avoid-frame-duplicates
+        (seq-filter (lambda (buf)
+                      (not (agent-shell-menu--buffer-displayed-elsewhere-in-frame-p buf)))
+                    live)
+      live)))
 
 ;;;###autoload
 (defun agent-shell-menu-next-buffer (&optional backward)
@@ -185,12 +225,19 @@ Shells with no recorded activity sort after those with timestamps."
         (seq-filter #'buffer-live-p agent-shell-menu--cycle-buffers))
   (unless agent-shell-menu--cycle-buffers
     (user-error "No live agent-shell buffers"))
-  (let* ((current (agent-shell-menu--session-shell-buffer))
-         (position (seq-position agent-shell-menu--cycle-buffers current))
-         (index (if position
-                    (mod (+ position (if backward -1 1)) (length agent-shell-menu--cycle-buffers))
-                  (if backward (1- (length agent-shell-menu--cycle-buffers)) 0))))
-    (agent-shell-menu--display-shell (nth index agent-shell-menu--cycle-buffers))))
+  (let* ((candidates (agent-shell-menu--cycle-candidate-buffers))
+         (current (agent-shell-menu--session-shell-buffer)))
+    (unless candidates
+      (user-error "All other agent-shell buffers are displayed in other windows"))
+    (when (and (= (length candidates) 1)
+               (eq (car candidates) current)
+               (> (length agent-shell-menu--cycle-buffers) 1))
+      (user-error "All other agent-shell buffers are displayed in other windows"))
+    (let* ((position (seq-position candidates current))
+           (index (if position
+                      (mod (+ position (if backward -1 1)) (length candidates))
+                    (if backward (1- (length candidates)) 0))))
+      (agent-shell-menu--display-shell (nth index candidates)))))
 
 ;;;###autoload
 (defun agent-shell-menu-previous-buffer ()
