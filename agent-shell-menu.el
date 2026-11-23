@@ -1294,6 +1294,8 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
   (agent-shell-menu-mode-key "s" agent-shell-prompt-steer)
   (agent-shell-menu-mode-key "r" agent-shell-menu-restart)
   (keymap-set agent-shell-mode-map "C-c C-p" #'agent-shell-menu-resolve-permission)
+  (keymap-set agent-shell-mode-map "C-c C-s" #'agent-shell-steer)
+  (keymap-set agent-shell-mode-map "C-c s" #'agent-shell-steer)
   (keymap-set agent-shell-mode-map "C-c b" #'agent-shell-switch-buffer)
   (keymap-set agent-shell-mode-map "C-c ]" #'agent-shell-menu-next-buffer)
   (keymap-set agent-shell-mode-map "C-c [" #'agent-shell-menu-previous-buffer)
@@ -1303,6 +1305,9 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
   (keymap-set agent-shell-mode-map "M-SPC" #'agent-shell-menu-select-session-mode)
   (setq agent-shell-queue-pick-buffer-function #'agent-shell-menu--pick-buffer)
   (keymap-set agent-shell-queue-mode-map "M" #'agent-shell-menu-dispatch))
+
+;;;###autoload
+(defalias 'agent-shell-transient-menu #'agent-shell-menu-dispatch)
 
 (provide 'agent-shell-menu)
 
