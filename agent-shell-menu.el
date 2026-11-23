@@ -1258,13 +1258,27 @@ Bound to \"e\" in `agent-shell-mode-map'; self-inserts at the idle prompt."
     ("k"  "Compact (manual)"    agent-shell-queue-insert-compact)
     ("w"  "Wait-until (timer)"  agent-shell-queue-insert-wait)]])
 
+(defun agent-shell-menu--make-client-or-log (maker config client-maker)
+  "Call CLIENT-MAKER for CONFIG built by MAKER; log and return nil on error.
+Agents whose client cannot be built (for example, missing authentication)
+are excluded from the menu, and the reason is logged rather than hidden."
+  (condition-case err
+      (funcall client-maker (current-buffer))
+    (error
+     (message "agent-shell-menu: skipping %s (%s): %s"
+              (or (map-elt config :identifier) maker)
+              maker
+              (error-message-string err))
+     nil)))
+
 (defun agent-shell-menu-installed-agent-configs ()
-  "Return default agent config makers whose executable is available on `exec-path'."
+  "Return default agent config makers whose executable is available on `exec-path'.
+Makers whose client fails to build are skipped with a logged message."
   (seq-filter
    (lambda (maker)
      (when-let* ((config (if (functionp maker) (funcall maker) maker))
                  (cm (map-elt config :client-maker))
-                 (client (ignore-errors (funcall cm (current-buffer))))
+                 (client (agent-shell-menu--make-client-or-log maker config cm))
                  (cmd (map-elt client :command))
                  (bin (if (consp cmd) (car cmd) cmd)))
        (executable-find bin t)))

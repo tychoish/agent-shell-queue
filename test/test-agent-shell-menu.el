@@ -1061,6 +1061,22 @@ route a keystroke typed there to the menu command."
     (should (listp configs))
     (should (seq-every-p #'functionp configs))))
 
+(ert-deftest agent-shell-menu/installed-agent-configs-logs-client-errors ()
+  "A maker whose client-maker errors is skipped, and the reason is logged."
+  (let ((logged nil))
+    (cl-letf (((symbol-function 'agent-shell-default-agent-config-makers)
+               (lambda () (list #'agent-shell-menu-test--failing-maker)))
+              ((symbol-function 'agent-shell-menu-test--failing-maker)
+               (lambda ()
+                 (list (cons :identifier 'failing)
+                       (cons :client-maker
+                             (lambda (_buf) (user-error "Please set auth"))))))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (push (apply #'format fmt args) logged))))
+      (should-not (agent-shell-menu-installed-agent-configs))
+      (should (seq-some (lambda (m) (string-match-p "skipping failing.*Please set auth" m))
+                        logged)))))
+
 
 (ert-deftest agent-shell-menu/queue-delay-keys-in-dispatch ()
   "The dispatch menu exposes both per-item delay setters."
