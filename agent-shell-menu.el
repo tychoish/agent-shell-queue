@@ -255,8 +255,8 @@ Shells with no recorded activity sort after those with timestamps."
 
 (defvar-keymap agent-shell-menu-navigation-mode-map
   "C-c b" #'agent-shell-menu--switch-buffer
-  "C-c ]" #'agent-shell-menu-next-buffer
-  "C-c [" #'agent-shell-menu-previous-buffer)
+  "C-c SPC" #'agent-shell-menu-next-buffer
+  "C-c C-SPC" #'agent-shell-menu-previous-buffer)
 
 ;;;###autoload
 (define-minor-mode agent-shell-menu-navigation-mode
@@ -1441,8 +1441,8 @@ Makers whose client fails to build are skipped with a logged message."
   (keymap-set agent-shell-mode-map "C-c C-r" #'agent-shell-menu-restart)
   (keymap-set agent-shell-mode-map "C-c r" #'agent-shell-menu-restart)
   (keymap-set agent-shell-mode-map "C-c b" #'agent-shell-switch-buffer)
-  (keymap-set agent-shell-mode-map "C-c ]" #'agent-shell-menu-next-buffer)
-  (keymap-set agent-shell-mode-map "C-c [" #'agent-shell-menu-previous-buffer)
+  (keymap-set agent-shell-mode-map "C-c SPC" #'agent-shell-menu-next-buffer)
+  (keymap-set agent-shell-mode-map "C-c C-SPC" #'agent-shell-menu-previous-buffer)
   (keymap-set agent-shell-mode-map "C-c m" #'agent-shell-menu-select-action)
   (keymap-set agent-shell-mode-map "C-c x" #'agent-shell-menu-select-command)
   (keymap-set agent-shell-mode-map "C-c TAB" #'agent-shell-menu-select-collapse)

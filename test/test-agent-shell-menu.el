@@ -365,10 +365,11 @@ produced 'Each alist entry must be a cons cell; got: #<buffer ...>'."
     (let ((overriding-local-map nil))
       (agent-shell-menu-navigation-mode 1)
       (should (eq (key-binding (kbd "C-c b")) 'agent-shell-menu--switch-buffer))
-      (should (eq (key-binding (kbd "C-c ]")) 'agent-shell-menu-next-buffer))
-      (should (eq (key-binding (kbd "C-c [")) 'agent-shell-menu-previous-buffer))
+      (should (eq (key-binding (kbd "C-c SPC")) 'agent-shell-menu-next-buffer))
+      (should (eq (key-binding (kbd "C-c C-SPC")) 'agent-shell-menu-previous-buffer))
       (agent-shell-menu-navigation-mode -1)
-      (should-not (eq (key-binding (kbd "C-c ]")) 'agent-shell-menu-next-buffer)))))
+      (should-not (eq (key-binding (kbd "C-c SPC")) 'agent-shell-menu-next-buffer))
+      (should-not (eq (key-binding (kbd "C-c C-SPC")) 'agent-shell-menu-previous-buffer)))))
 
 (ert-deftest agent-shell-menu/navigation-enable-only-in-shell ()
   "The global mode enables its local mode only in agent-shell buffers."
@@ -1094,6 +1095,8 @@ route a keystroke typed there to the menu command."
   (should (eq (keymap-lookup agent-shell-mode-map "C-c s") #'agent-shell-prompt-steer))
   (should (eq (keymap-lookup agent-shell-mode-map "C-c C-r") #'agent-shell-menu-restart))
   (should (eq (keymap-lookup agent-shell-mode-map "C-c r") #'agent-shell-menu-restart))
+  (should (eq (keymap-lookup agent-shell-mode-map "C-c SPC") #'agent-shell-menu-next-buffer))
+  (should (eq (keymap-lookup agent-shell-mode-map "C-c C-SPC") #'agent-shell-menu-previous-buffer))
   (should (fboundp 'agent-shell-steer)))
 
 (ert-deftest agent-shell-menu/dispatch-org-and-workflow-keys ()
