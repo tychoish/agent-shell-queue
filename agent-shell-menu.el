@@ -50,6 +50,13 @@
 (when (and (fboundp 'hitl-list) (not (fboundp 'hitl-view-questions)))
   (defalias 'hitl-view-questions #'hitl-list))
 (declare-function agent-shell-workflow-select "agent-shell-workflow-menu")
+(declare-function agent-shell-workflow-select-group "agent-shell-workflow-menu")
+(declare-function agent-shell-workflow-dispatch-org-task "agent-shell-workflow-library")
+(declare-function org-back-to-heading "org")
+(declare-function org-get-heading "org")
+(declare-function org-end-of-subtree "org")
+(defvar org-capture-last-stored-marker)
+(defvar org-capture-mode)
 (declare-function agent-shell-queue-buffer-open "agent-shell-queue-ui")
 (declare-function agent-shell-queue-buffer-switch "agent-shell-queue-ui")
 (declare-function agent-shell-queue-enqueue "agent-shell-queue-ui")
@@ -732,6 +739,121 @@ File-visiting buffers are sent as @file references; others as raw text."
           (agent-shell-insert :text (agent-shell--get-files-context :files (list file)))
         (agent-shell-insert :text (with-current-buffer buf (buffer-string)))))))
 
+(defvar agent-shell-menu-org-capture-history-max 30
+  "Maximum number of entries to retain in `agent-shell-menu--org-capture-history'.")
+
+(defvar agent-shell-menu--org-capture-history nil
+  "History of recent Org capture entries.
+Each element is a plist `(:title ... :file ... :text ... :time ...)'.")
+
+(defvar agent-shell-menu--org-capture-sent-history nil
+  "History of Org capture entries previously sent to an agent shell.
+Each element is a plist `(:title ... :file ... :text ... :shell ... :time ...)'.")
+
+(defun agent-shell-menu--record-last-org-capture ()
+  "Record the last captured Org entry into `agent-shell-menu--org-capture-history'."
+  (when (and (boundp 'org-capture-last-stored-marker)
+             (markerp org-capture-last-stored-marker)
+             (marker-buffer org-capture-last-stored-marker)
+             (buffer-live-p (marker-buffer org-capture-last-stored-marker)))
+    (ignore-errors
+      (with-current-buffer (marker-buffer org-capture-last-stored-marker)
+        (save-excursion
+          (goto-char (marker-position org-capture-last-stored-marker))
+          (org-back-to-heading t)
+          (let* ((heading (org-get-heading t t t t))
+                 (file (or (buffer-file-name) (buffer-name)))
+                 (start (point))
+                 (end (save-excursion (org-end-of-subtree t t) (point)))
+                 (text (string-trim (buffer-substring-no-properties start end)))
+                 (entry (list :title (or heading "(untitled capture)")
+                              :file file
+                              :text text
+                              :time (current-time))))
+            (unless (and agent-shell-menu--org-capture-history
+                         (equal text (plist-get (car agent-shell-menu--org-capture-history) :text)))
+              (push entry agent-shell-menu--org-capture-history)
+              (when (> (length agent-shell-menu--org-capture-history)
+                       agent-shell-menu-org-capture-history-max)
+                (setq agent-shell-menu--org-capture-history
+                      (seq-take agent-shell-menu--org-capture-history
+                                agent-shell-menu-org-capture-history-max))))))))))
+
+;;;###autoload
+(defun agent-shell-menu-send-org-capture (&optional arg)
+  "Send an item from Org capture to an agent shell.
+By default (or with no prefix ARG), presents recent Org capture entries
+via `annotated-completing-read' with the most recently stored capture item as
+the default (selected on RET).  If only one capture item exists and no prefix
+ARG is given, sends that item immediately without prompting.
+When in an active `org-capture-mode' buffer, sends the current capture buffer.
+With prefix ARG (or if history of sent items exists), also includes entries
+from `agent-shell-menu--org-capture-sent-history'."
+  (interactive "P")
+  (if (and (boundp 'org-capture-mode) org-capture-mode)
+      (let* ((text (string-trim (buffer-substring-no-properties (point-min) (point-max))))
+             (shell (or (agent-shell-menu--session-shell-buffer)
+                        (agent-shell-menu--pick-buffer "Send org-capture to shell: "))))
+        (when (string-empty-p text)
+          (user-error "Current capture buffer is empty"))
+        (agent-shell-insert :text text :shell-buffer shell)
+        (let ((entry (list :title (car (split-string text "\n"))
+                           :file (buffer-name)
+                           :text text
+                           :shell (buffer-name shell)
+                           :time (current-time))))
+          (push entry agent-shell-menu--org-capture-sent-history))
+        (message "Sent active org-capture buffer to %s" (buffer-name shell)))
+    (agent-shell-menu--record-last-org-capture)
+    (let* ((candidates-source
+            (delete-dups
+             (append agent-shell-menu--org-capture-history
+                     (when (or arg agent-shell-menu--org-capture-sent-history)
+                       agent-shell-menu--org-capture-sent-history))))
+           (chosen
+            (cond
+             ((null candidates-source)
+              (user-error "No org-capture items available (none stored yet)"))
+             ((and (not arg) (= (length candidates-source) 1))
+              (car candidates-source))
+             (t
+              (let* ((items-table (make-hash-table :test #'equal))
+                     (annot-table (make-hash-table :test #'equal)))
+                (seq-do-indexed
+                 (lambda (item idx)
+                   (let* ((title (or (plist-get item :title) "(untitled)"))
+                          (file (file-name-nondirectory (or (plist-get item :file) "")))
+                          (time (when-let* ((tm (plist-get item :time)))
+                                  (format-time-string "%H:%M:%S" tm)))
+                          (label (if (zerop idx)
+                                     (format "[latest] %s" title)
+                                   (format "[%d] %s" (1+ idx) title)))
+                          (annotation (format "  [%s]%s"
+                                              file
+                                              (if time (format " (%s)" time) ""))))
+                     (setf (map-elt items-table label) item)
+                     (setf (map-elt annot-table label) annotation)))
+                 candidates-source)
+                (let* ((default-choice (format "[latest] %s" (or (plist-get (car candidates-source) :title) "(untitled)")))
+                       (selection (annotated-completing-read
+                                   annot-table
+                                   :prompt (format "Send org-capture to shell (default: %s): " default-choice)
+                                   :require-match t
+                                   :default default-choice
+                                   :history 'agent-shell-menu-send-org-capture-history)))
+                  (map-elt items-table selection))))))
+           (shell (or (agent-shell-menu--session-shell-buffer)
+                      (agent-shell-menu--pick-buffer "Send org-capture to shell: ")))
+           (text (plist-get chosen :text)))
+      (unless (and text (not (string-empty-p text)))
+        (user-error "Selected org-capture item has no content"))
+      (agent-shell-insert :text text :shell-buffer shell)
+      (let ((sent-entry (plist-put (copy-sequence chosen) :shell (buffer-name shell))))
+        (push sent-entry agent-shell-menu--org-capture-sent-history))
+      (message "Sent org-capture item to %s: %s"
+               (buffer-name shell)
+               (or (plist-get chosen :title) "(untitled)")))))
+
 ;;; Output and Collapse Control
 
 (defun agent-shell-menu--blocks-in-buffer ()
@@ -1141,7 +1263,7 @@ Keys are assigned as 1, 2, 3… in button order."
    :class transient-column
    :if agent-shell-menu--session-permission-pending-p
    :setup-children agent-shell-menu--permission-suffixes]
-  ;; Session management (always), act/write/settings/fork (session-conditional)
+  ;; Row 1: Session Lifecycle, Interactive Control, Settings/View, Fork
   [["Sessions"
     ("sn" "New shell" agent-shell-new-shell)
     ("sN" "New named shell" agent-shell-menu-new-named-shell)
@@ -1154,18 +1276,11 @@ Keys are assigned as 1, 2, 3… in button order."
      :if agent-shell-menu--agent-review-available-p)
     ("rs" "Send issues to review agent" agent-review-send-to-agent-shell
      :if agent-shell-menu--agent-review-available-p)]
-   ["Actions" :if agent-shell-menu--in-session-p
-    ("aa" "Action menu" agent-shell-menu-select-action)
-    ("ai" "Interrupt" agent-shell-interrupt)
+   ["Control" :if agent-shell-menu--in-session-p
     ("as" "Steer" agent-shell-prompt-steer)
+    ("ai" "Interrupt" agent-shell-interrupt)
     ("ae" "Restart" agent-shell-menu-restart)
     ("ar" "Resolve permission" agent-shell-menu-resolve-permission)
-    ("ac" "Command menu" agent-shell-menu-select-command)
-    ("ap" "Workflows" agent-shell-workflow-select
-     :if agent-shell-menu--workflow-select-available-p)
-    ("hq" "HITL questions" hitl-view-questions
-     :if agent-shell-menu--hitl-available-p)
-    ("ax" "Collapse menu" agent-shell-menu-select-collapse)
     ("ij" "Interject" agent-shell-queue-interject
      :if agent-shell-menu--queue-available-p
      :inapt-if-not agent-shell-menu--interject-available-p)
@@ -1173,12 +1288,17 @@ Keys are assigned as 1, 2, 3… in button order."
      :if agent-shell-menu--interjection-p)
     ("ic" "Close/Abort interjection" agent-shell-queue-interjection-close
      :if agent-shell-menu--interjection-p)]
-   ["Settings" :if agent-shell-menu--in-session-p
+   ["Settings & View" :if agent-shell-menu--in-session-p
     ("mm" "Set mode" agent-shell-menu-select-session-mode)
     ("mv" "Set model" agent-shell-set-session-model)
     ("mc" "Cycle mode" agent-shell-cycle-session-mode)
     ("mi" "Copy session ID" agent-shell-copy-session-id)
-    ("mt" "Open transcript" agent-shell-open-transcript)]
+    ("mt" "Open transcript" agent-shell-open-transcript)
+    ("aa" "Action menu" agent-shell-menu-select-action)
+    ("ac" "Command menu" agent-shell-menu-select-command)
+    ("ax" "Collapse menu" agent-shell-menu-select-collapse)
+    ("hq" "HITL questions" hitl-view-questions
+     :if agent-shell-menu--hitl-available-p)]
    ["Fork" :if agent-shell-menu--in-session-p
     ("ff" "Fork session" agent-shell-fork)
     ("fo" "Other (project)" agent-shell-menu-switch-project-session)
@@ -1190,15 +1310,23 @@ Keys are assigned as 1, 2, 3… in button order."
      :if agent-shell-menu--queue-available-p)
     ("fr" "Release pending fork" agent-shell-queue-release-pending-fork
      :if agent-shell-menu--queue-available-p)]]
-  ;; Queue row: global queue ops, intercept config, and capture
+  ;; Row 2: Direct Send, Workflows & Tasks, Queue Orchestration, Capture & Session Queue
   [["Send"
+    ("ws" "Send dwim" agent-shell-send-dwim)
+    ("wr" "Send region to…" agent-shell-send-region-to)
     ("wb" "Send buffer" agent-shell-menu-send-buffer)
     ("wt" "Send file to…" agent-shell-send-file-to)
     ("wo" "Send other file" agent-shell-send-other-file)
-    ("wr" "Send region to…" agent-shell-send-region-to)
     ("wc" "Send screenshot to…" agent-shell-send-screenshot-to)
     ("wi" "Send clipboard image to…" agent-shell-send-clipboard-image-to)
-    ("ws" "Send dwim" agent-shell-send-dwim)]
+    ("oc" "Send from org-capture" agent-shell-menu-send-org-capture)]
+   ["Workflows & Org"
+    ("ww" "Select workflow" agent-shell-workflow-select
+     :if agent-shell-menu--workflow-select-available-p)
+    ("ot" "Dispatch Org task" agent-shell-workflow-dispatch-org-task
+     :if agent-shell-menu--workflow-select-available-p)
+    ("wg" "Group workflow" agent-shell-workflow-select-group
+     :if agent-shell-menu--workflow-select-available-p)]
    ["Queue" :if agent-shell-menu--queue-available-p
     ("qq" "Open queue" agent-shell-queue-buffer-open)
     ("qb" "Switch to queue" agent-shell-queue-buffer-switch)
@@ -1209,32 +1337,32 @@ Keys are assigned as 1, 2, 3… in button order."
     ("qp" "Suspend all dispatch" agent-shell-queue-pause)
     ("qr" "Resume all dispatch" agent-shell-queue-resume)
     ("qu" "Resume all sessions" agent-shell-queue-unpause-all-sessions)]
-   ["Capture" :if agent-shell-menu--queue-available-p
+   ["Capture & Session Queue" :if agent-shell-menu--queue-available-p
     ("cw" "Compose (write)" agent-shell-queue-capture)
     ("cu" "Unassigned" agent-shell-queue-capture-unassigned)
     ("cr" "From region" agent-shell-queue-capture-from-region)
     ("cy" "From clipboard" agent-shell-queue-capture-from-clipboard)
-    ("cc" "From context" agent-shell-queue-capture-from-context)]
-  ;; Per-session queue controls
-   ["Session Queue" :if (lambda () (and (agent-shell-menu--in-session-p)
-                                        (agent-shell-menu--queue-available-p)))
+    ("cc" "From context" agent-shell-queue-capture-from-context)
     ("qsp" "Suspend this session" agent-shell-queue-session-pause
+     :if agent-shell-menu--in-session-p
      :inapt-if agent-shell-queue-session-paused-p)
     ("qsr" "Resume this session" agent-shell-queue-session-resume
+     :if agent-shell-menu--in-session-p
      :inapt-if-not agent-shell-queue-session-paused-p)
     ("qim" agent-shell-queue-toggle-input-mode
      :description (lambda ()
                     (format "Input mode: [%s]"
                             (if (fboundp 'agent-shell-queue-input-mode-value)
                                 (agent-shell-queue-input-mode-value)
-                              "default"))))
-    ("qix" "Reset all to default" agent-shell-queue-reset-all-input-modes)
+                              "default")))
+     :if agent-shell-menu--in-session-p)
+    ("qix" "Reset all to default" agent-shell-queue-reset-all-input-modes
+     :if agent-shell-menu--in-session-p)
     ("qid" agent-shell-queue-set-input-mode-default
      :description (lambda ()
                     (format "Default: [%s]"
                             (bound-and-true-p agent-shell-queue-input-mode-default)))
-     :if agent-shell-menu--in-shell-p)]
-   ])
+     :if agent-shell-menu--in-shell-p)]])
 
 ;;;###autoload
 (transient-define-prefix agent-shell-queue-capture-menu ()
@@ -1308,8 +1436,10 @@ Makers whose client fails to build are skipped with a logged message."
   (agent-shell-menu-mode-key "s" agent-shell-prompt-steer)
   (agent-shell-menu-mode-key "r" agent-shell-menu-restart)
   (keymap-set agent-shell-mode-map "C-c C-p" #'agent-shell-menu-resolve-permission)
-  (keymap-set agent-shell-mode-map "C-c C-s" #'agent-shell-steer)
-  (keymap-set agent-shell-mode-map "C-c s" #'agent-shell-steer)
+  (keymap-set agent-shell-mode-map "C-c C-s" #'agent-shell-prompt-steer)
+  (keymap-set agent-shell-mode-map "C-c s" #'agent-shell-prompt-steer)
+  (keymap-set agent-shell-mode-map "C-c C-r" #'agent-shell-menu-restart)
+  (keymap-set agent-shell-mode-map "C-c r" #'agent-shell-menu-restart)
   (keymap-set agent-shell-mode-map "C-c b" #'agent-shell-switch-buffer)
   (keymap-set agent-shell-mode-map "C-c ]" #'agent-shell-menu-next-buffer)
   (keymap-set agent-shell-mode-map "C-c [" #'agent-shell-menu-previous-buffer)
@@ -1317,8 +1447,16 @@ Makers whose client fails to build are skipped with a logged message."
   (keymap-set agent-shell-mode-map "C-c x" #'agent-shell-menu-select-command)
   (keymap-set agent-shell-mode-map "C-c TAB" #'agent-shell-menu-select-collapse)
   (keymap-set agent-shell-mode-map "M-SPC" #'agent-shell-menu-select-session-mode)
+  (when (boundp 'agent-shell-viewport-edit-mode-map)
+    (keymap-set agent-shell-viewport-edit-mode-map "C-c C-s" #'agent-shell-prompt-steer)
+    (keymap-set agent-shell-viewport-edit-mode-map "C-c s" #'agent-shell-prompt-steer)
+    (keymap-set agent-shell-viewport-edit-mode-map "C-c C-r" #'agent-shell-menu-restart)
+    (keymap-set agent-shell-viewport-edit-mode-map "C-c r" #'agent-shell-menu-restart))
+  (add-hook 'org-capture-after-finalize-hook #'agent-shell-menu--record-last-org-capture)
   (setq agent-shell-queue-pick-buffer-function #'agent-shell-menu--pick-buffer)
   (keymap-set agent-shell-queue-mode-map "M" #'agent-shell-menu-dispatch))
+
+(defalias 'agent-shell-steer #'agent-shell-prompt-steer)
 
 ;;;###autoload
 (defalias 'agent-shell-transient-menu #'agent-shell-menu-dispatch)

@@ -1086,3 +1086,80 @@ route a keystroke typed there to the menu command."
   (should (eq 'agent-shell-queue-set-item-delay-before
               (plist-get (agent-shell-test/suffix-plist
                           (transient-get-suffix 'agent-shell-menu-dispatch "qw")) :command))))
+
+(ert-deftest agent-shell-menu/keybindings-steer-and-restart ()
+  "Keybindings in agent-shell-mode-map map C-c C-s/C-c s to steer and C-c C-r/C-c r to restart."
+  (agent-shell-menu-install)
+  (should (eq (keymap-lookup agent-shell-mode-map "C-c C-s") #'agent-shell-prompt-steer))
+  (should (eq (keymap-lookup agent-shell-mode-map "C-c s") #'agent-shell-prompt-steer))
+  (should (eq (keymap-lookup agent-shell-mode-map "C-c C-r") #'agent-shell-menu-restart))
+  (should (eq (keymap-lookup agent-shell-mode-map "C-c r") #'agent-shell-menu-restart))
+  (should (fboundp 'agent-shell-steer)))
+
+(ert-deftest agent-shell-menu/dispatch-org-and-workflow-keys ()
+  "The dispatch menu exposes oc (send org-capture), ot (dispatch org task), and ww (workflows)."
+  (should (eq 'agent-shell-menu-send-org-capture
+              (plist-get (agent-shell-test/suffix-plist
+                          (transient-get-suffix 'agent-shell-menu-dispatch "oc")) :command)))
+  (should (eq 'agent-shell-workflow-dispatch-org-task
+              (plist-get (agent-shell-test/suffix-plist
+                          (transient-get-suffix 'agent-shell-menu-dispatch "ot")) :command)))
+  (should (eq 'agent-shell-workflow-select
+              (plist-get (agent-shell-test/suffix-plist
+                          (transient-get-suffix 'agent-shell-menu-dispatch "ww")) :command))))
+
+(ert-deftest agent-shell-menu/send-org-capture-from-history ()
+  "agent-shell-menu-send-org-capture sends the recorded item to the target shell."
+  (let ((inserted nil)
+        (org-capture-last-stored-marker nil)
+        (agent-shell-menu--org-capture-history
+         (list (list :title "Fix bug #123"
+                     :file "tasks.org"
+                     :text "* Fix bug #123\nDetails here"
+                     :time (current-time))))
+        (agent-shell-menu--org-capture-sent-history nil)
+        (shell (generate-new-buffer "*mock-shell*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () shell))
+                  ((symbol-function 'agent-shell-insert)
+                   (lambda (&rest args) (setq inserted (plist-get args :text)))))
+          (agent-shell-menu-send-org-capture)
+          (should (equal inserted "* Fix bug #123\nDetails here"))
+          (should (equal (length agent-shell-menu--org-capture-sent-history) 1))
+          (should (equal (plist-get (car agent-shell-menu--org-capture-sent-history) :title) "Fix bug #123")))
+      (kill-buffer shell))))
+
+(ert-deftest agent-shell-menu/send-org-capture-multiple-history-prompt ()
+  "agent-shell-menu-send-org-capture prompts via annotated-completing-read when multiple items exist."
+  (let ((inserted nil)
+        (org-capture-last-stored-marker nil)
+        (agent-shell-menu--org-capture-history
+         (list (list :title "Task 2" :file "t2.org" :text "* Task 2" :time (current-time))
+               (list :title "Task 1" :file "t1.org" :text "* Task 1" :time (current-time))))
+        (agent-shell-menu--org-capture-sent-history nil)
+        (shell (generate-new-buffer "*mock-shell*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () shell))
+                  ((symbol-function 'annotated-completing-read) (lambda (_table &rest plist) (plist-get plist :default)))
+                  ((symbol-function 'agent-shell-insert)
+                   (lambda (&rest args) (setq inserted (plist-get args :text)))))
+          (agent-shell-menu-send-org-capture)
+          (should (equal inserted "* Task 2")))
+      (kill-buffer shell))))
+
+(ert-deftest agent-shell-menu/send-org-capture-active-buffer ()
+  "agent-shell-menu-send-org-capture sends from an active org-capture buffer."
+  (let ((inserted nil)
+        (shell (generate-new-buffer "*mock-shell*"))
+        (cap (generate-new-buffer "*org-capture*")))
+    (unwind-protect
+        (with-current-buffer cap
+          (setq-local org-capture-mode t)
+          (insert "* Captured task in buffer\nNotes go here\n")
+          (cl-letf (((symbol-function 'agent-shell-menu--session-shell-buffer) (lambda () shell))
+                    ((symbol-function 'agent-shell-insert)
+                     (lambda (&rest args) (setq inserted (plist-get args :text)))))
+            (agent-shell-menu-send-org-capture)
+            (should (string-match-p "Captured task in buffer" inserted))))
+      (kill-buffer shell)
+      (kill-buffer cap))))
