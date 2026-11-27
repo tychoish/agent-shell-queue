@@ -17,6 +17,13 @@
 
 * Key Functions
 
+Use ~agent-shell-queue-org-capture-from-heading~ to edit a raw subtree in
+a capture buffer. The former ~agent-shell-queue-org-refile-from-heading~
+name remains an obsolete alias, including its prefix argument to remove
+the original subtree. For task implementation with stable Org IDs,
+source line numbers, and progress instructions, use
+~agent-shell-workflow-dispatch-org-task~ from ~agent-shell-workflow~.
+
 - [[file:api.org::#agent-shell-queue-enqueue][~agent-shell-queue-enqueue~]]: Queue a prompt for an active or specified shell buffer.
 - [[file:api.org::#agent-shell-queue-capture][~agent-shell-queue-capture~]]: Open an interactive markdown buffer for prompt composition.
 - [[file:api.org::#agent-shell-queue-capture-unassigned][~agent-shell-queue-capture-unassigned~]]: Open capture buffer targeting the unassigned queue.

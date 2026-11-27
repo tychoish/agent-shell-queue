@@ -34,6 +34,8 @@
 (require 'org)
 (require 'org-element)
 
+(declare-function agent-shell-queue--open-capture "agent-shell-queue-ui")
+
 (defvar agent-shell-queue--items)
 
 ;; Status / keyword mapping
@@ -228,9 +230,11 @@ string-in-paragraph-contents issues during tree walking."
 ;;; Org Mode Integration
 
 ;;;###autoload
-(defun agent-shell-queue-org-refile-from-heading (&optional remove-original)
+(defun agent-shell-queue-org-capture-from-heading (&optional remove-original)
   "Capture the current org heading's subtree text into the agent-shell-queue.
 Opens a queue capture buffer pre-seeded with the heading content.
+For implementation instructions and stable source references, use
+`agent-shell-workflow-dispatch-org-task' from agent-shell-workflow instead.
 With prefix arg REMOVE-ORIGINAL, delete the original subtree immediately
 after opening the capture buffer."
   (interactive "P")
@@ -247,6 +251,10 @@ after opening the capture buffer."
         (save-excursion
           (goto-char start)
           (org-cut-subtree))))))
+
+;;;###autoload
+(define-obsolete-function-alias 'agent-shell-queue-org-refile-from-heading
+  #'agent-shell-queue-org-capture-from-heading "0.1.0")
 
 (provide 'agent-shell-queue-org)
 ;;; agent-shell-queue-org.el ends here
