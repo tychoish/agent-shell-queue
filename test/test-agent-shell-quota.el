@@ -191,13 +191,13 @@
           (should (eq (agent-shell-quota-entry-status entry) 'error))
           (should (string-match-p "Parse error" (agent-shell-quota-entry-error-message entry))))))))
 
-;;; HUD Modeline Segment Tests
+;;; Mode-Line Indicator Tests
 
-(ert-deftest test-agent-shell-quota/hud-segment ()
-  "HUD segment labels the quota button and includes cache age."
+(ert-deftest test-agent-shell-quota/mode-line-segment ()
+  "The indicator labels the quota button and includes cache age."
   (let ((agent-shell-quota--cache (make-hash-table :test #'equal))
         (agent-shell-quota-providers '("antigravity" "codex" "claude")))
-    (should (equal (substring-no-properties (agent-shell-quota--hud-segment))
+    (should (equal (substring-no-properties (agent-shell-quota--mode-line-segment))
                    "quota never"))
     (setf (map-elt agent-shell-quota--cache "antigravity")
           (agent-shell-quota--parse-output
@@ -209,7 +209,7 @@
           (agent-shell-quota--parse-output
            "claude" test-agent-shell-quota--claude-enterprise-json 1000.0))
     (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1120.0)))
-      (let ((seg (agent-shell-quota--hud-segment)))
+      (let ((seg (agent-shell-quota--mode-line-segment)))
         (should (equal (substring-no-properties seg) "quota 2m"))
         (should (string-match-p "Agy:45% Cdx:60% Cld:35%"
                                 (get-text-property 0 'help-echo seg)))))))
@@ -281,7 +281,7 @@
       (should (equal (agent-shell-quota--cache-age) "2m"))
       (should (string-match-p "Capacity.*Cdx:40% Cld:65%"
                               (get-text-property
-                               0 'help-echo (agent-shell-quota--hud-segment)))))
+                               0 'help-echo (agent-shell-quota--mode-line-segment)))))
     (setf (agent-shell-quota-entry-status
            (map-elt agent-shell-quota--cache "codex")) 'error)
     (should (equal (agent-shell-quota--cache-age 1120.0) "1m"))))
@@ -310,7 +310,7 @@
       (erase-buffer))
     (should-error (agent-shell-quota-refresh-at-point) :type 'user-error)))
 
-(ert-deftest test-agent-shell-quota/dispatch-and-hud-action ()
+(ert-deftest test-agent-shell-quota/dispatch ()
   "The modeline action opens the quota transient."
   (should (get 'agent-shell-quota-dispatch 'transient--prefix))
   (let (opened)
@@ -321,14 +321,162 @@
   (require 'test-helper)
   (let ((keys (transient-test/collect-keys 'agent-shell-quota-dispatch)))
     (should (equal keys '("r" "g" "t" "o")))
-    (should-not (transient-test/duplicate-keys keys)))
-  (let (action)
-    (cl-letf (((symbol-function 'hud-modeline--register-segment) #'ignore)
-              ((symbol-function 'hud-modeline--make-segment) #'list)
-              ((symbol-function 'hud-modeline-set-segment-action)
-               (lambda (_key command &optional _help) (setq action command))))
-      (agent-shell-quota-hud-enable)
-      (should (eq action #'agent-shell-quota-dispatch)))))
+    (should-not (transient-test/duplicate-keys keys))))
+
+(ert-deftest test-agent-shell-quota/mode-preserves-existing-buffer ()
+  "Refusing the report mode preserves text, locals, and the major mode."
+  (with-temp-buffer
+    (text-mode)
+    (insert "Existing work")
+    (setq-local header-line-format "Keep this")
+    (let ((original-map (current-local-map)))
+      (should-error (agent-shell-quota-mode) :type 'user-error)
+      (should (eq major-mode 'text-mode))
+      (should (eq (current-local-map) original-map))
+      (should (equal header-line-format "Keep this"))
+      (should (equal (buffer-string) "Existing work")))))
+
+(ert-deftest test-agent-shell-quota/mode-rejects-occupied-fundamental-buffer ()
+  "Even fundamental buffers must be empty and must not visit files."
+  (with-temp-buffer
+    (insert "Existing work")
+    (should-error (agent-shell-quota-mode) :type 'user-error)
+    (erase-buffer)
+    (setq buffer-file-name "/tmp/quota-existing-file")
+    (should-error (agent-shell-quota-mode) :type 'user-error)))
+
+(ert-deftest test-agent-shell-quota/mode-rejects-empty-existing-mode ()
+  "An empty buffer with an existing major mode is still protected."
+  (with-temp-buffer
+    (text-mode)
+    (should-error (agent-shell-quota-mode) :type 'user-error)
+    (should (eq major-mode 'text-mode))))
+
+(ert-deftest test-agent-shell-quota/mode-allows-new-and-report-buffers ()
+  "New empty buffers and existing quota reports can enter report mode."
+  (with-temp-buffer
+    (agent-shell-quota-mode)
+    (let ((inhibit-read-only t))
+      (insert "Report data"))
+    (agent-shell-quota-mode)
+    (should (eq major-mode 'agent-shell-quota-mode))))
+
+(ert-deftest test-agent-shell-quota/mode-line-lifecycle ()
+  "The misc indicator refreshes immediately and cleans up its timer."
+  (let ((global-mode-string nil)
+        (agent-shell-quota-mode-line-mode nil)
+        (agent-shell-quota--refresh-timer nil)
+        (agent-shell-quota--cache (make-hash-table :test #'equal))
+        (refreshes 0))
+    (cl-letf (((symbol-function 'agent-shell-quota-refresh)
+               (lambda (&rest _) (setq refreshes (1+ refreshes)))))
+      (unwind-protect
+          (progn
+            (agent-shell-quota-mode-line-mode 1)
+            (should (= refreshes 1))
+            (should (member 'agent-shell-quota--mode-line global-mode-string))
+            (should (timerp agent-shell-quota--refresh-timer))
+            (should-not (assq 'agent-shell-quota-mode-line-mode minor-mode-alist))
+            (agent-shell-quota-mode-line-mode 1)
+            (should (= (seq-count
+                        (lambda (entry) (eq entry 'agent-shell-quota--mode-line))
+                        global-mode-string)
+                       1)))
+        (agent-shell-quota-mode-line-mode -1))
+      (should-not agent-shell-quota--refresh-timer)
+      (should-not global-mode-string))))
+
+(ert-deftest test-agent-shell-quota/mode-line-button ()
+  "The indicator is clickable without loading hud-modeline."
+  (let* ((agent-shell-quota--cache (make-hash-table :test #'equal))
+         (text (agent-shell-quota--mode-line-segment))
+         (keymap (get-text-property 0 'local-map text)))
+    (should (keymapp keymap))
+    (should (eq (lookup-key keymap [mode-line mouse-1]) 'agent-shell-quota))
+    (should (eq (lookup-key keymap [mode-line mouse-3])
+                'agent-shell-quota-dispatch))
+    (should (string-match-p "never" text))))
+
+(ert-deftest test-agent-shell-quota/mode-line-rendering ()
+  "Redisplay evaluates the misc symbol and preserves its mouse properties."
+  (should (get 'agent-shell-quota--mode-line 'risky-local-variable))
+  (unless noninteractive
+    (let* ((agent-shell-quota--cache (make-hash-table :test #'equal))
+           (text (format-mode-line '("" agent-shell-quota--mode-line))))
+      (should (string-match-p "quota never" text))
+      (should (keymapp (get-text-property 0 'local-map text))))))
+
+(ert-deftest test-agent-shell-quota/background-refresh-error ()
+  "Missing executables populate error state without breaking timer callbacks."
+  (let ((agent-shell-quota--cache (make-hash-table :test #'equal))
+        (agent-shell-quota-providers '("codex")))
+    (cl-letf (((symbol-function 'agent-shell-quota-refresh)
+               (lambda (&rest _) (user-error "Missing codexbar"))))
+      (agent-shell-quota--refresh-background))
+    (should (eq (agent-shell-quota-entry-status
+                 (map-elt agent-shell-quota--cache "codex"))
+                'error))))
+
+(ert-deftest test-agent-shell-quota/popup-lifecycle ()
+  "Reports appear below without stealing focus and dismiss on timeout."
+  (save-window-excursion
+    (let ((origin (selected-window))
+          (agent-shell-quota-popup-seconds 60)
+          (agent-shell-quota--cache (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'agent-shell-quota-refresh) #'ignore))
+        (unwind-protect
+            (progn
+              (agent-shell-quota)
+              (let ((popup (get-buffer-window agent-shell-quota-buffer-name)))
+                (should (window-live-p popup))
+                (should (eq (selected-window) origin))
+                (should (eq (window-parameter popup 'window-side) 'bottom))
+                (should (timerp (window-parameter popup 'agent-shell-quota-timer)))
+                (agent-shell-quota--dismiss-popup
+                 popup (get-buffer agent-shell-quota-buffer-name))
+                (should-not (get-buffer-window agent-shell-quota-buffer-name))))
+          (when-let* ((buffer (get-buffer agent-shell-quota-buffer-name)))
+            (kill-buffer buffer)))))))
+
+(ert-deftest test-agent-shell-quota/popup-interaction ()
+  "Interacting with a popup cancels its dismissal."
+  (save-window-excursion
+    (let ((agent-shell-quota-popup-seconds 60)
+          (agent-shell-quota--cache (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'agent-shell-quota-refresh) #'ignore))
+        (unwind-protect
+            (progn
+              (agent-shell-quota)
+              (let ((popup (get-buffer-window agent-shell-quota-buffer-name)))
+                (select-window popup)
+                (with-current-buffer (window-buffer popup)
+                  (agent-shell-quota--keep-popup))
+                (should-not (window-parameter popup 'agent-shell-quota-timer))
+                (agent-shell-quota--dismiss-popup popup (window-buffer popup))
+                (should (window-live-p popup))))
+          (when-let* ((buffer (get-buffer agent-shell-quota-buffer-name)))
+            (kill-buffer buffer)))))))
+
+(ert-deftest test-agent-shell-quota/popup-scroll-interaction ()
+  "Scrolling retains a popup; initial redisplay leaves dismissal armed."
+  (save-window-excursion
+    (let ((agent-shell-quota-popup-seconds 60)
+          (agent-shell-quota--cache (make-hash-table :test #'equal)))
+      (cl-letf (((symbol-function 'agent-shell-quota-refresh) #'ignore))
+        (unwind-protect
+            (progn
+              (agent-shell-quota)
+              (let ((popup (get-buffer-window agent-shell-quota-buffer-name)))
+                (with-current-buffer (window-buffer popup)
+                  (let ((this-command 'agent-shell-quota))
+                    (agent-shell-quota--keep-scrolled-popup popup 1)
+                    (should (window-parameter popup 'agent-shell-quota-timer)))
+                  (let ((this-command 'mwheel-scroll))
+                    (agent-shell-quota--keep-scrolled-popup popup 1)
+                    (should-not
+                     (window-parameter popup 'agent-shell-quota-timer))))))
+          (when-let* ((buffer (get-buffer agent-shell-quota-buffer-name)))
+            (kill-buffer buffer)))))))
 
 (provide 'test-agent-shell-quota)
 ;;; test-agent-shell-quota.el ends here

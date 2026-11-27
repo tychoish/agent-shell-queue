@@ -145,13 +145,27 @@ remaining), and ~?~ to open the quota transient. Set
 choose the initial view. Warning colors always reflect usage, so low
 remaining capacity still shows a warning.
 
-The report's mode line reads ~quota~ followed by refresh age, such as
-~2m~. Enable ~agent-shell-quota-hud-enable~ to add a ~quota 2m~ button
-to ~hud-modeline~. Its tooltip shows provider percentages in the
-selected view; clicking opens the transient with refresh-line,
-refresh-all, toggle, and open-report actions. Refresh-line is available
-when the current buffer is the quota report and point is on a provider
-row.
+Enable ~agent-shell-quota-mode-line-mode~ to add a clickable ~quota 2m~
+indicator to the miscellaneous section via ~global-mode-string~,
+including in ~hud-modeline~. It fetches data immediately and refreshes
+every ~agent-shell-quota-refresh-interval~ seconds (300 by
+default). Disabling the mode removes the indicator and stops its refresh
+timer. No minor-mode lighter is added. Hover for provider percentages,
+click to open the report, or right-click for the refresh and display
+menu. Background failures appear in the cached report and tooltip.
+
+~M-x agent-shell-quota~ displays a small bottom window in the current
+frame without changing the selected window. It disappears after
+~agent-shell-quota-popup-seconds~ (5 by default), unless you select or
+interact with it. Use ~q~ to dismiss a report you keep open. The
+report's own mode line shows ~quota~ followed by refresh age.
+
+The former ~agent-shell-quota-hud-enable~ and
+~agent-shell-quota-hud-disable~ commands are removed. Use
+~agent-shell-quota-mode-line-mode~ for the indicator and automatic refreshes.
+
+~agent-shell-quota-mode~ refuses to replace an existing buffer's major
+mode or contents. Open reports with ~M-x agent-shell-quota~.
 
 Age reflects the oldest successful refresh among configured providers,
 with seconds, minutes, hours, or days as units; ~never~ means no

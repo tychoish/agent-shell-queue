@@ -18,8 +18,9 @@
 ;; `tabulated-list-mode' buffer incrementally as each subprocess
 ;; completes.  Strictly zero-token: never invokes LLM inference.
 ;;
-;; Optionally registers a quota menu button in `hud-modeline'
-;; via `agent-shell-quota-hud-enable'.
+;; Enable `agent-shell-quota-mode-line-mode' for a clickable miscellaneous
+;; mode-line indicator with background refreshes.  Reports pop up briefly
+;; at the bottom of the frame and stay open when selected.
 
 ;;; Code:
 
@@ -31,13 +32,6 @@
 (require 'subr-x)
 (require 'tabulated-list)
 (require 'transient)
-
-(declare-function hud-modeline--register-segment "hud-modeline"
-                  (var key segment &optional place-after place-before))
-(declare-function hud-modeline--make-segment "hud-modeline" (&rest args))
-(declare-function hud-modeline--action-map "hud-modeline" (key))
-(declare-function hud-modeline-remove-segment "hud-modeline" (var key))
-(declare-function hud-modeline-set-segment-action "hud-modeline" (key command &optional help-echo))
 
 ;;; Customization
 
@@ -86,6 +80,18 @@
 Warning and critical faces always reflect usage, even in capacity view."
   :type '(choice (const :tag "Usage (% used)" usage)
                  (const :tag "Capacity (% remaining)" capacity))
+  :group 'agent-shell-quota)
+
+(defcustom agent-shell-quota-refresh-interval 300
+  "Seconds between background refreshes while the mode-line mode is enabled."
+  :type '(number :match (lambda (_widget value)
+                         (and (numberp value) (> value 0))))
+  :group 'agent-shell-quota)
+
+(defcustom agent-shell-quota-popup-seconds 5
+  "Seconds before an unattended quota popup disappears.
+Selecting or using the report keeps it open."
+  :type 'number
   :group 'agent-shell-quota)
 
 (defconst agent-shell-quota-buffer-name "*agent-shell-quota*"
@@ -146,6 +152,15 @@ Warning and critical faces always reflect usage, even in capacity view."
 
 (defvar agent-shell-quota--inflight (make-hash-table :test #'equal)
   "Hash table mapping provider name string to (PROCESS . WATCHDOG-TIMER).")
+
+(defvar agent-shell-quota--refresh-timer nil
+  "Timer for background quota refreshes.")
+
+(defvar agent-shell-quota--mode-line
+  '(:eval (agent-shell-quota--mode-line-segment))
+  "Quota indicator displayed through `global-mode-string'.")
+
+(put 'agent-shell-quota--mode-line 'risky-local-variable t)
 
 ;;; Parsing Helpers
 
@@ -571,26 +586,72 @@ Failed fetches do not count as fresh quota data."
   "?" #'agent-shell-quota-dispatch
   "RET" #'agent-shell-quota-inspect-at-point)
 
-(define-derived-mode agent-shell-quota-mode tabulated-list-mode "quota"
-  "Major mode for viewing agent-shell subscription quotas."
-  (setq tabulated-list-format
-        (vector '("Provider" 13 t)
-                '("Window / Pool" 20 t)
-                (list (if (eq agent-shell-quota-display 'capacity)
-                          "Capacity"
-                        "Usage")
-                      19 nil)
-                '("Resets In" 12 nil)
-                '("Status / Notes" 0 nil)))
-  (setq-local mode-line-process
-              '(:eval (concat " " (agent-shell-quota--cache-age))))
-  (setq tabulated-list-padding 1)
-  (setq tabulated-list-sort-key nil)
-  (tabulated-list-init-header))
+(put 'agent-shell-quota-mode 'derived-mode-parent 'tabulated-list-mode)
+
+(defvar agent-shell-quota-mode-hook nil
+  "Hook run after initializing `agent-shell-quota-mode'.")
+
+(defun agent-shell-quota-mode ()
+  "Major mode for viewing agent-shell subscription quotas.
+Only initialize an empty, non-file fundamental buffer or a quota report."
+  (interactive)
+  (unless (or (derived-mode-p 'agent-shell-quota-mode)
+              (and (eq major-mode 'fundamental-mode)
+                   (not buffer-file-name)
+                   (zerop (buffer-size))))
+    (user-error "Open the quota report with M-x agent-shell-quota"))
+  (delay-mode-hooks
+    (tabulated-list-mode)
+    (setq major-mode 'agent-shell-quota-mode)
+    (setq mode-name "quota")
+    (use-local-map agent-shell-quota-mode-map)
+    (setq tabulated-list-format
+          (vector '("Provider" 13 t)
+                  '("Window / Pool" 20 t)
+                  (list (if (eq agent-shell-quota-display 'capacity)
+                            "Capacity"
+                          "Usage")
+                        19 nil)
+                  '("Resets In" 12 nil)
+                  '("Status / Notes" 0 nil)))
+    (setq-local mode-line-process
+                '(:eval (concat " " (agent-shell-quota--cache-age))))
+    (setq tabulated-list-padding 1)
+    (setq tabulated-list-sort-key nil)
+    (tabulated-list-init-header)
+    (add-hook 'post-command-hook #'agent-shell-quota--keep-popup nil t)
+    (add-hook 'window-scroll-functions #'agent-shell-quota--keep-scrolled-popup nil t))
+  (run-mode-hooks 'agent-shell-quota-mode-hook))
+
+(defun agent-shell-quota--keep-scrolled-popup (window _start)
+  "Keep WINDOW open when the user scrolls an unattended quota popup."
+  (when (memq this-command '(mwheel-scroll mwheel-scroll-up mwheel-scroll-down
+                            scroll-up-command scroll-down-command
+                            scroll-up scroll-down pixel-scroll-precision))
+    (agent-shell-quota--keep-popup window)))
+
+(defun agent-shell-quota--keep-popup (&optional window)
+  "Cancel dismissal when the user interacts with the report in WINDOW."
+  (let ((window (or window (selected-window))))
+    (when-let* (((eq (window-buffer window) (current-buffer)))
+                (timer (window-parameter window 'agent-shell-quota-timer)))
+      (cancel-timer timer)
+      (set-window-parameter window 'agent-shell-quota-timer nil))))
+
+(defun agent-shell-quota--dismiss-popup (window buffer)
+  "Dismiss WINDOW if it still shows BUFFER and has not been selected."
+  (when (window-live-p window)
+    (when-let* ((timer (window-parameter window 'agent-shell-quota-timer)))
+      (cancel-timer timer))
+    (set-window-parameter window 'agent-shell-quota-timer nil)
+    (when (and (eq (window-buffer window) buffer)
+               (not (eq window (selected-window))))
+      (quit-window nil window))))
 
 ;;;###autoload
 (defun agent-shell-quota ()
-  "Open the subscription quota report buffer and refresh all providers."
+  "Pop up subscription quotas at the bottom and refresh all providers.
+The report disappears after `agent-shell-quota-popup-seconds' unless used."
   (interactive)
   (let ((buf (get-buffer-create agent-shell-quota-buffer-name)))
     (with-current-buffer buf
@@ -598,7 +659,18 @@ Failed fetches do not count as fresh quota data."
         (agent-shell-quota-mode))
       (setq tabulated-list-entries (agent-shell-quota--build-rows))
       (tabulated-list-print t))
-    (pop-to-buffer buf)
+    (let ((window (display-buffer
+                   buf '((display-buffer-in-side-window)
+                         (side . bottom)
+                         (slot . 0)
+                         (window-height . 0.25)
+                         (inhibit-switch-frame . t)))))
+      (when-let* ((timer (window-parameter window 'agent-shell-quota-timer)))
+        (cancel-timer timer))
+      (set-window-parameter
+       window 'agent-shell-quota-timer
+       (run-at-time agent-shell-quota-popup-seconds nil
+                    #'agent-shell-quota--dismiss-popup window buf)))
     (agent-shell-quota-refresh)))
 
 ;;;###autoload
@@ -613,7 +685,46 @@ Failed fetches do not count as fresh quota data."
    ("t" "Toggle usage/capacity" agent-shell-quota-toggle-display :transient t)
    ("o" "Open report" agent-shell-quota)])
 
-;;; Optional hud-modeline Widget
+;;; Optional Mode-Line Indicator
+
+(defvar-keymap agent-shell-quota--mode-line-map
+  :doc "Mouse actions for the quota indicator."
+  "<mode-line> <mouse-1>" #'agent-shell-quota
+  "<mode-line> <mouse-3>" #'agent-shell-quota-dispatch)
+
+(defun agent-shell-quota--refresh-background ()
+  "Refresh quota data, exposing background failures in the cached report."
+  (condition-case err
+      (agent-shell-quota-refresh)
+    (error
+     (seq-do (lambda (provider)
+               (agent-shell-quota--record-error
+                provider (error-message-string err)))
+             agent-shell-quota-providers))))
+
+;;;###autoload
+(define-minor-mode agent-shell-quota-mode-line-mode
+  "Show a clickable quota indicator in the mode line's miscellaneous section.
+Refresh immediately on enable, then every `agent-shell-quota-refresh-interval'
+seconds.  Click to open a report popup; right-click to open the quota menu."
+  :global t
+  :group 'agent-shell-quota
+  (when (timerp agent-shell-quota--refresh-timer)
+    (cancel-timer agent-shell-quota--refresh-timer))
+  (setq agent-shell-quota--refresh-timer nil)
+  (if agent-shell-quota-mode-line-mode
+      (progn
+        (unless (listp global-mode-string)
+          (setq global-mode-string (list global-mode-string)))
+        (add-to-list 'global-mode-string 'agent-shell-quota--mode-line t)
+        (agent-shell-quota--refresh-background)
+        (setq agent-shell-quota--refresh-timer
+              (run-at-time agent-shell-quota-refresh-interval
+                           agent-shell-quota-refresh-interval
+                           #'agent-shell-quota--refresh-background)))
+    (setq global-mode-string
+          (remq 'agent-shell-quota--mode-line global-mode-string)))
+  (force-mode-line-update t))
 
 (defun agent-shell-quota--provider-abbrev (provider)
   "Return a short 3-character display abbreviation for PROVIDER."
@@ -631,8 +742,8 @@ Failed fetches do not count as fresh quota data."
     (when percents
       (apply #'max percents))))
 
-(defun agent-shell-quota--hud-segment ()
-  "Render a quota menu button with cache age for `hud-modeline'.
+(defun agent-shell-quota--mode-line-segment ()
+  "Render a quota menu button with cache age for the mode line.
 Reads strictly from `agent-shell-quota--cache' without spawning I/O."
   (let ((parts
          (seq-map
@@ -655,42 +766,13 @@ Reads strictly from `agent-shell-quota--cache' without spawning I/O."
           agent-shell-quota-providers)))
     (propertize
      (concat "quota " (agent-shell-quota--cache-age))
-     'local-map (when (fboundp 'hud-modeline--action-map)
-                  (hud-modeline--action-map 'agent-shell-quota))
+     'local-map agent-shell-quota--mode-line-map
      'mouse-face 'mode-line-highlight
-     'help-echo (format "%s: %s\nAge of oldest successful provider refresh\nmouse-1: Quota menu"
+     'help-echo (format "%s: %s\nAge of oldest successful provider refresh\nmouse-1: Quota report; mouse-3: Quota menu"
                         (if (eq agent-shell-quota-display 'capacity)
                             "Capacity (% remaining)"
                           "Usage (% used)")
                         (string-join parts " ")))))
-
-;;;###autoload
-(defun agent-shell-quota-hud-enable (&optional segment-block)
-  "Register the quota summary segment in `hud-modeline'.
-SEGMENT-BLOCK defaults to `hud-modeline-right-segments'."
-  (interactive)
-  (unless (and (fboundp 'hud-modeline--register-segment)
-               (fboundp 'hud-modeline--make-segment))
-    (user-error "Package `hud-modeline' is not loaded"))
-  (hud-modeline--register-segment
-   (or segment-block 'hud-modeline-right-segments)
-   'agent-shell-quota
-   (hud-modeline--make-segment
-    :fn #'agent-shell-quota--hud-segment
-    :name "quota"
-    :description "Subscription quota menu and refresh age"))
-  (when (fboundp 'hud-modeline-set-segment-action)
-    (hud-modeline-set-segment-action
-     'agent-shell-quota #'agent-shell-quota-dispatch
-     "mouse-1: Quota menu")))
-
-;;;###autoload
-(defun agent-shell-quota-hud-disable ()
-  "Remove the quota summary segment from `hud-modeline'."
-  (interactive)
-  (when (fboundp 'hud-modeline-remove-segment)
-    (hud-modeline-remove-segment 'hud-modeline-right-segments 'agent-shell-quota)
-    (hud-modeline-remove-segment 'hud-modeline-left-segments 'agent-shell-quota)))
 
 (provide 'agent-shell-quota)
 ;;; agent-shell-quota.el ends here
