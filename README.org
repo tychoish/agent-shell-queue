@@ -22,6 +22,7 @@ the queue and can be loaded separately with ~(require 'agent-shell-menu)~.
   - [[#manual-installation][Manual Installation]]
 - [[#configuration][Configuration]]
   - [[#key-options--customization][Key Options & Customization]]
+  - [[#subscription-quotas][Subscription Quotas]]
 - [[#user-guides][User Guides]]
 - [[#api-reference][API Reference]]
   - [[#agent-shell-menu][agent-shell-menu]]
@@ -134,6 +135,29 @@ Below is an example ~use-package~ configuration block mirroring typical producti
 - *Safe Save Backups*: ~agent-shell-queue-safe-save~ enables versioned queue backups, capped by ~agent-shell-queue-safe-save-max-files~.
 - *Pause Delays*: ~agent-shell-queue-default-pause-delay~ sets the pause duration (in seconds) inserted when pausing queue processing.
 - *Archive Lifecycle*: ~agent-shell-queue-archive-enabled~ enables archiving finished queue items to a JSONL file via ~agent-shell-queue-buffer-archive~.
+
+** Subscription Quotas
+Run ~M-x agent-shell-quota~ to query subscription quotas with the
+~codexbar~ CLI. Use ~r~ to refresh the provider on the current line, ~g~
+to refresh all providers, ~t~ to toggle usage (% used) and capacity (%
+remaining), and ~?~ to open the quota transient. Set
+~agent-shell-quota-display~ to ~usage~ (the default) or ~capacity~ to
+choose the initial view. Warning colors always reflect usage, so low
+remaining capacity still shows a warning.
+
+The report's mode line reads ~quota~ followed by refresh age, such as
+~2m~. Enable ~agent-shell-quota-hud-enable~ to add a ~quota 2m~ button
+to ~hud-modeline~. Its tooltip shows provider percentages in the
+selected view; clicking opens the transient with refresh-line,
+refresh-all, toggle, and open-report actions. Refresh-line is available
+when the current buffer is the quota report and point is on a provider
+row.
+
+Age reflects the oldest successful refresh among configured providers,
+with seconds, minutes, hours, or days as units; ~never~ means no
+successful data is cached. Failed requests do not count as fresh
+data. Age updates when the mode line redisplays; rendering never fetches
+data.
 
 * User Guides
 Detailed use-case guides live under [[file:docs/][docs/]]:

@@ -194,10 +194,11 @@
 ;;; HUD Modeline Segment Tests
 
 (ert-deftest test-agent-shell-quota/hud-segment ()
-  "HUD segment returns nil when empty and compact peak summary when populated."
+  "HUD segment labels the quota button and includes cache age."
   (let ((agent-shell-quota--cache (make-hash-table :test #'equal))
         (agent-shell-quota-providers '("antigravity" "codex" "claude")))
-    (should (null (agent-shell-quota--hud-segment)))
+    (should (equal (substring-no-properties (agent-shell-quota--hud-segment))
+                   "quota never"))
     (setf (map-elt agent-shell-quota--cache "antigravity")
           (agent-shell-quota--parse-output
            "antigravity" test-agent-shell-quota--antigravity-json 1000.0))
@@ -207,8 +208,127 @@
     (setf (map-elt agent-shell-quota--cache "claude")
           (agent-shell-quota--parse-output
            "claude" test-agent-shell-quota--claude-enterprise-json 1000.0))
-    (let ((seg (agent-shell-quota--hud-segment)))
-      (should (equal (substring-no-properties seg) "Agy:45% Cdx:60% Cld:35%")))))
+    (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1120.0)))
+      (let ((seg (agent-shell-quota--hud-segment)))
+        (should (equal (substring-no-properties seg) "quota 2m"))
+        (should (string-match-p "Agy:45% Cdx:60% Cld:35%"
+                                (get-text-property 0 'help-echo seg)))))))
+
+(ert-deftest test-agent-shell-quota/capacity-bars ()
+  "Capacity inverts the displayed percentage while retaining usage severity."
+  (let ((agent-shell-quota-display 'capacity))
+    (let ((bar (agent-shell-quota--format-bar 90)))
+      (should (equal (substring-no-properties bar) "[█░░░░░░░░░]  10%"))
+      (should (eq (get-text-property 0 'face bar)
+                  'agent-shell-quota-critical-face)))
+    (should (string-suffix-p "100%" (agent-shell-quota--format-bar 0)))
+    (should (string-suffix-p "  0%" (agent-shell-quota--format-bar 120)))
+    (should (equal (substring-no-properties (agent-shell-quota--format-bar nil))
+                   "---"))))
+
+(ert-deftest test-agent-shell-quota/toggle-display ()
+  "Toggling updates report rows and headers without fetching new data."
+  (let ((agent-shell-quota-display 'usage)
+        (agent-shell-quota--cache (make-hash-table :test #'equal))
+        (agent-shell-quota-providers '("codex")))
+    (setf (map-elt agent-shell-quota--cache "codex")
+          (agent-shell-quota--parse-output
+           "codex" test-agent-shell-quota--codex-json 1000.0))
+    (with-temp-buffer
+      (agent-shell-quota-mode)
+      (let ((agent-shell-quota-buffer-name (buffer-name)))
+        (should (equal mode-name "quota"))
+        (agent-shell-quota--redraw-if-live)
+        (goto-char (point-min))
+        (forward-line 1)
+        (let ((row (tabulated-list-get-id)))
+          (agent-shell-quota-toggle-display)
+          (should (eq agent-shell-quota-display 'capacity))
+          (should (equal (car (aref tabulated-list-format 2)) "Capacity"))
+          (should (equal (tabulated-list-get-id) row))
+          (should (string-suffix-p " 70%" (aref (tabulated-list-get-entry) 2)))
+          (should (= (agent-shell-quota-window-used-percent
+                      (car (agent-shell-quota-entry-windows
+                            (map-elt agent-shell-quota--cache "codex"))))
+                     60.0))
+          (agent-shell-quota-toggle-display)
+          (should (eq agent-shell-quota-display 'usage))
+          (should (equal (car (aref tabulated-list-format 2)) "Usage")))))))
+
+(ert-deftest test-agent-shell-quota/format-age ()
+  "Refresh ages handle unknown, seconds, minutes, hours, days and clock skew."
+  (should (equal (agent-shell-quota--format-age nil 1000) "never"))
+  (should (equal (agent-shell-quota--format-age 1010 1000) "0s"))
+  (should (equal (agent-shell-quota--format-age 990 1000) "10s"))
+  (should (equal (agent-shell-quota--format-age 880 1000) "2m"))
+  (should (equal (agent-shell-quota--format-age 1000 8200) "2h"))
+  (should (equal (agent-shell-quota--format-age 1000 173800) "2d")))
+
+(ert-deftest test-agent-shell-quota/cache-age-and-capacity-tooltip ()
+  "Age uses the oldest successful configured provider, including during refresh."
+  (let ((agent-shell-quota-display 'capacity)
+        (agent-shell-quota-providers '("codex" "claude"))
+        (agent-shell-quota--cache (make-hash-table :test #'equal))
+        (agent-shell-quota--inflight (make-hash-table :test #'equal)))
+    (setf (map-elt agent-shell-quota--cache "codex")
+          (agent-shell-quota--parse-output
+           "codex" test-agent-shell-quota--codex-json 1000.0))
+    (setf (map-elt agent-shell-quota--cache "claude")
+          (agent-shell-quota--parse-output
+           "claude" test-agent-shell-quota--claude-enterprise-json 1060.0))
+    (setf (map-elt agent-shell-quota--inflight "codex") '(fake-process))
+    (cl-letf (((symbol-function 'float-time) (lambda (&optional _) 1120.0)))
+      (should (equal (agent-shell-quota--cache-age) "2m"))
+      (should (string-match-p "Capacity.*Cdx:40% Cld:65%"
+                              (get-text-property
+                               0 'help-echo (agent-shell-quota--hud-segment)))))
+    (setf (agent-shell-quota-entry-status
+           (map-elt agent-shell-quota--cache "codex")) 'error)
+    (should (equal (agent-shell-quota--cache-age 1120.0) "1m"))))
+
+(ert-deftest test-agent-shell-quota/bindings-and-refresh-line ()
+  "Report bindings expose the menu and dispatch refreshes to the current provider."
+  (should (eq (keymap-lookup agent-shell-quota-mode-map "g")
+              #'agent-shell-quota-refresh))
+  (should (eq (keymap-lookup agent-shell-quota-mode-map "r")
+              #'agent-shell-quota-refresh-at-point))
+  (should (eq (keymap-lookup agent-shell-quota-mode-map "t")
+              #'agent-shell-quota-toggle-display))
+  (should (eq (keymap-lookup agent-shell-quota-mode-map "?")
+              #'agent-shell-quota-dispatch))
+  (with-temp-buffer
+    (agent-shell-quota-mode)
+    (setq tabulated-list-entries '((("codex" . 0) ["codex" "Session" "60%" "" ""])))
+    (tabulated-list-print)
+    (goto-char (point-min))
+    (let (refreshed)
+      (cl-letf (((symbol-function 'agent-shell-quota-refresh-provider)
+                 (lambda (provider) (setq refreshed provider))))
+        (agent-shell-quota-refresh-at-point)
+        (should (equal refreshed "codex"))))
+    (let ((inhibit-read-only t))
+      (erase-buffer))
+    (should-error (agent-shell-quota-refresh-at-point) :type 'user-error)))
+
+(ert-deftest test-agent-shell-quota/dispatch-and-hud-action ()
+  "The modeline action opens the quota transient."
+  (should (get 'agent-shell-quota-dispatch 'transient--prefix))
+  (let (opened)
+    (cl-letf (((symbol-function 'transient-setup)
+               (lambda (prefix &rest _) (setq opened prefix))))
+      (agent-shell-quota-dispatch)
+      (should (eq opened 'agent-shell-quota-dispatch))))
+  (require 'test-helper)
+  (let ((keys (transient-test/collect-keys 'agent-shell-quota-dispatch)))
+    (should (equal keys '("r" "g" "t" "o")))
+    (should-not (transient-test/duplicate-keys keys)))
+  (let (action)
+    (cl-letf (((symbol-function 'hud-modeline--register-segment) #'ignore)
+              ((symbol-function 'hud-modeline--make-segment) #'list)
+              ((symbol-function 'hud-modeline-set-segment-action)
+               (lambda (_key command &optional _help) (setq action command))))
+      (agent-shell-quota-hud-enable)
+      (should (eq action #'agent-shell-quota-dispatch)))))
 
 (provide 'test-agent-shell-quota)
 ;;; test-agent-shell-quota.el ends here

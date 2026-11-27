@@ -5,7 +5,7 @@
 ;; Keywords: tools, agent-shell
 ;; Version: 0.1.0
 ;; URL: https://github.com/tychoish/agent-shell-queue
-;; Package-Requires: ((emacs "29.1"))
+;; Package-Requires: ((emacs "29.1") (transient "0.4"))
 
 ;; This file is not part of GNU Emacs.
 
@@ -18,7 +18,7 @@
 ;; `tabulated-list-mode' buffer incrementally as each subprocess
 ;; completes.  Strictly zero-token: never invokes LLM inference.
 ;;
-;; Optionally registers a read-only summary segment in `hud-modeline'
+;; Optionally registers a quota menu button in `hud-modeline'
 ;; via `agent-shell-quota-hud-enable'.
 
 ;;; Code:
@@ -30,6 +30,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'tabulated-list)
+(require 'transient)
 
 (declare-function hud-modeline--register-segment "hud-modeline"
                   (var key segment &optional place-after place-before))
@@ -78,6 +79,13 @@
 (defcustom agent-shell-quota-bar-width 10
   "Character width of the utilization progress bar."
   :type 'integer
+  :group 'agent-shell-quota)
+
+(defcustom agent-shell-quota-display 'usage
+  "Whether quota bars and summaries show usage or remaining capacity.
+Warning and critical faces always reflect usage, even in capacity view."
+  :type '(choice (const :tag "Usage (% used)" usage)
+                 (const :tag "Capacity (% remaining)" capacity))
   :group 'agent-shell-quota)
 
 (defconst agent-shell-quota-buffer-name "*agent-shell-quota*"
@@ -367,19 +375,46 @@ Defaults to `agent-shell-quota-providers'."
    (t 'agent-shell-quota-ok-face)))
 
 (defun agent-shell-quota--format-bar (percent)
-  "Render a progress bar and percentage string for PERCENT."
+  "Render used PERCENT according to `agent-shell-quota-display'."
   (if (null percent)
       (propertize "---" 'face 'agent-shell-quota-muted-face)
     (let* ((clamped (max 0.0 (min 100.0 (float percent))))
+           (displayed (if (eq agent-shell-quota-display 'capacity)
+                          (- 100.0 clamped)
+                        clamped))
            (width (max 1 agent-shell-quota-bar-width))
-           (filled (round (* width (/ clamped 100.0))))
+           (filled (round (* width (/ displayed 100.0))))
            (empty (- width filled))
            (bar (concat "["
                         (make-string filled ?█)
                         (make-string empty ?░)
                         "]"))
-           (label (format "%s %3.0f%%" bar clamped)))
+           (label (format "%s %3.0f%%" bar displayed)))
       (propertize label 'face (agent-shell-quota--usage-face clamped)))))
+
+(defun agent-shell-quota--format-age (fetched-at &optional now)
+  "Format the age of FETCHED-AT relative to NOW in compact units."
+  (if (null fetched-at)
+      "never"
+    (let ((age (max 0 (floor (- (or now (float-time)) fetched-at)))))
+      (cond
+       ((< age 60) (format "%ds" age))
+       ((< age 3600) (format "%dm" (/ age 60)))
+       ((< age 86400) (format "%dh" (/ age 3600)))
+       (t (format "%dd" (/ age 86400)))))))
+
+(defun agent-shell-quota--cache-age (&optional now)
+  "Return the age of the oldest successful configured provider at NOW.
+Failed fetches do not count as fresh quota data."
+  (let ((timestamps
+         (thread-last agent-shell-quota-providers
+                      (seq-map (lambda (provider)
+                                 (when-let* ((entry (map-elt agent-shell-quota--cache provider))
+                                             ((eq (agent-shell-quota-entry-status entry) 'ok)))
+                                   (agent-shell-quota-entry-fetched-at entry))))
+                      (seq-filter #'numberp))))
+    (agent-shell-quota--format-age
+     (when timestamps (apply #'min timestamps)) now)))
 
 (defun agent-shell-quota--format-reset (resets-at &optional now)
   "Format RESETS-AT Unix timestamp as a concise countdown relative to NOW."
@@ -464,12 +499,28 @@ Defaults to `agent-shell-quota-providers'."
     (with-current-buffer buf
       (when (derived-mode-p 'agent-shell-quota-mode)
         (let ((id (tabulated-list-get-id)))
+          (setf (car (aref tabulated-list-format 2))
+                (if (eq agent-shell-quota-display 'capacity)
+                    "Capacity"
+                  "Usage"))
+          (tabulated-list-init-header)
           (setq tabulated-list-entries (agent-shell-quota--build-rows))
           (tabulated-list-print t)
           (when id
             (goto-char (point-min))
             (while (and (not (eobp)) (not (equal (tabulated-list-get-id) id)))
               (forward-line 1))))))))
+
+;;;###autoload
+(defun agent-shell-quota-toggle-display ()
+  "Toggle between percentage used and percentage remaining."
+  (interactive)
+  (setq agent-shell-quota-display
+        (if (eq agent-shell-quota-display 'usage)
+            'capacity
+          'usage))
+  (agent-shell-quota--redraw-if-live)
+  (force-mode-line-update t))
 
 (defun agent-shell-quota-refresh-at-point ()
   "Refresh the provider on the current line."
@@ -516,16 +567,23 @@ Defaults to `agent-shell-quota-providers'."
   :parent tabulated-list-mode-map
   "g" #'agent-shell-quota-refresh
   "r" #'agent-shell-quota-refresh-at-point
+  "t" #'agent-shell-quota-toggle-display
+  "?" #'agent-shell-quota-dispatch
   "RET" #'agent-shell-quota-inspect-at-point)
 
-(define-derived-mode agent-shell-quota-mode tabulated-list-mode "Agent-Quota"
+(define-derived-mode agent-shell-quota-mode tabulated-list-mode "quota"
   "Major mode for viewing agent-shell subscription quotas."
   (setq tabulated-list-format
-        [("Provider" 13 t)
-         ("Window / Pool" 20 t)
-         ("Usage" 19 nil)
-         ("Resets In" 12 nil)
-         ("Status / Notes" 0 nil)])
+        (vector '("Provider" 13 t)
+                '("Window / Pool" 20 t)
+                (list (if (eq agent-shell-quota-display 'capacity)
+                          "Capacity"
+                        "Usage")
+                      19 nil)
+                '("Resets In" 12 nil)
+                '("Status / Notes" 0 nil)))
+  (setq-local mode-line-process
+              '(:eval (concat " " (agent-shell-quota--cache-age))))
   (setq tabulated-list-padding 1)
   (setq tabulated-list-sort-key nil)
   (tabulated-list-init-header))
@@ -543,6 +601,18 @@ Defaults to `agent-shell-quota-providers'."
     (pop-to-buffer buf)
     (agent-shell-quota-refresh)))
 
+;;;###autoload
+(transient-define-prefix agent-shell-quota-dispatch ()
+  "Manage subscription quota data and its display."
+  ["Quota"
+   ("r" "Refresh line" agent-shell-quota-refresh-at-point
+    :inapt-if-not (lambda ()
+                    (and (derived-mode-p 'agent-shell-quota-mode)
+                         (tabulated-list-get-id))))
+   ("g" "Refresh all" agent-shell-quota-refresh)
+   ("t" "Toggle usage/capacity" agent-shell-quota-toggle-display :transient t)
+   ("o" "Open report" agent-shell-quota)])
+
 ;;; Optional hud-modeline Widget
 
 (defun agent-shell-quota--provider-abbrev (provider)
@@ -555,32 +625,44 @@ Defaults to `agent-shell-quota-providers'."
 
 (defun agent-shell-quota--entry-peak-percent (entry)
   "Return the highest `used-percent' across ENTRY's windows, or nil."
-  (let ((percents (delq nil (mapcar #'agent-shell-quota-window-used-percent
-                                    (agent-shell-quota-entry-windows entry)))))
+  (let ((percents (thread-last (agent-shell-quota-entry-windows entry)
+                              (seq-map #'agent-shell-quota-window-used-percent)
+                              (seq-filter #'numberp))))
     (when percents
       (apply #'max percents))))
 
 (defun agent-shell-quota--hud-segment ()
-  "Render a compact read-only quota summary string for `hud-modeline'.
+  "Render a quota menu button with cache age for `hud-modeline'.
 Reads strictly from `agent-shell-quota--cache' without spawning I/O."
-  (let ((parts nil))
-    (dolist (provider agent-shell-quota-providers)
-      (when-let* ((entry (map-elt agent-shell-quota--cache provider))
-                  ((eq (agent-shell-quota-entry-status entry) 'ok))
-                  (peak (agent-shell-quota--entry-peak-percent entry)))
-        (push (propertize
-               (format "%s:%.0f%%" (agent-shell-quota--provider-abbrev provider) peak)
-               'face (agent-shell-quota--usage-face peak))
-              parts)))
-    (when parts
-      (let ((str (string-join (nreverse parts) " ")))
-        (if-let* (((fboundp 'hud-modeline--action-map))
-                  (kmap (hud-modeline--action-map 'agent-shell-quota)))
-            (propertize str
-                        'local-map kmap
-                        'mouse-face 'mode-line-highlight
-                        'help-echo "mouse-1: Open agent-shell subscription quota report")
-          str)))))
+  (let ((parts
+         (seq-map
+          (lambda (provider)
+            (let* ((entry (map-elt agent-shell-quota--cache provider))
+                   (peak (and entry
+                              (eq (agent-shell-quota-entry-status entry) 'ok)
+                              (agent-shell-quota--entry-peak-percent entry))))
+              (if peak
+                  (propertize
+                   (format "%s:%.0f%%" (agent-shell-quota--provider-abbrev provider)
+                           (if (eq agent-shell-quota-display 'capacity)
+                               (max 0 (- 100 peak))
+                             peak))
+                   'face (agent-shell-quota--usage-face peak))
+                (format "%s:%s" (agent-shell-quota--provider-abbrev provider)
+                        (if entry
+                            (agent-shell-quota-entry-status entry)
+                          "not fetched")))))
+          agent-shell-quota-providers)))
+    (propertize
+     (concat "quota " (agent-shell-quota--cache-age))
+     'local-map (when (fboundp 'hud-modeline--action-map)
+                  (hud-modeline--action-map 'agent-shell-quota))
+     'mouse-face 'mode-line-highlight
+     'help-echo (format "%s: %s\nAge of oldest successful provider refresh\nmouse-1: Quota menu"
+                        (if (eq agent-shell-quota-display 'capacity)
+                            "Capacity (% remaining)"
+                          "Usage (% used)")
+                        (string-join parts " ")))))
 
 ;;;###autoload
 (defun agent-shell-quota-hud-enable (&optional segment-block)
@@ -595,12 +677,12 @@ SEGMENT-BLOCK defaults to `hud-modeline-right-segments'."
    'agent-shell-quota
    (hud-modeline--make-segment
     :fn #'agent-shell-quota--hud-segment
-    :name "Agent Quota"
-    :description "Cached subscription quota utilization across agent backends"))
+    :name "quota"
+    :description "Subscription quota menu and refresh age"))
   (when (fboundp 'hud-modeline-set-segment-action)
     (hud-modeline-set-segment-action
-     'agent-shell-quota #'agent-shell-quota
-     "mouse-1: Open agent-shell subscription quota report")))
+     'agent-shell-quota #'agent-shell-quota-dispatch
+     "mouse-1: Quota menu")))
 
 ;;;###autoload
 (defun agent-shell-quota-hud-disable ()
