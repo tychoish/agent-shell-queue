@@ -99,6 +99,7 @@
 (declare-function agent-shell--config-icon "agent-shell")
 (declare-function agent-shell-viewport--buffer "agent-shell-viewport")
 (declare-function agent-shell-switch-buffer "agent-shell")
+(declare-function agent-shell-quota "agent-shell-quota")
 (declare-function agent-review "agent-review")
 (declare-function agent-review-send-to-agent-shell "agent-review")
 (declare-function shell-maker-process "shell-maker")
@@ -1272,6 +1273,7 @@ Keys are assigned as 1, 2, 3… in button order."
     ("sd" "New in directory" agent-shell-menu-new-shell-in-dir)
     ("sr" "Name buffer" agent-shell-menu-name-buffer)
     ("ss" "Switch session" agent-shell-switch-buffer)
+    ("sq" "Quota report" agent-shell-quota)
     ("rr" "Review changes" agent-review
      :if agent-shell-menu--agent-review-available-p)
     ("rs" "Send issues to review agent" agent-review-send-to-agent-shell
